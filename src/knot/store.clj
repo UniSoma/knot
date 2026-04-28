@@ -31,30 +31,29 @@
 (defn- terminal? [terminal-statuses status]
   (contains? (or terminal-statuses #{}) status))
 
-(defn- find-by-id-glob
-  "Return the path of the file matching `<id>.md` or `<id>--*.md` under `dir`,
-   or nil when none."
+(defn- find-by-id-glob-all
+  "Return every path matching `<id>.md` or `<id>--*.md` under `dir`."
   [dir id]
   (when (fs/directory? dir)
     (let [bare    (fs/path dir (str id ".md"))
-          slugged (seq (fs/glob dir (str id "--*.md")))]
-      (cond
-        (fs/exists? bare) (str bare)
-        slugged           (str (first slugged))))))
+          slugged (fs/glob dir (str id "--*.md"))]
+      (concat (when (fs/exists? bare) [(str bare)])
+              (map str slugged)))))
+
+(defn- find-all-paths
+  "Return every on-disk path for `id` across both live and archive
+   directories. Live entries come first."
+  [project-root tickets-dir id]
+  (concat
+   (find-by-id-glob-all (fs/path project-root tickets-dir) id)
+   (find-by-id-glob-all (fs/path project-root tickets-dir archive-subdir) id)))
 
 (defn- find-existing-path
   "Locate the on-disk file for `id` across both live and archive directories.
-   Returns the path string, or nil when no matching file exists."
+   Returns the path string of the first match (live wins), or nil when no
+   matching file exists."
   [project-root tickets-dir id]
-  (or (find-by-id-glob (fs/path project-root tickets-dir) id)
-      (find-by-id-glob (fs/path project-root tickets-dir archive-subdir) id)))
-
-(defn- prior-status
-  "Return the prior on-disk status for `id`, or nil when there is no
-   existing file."
-  [project-root tickets-dir id]
-  (when-let [path (find-existing-path project-root tickets-dir id)]
-    (get-in (ticket/parse (slurp path)) [:frontmatter :status])))
+  (first (find-all-paths project-root tickets-dir id)))
 
 (defn- assoc-ordered
   "Like `assoc`, but inserts the key at the end of an ordered map when
@@ -64,20 +63,39 @@
     (assoc m k v)
     (assoc (or m (om/ordered-map)) k v)))
 
+(defn- assoc-after
+  "Insert `[k v]` into ordered map `m` immediately after `after-k`. If
+   `k` already exists, update in place. If `after-k` is missing, append."
+  [m after-k k v]
+  (cond
+    (contains? m k)             (assoc m k v)
+    (not (contains? m after-k)) (assoc-ordered m k v)
+    :else
+    (reduce (fn [acc [k* v*]]
+              (let [acc (assoc acc k* v*)]
+                (if (= k* after-k) (assoc acc k v) acc)))
+            (om/ordered-map)
+            m)))
+
 (defn- now-iso []
   (str (Instant/now)))
 
 (defn- stamp-timestamps
   "Return an updated frontmatter map with :updated bumped to `now`, and
-   :closed set/cleared based on the new vs prior status."
+   :closed set/cleared based on the new vs prior status. When :closed is
+   stamped fresh, it is inserted immediately after :updated for stable
+   human-readable ordering."
   [fm new-status prior-status* now terminal-statuses]
-  (let [bumped (assoc-ordered fm :updated now)
-        new-terminal? (terminal? terminal-statuses new-status)
+  (let [bumped          (assoc-ordered fm :updated now)
+        new-terminal?   (terminal? terminal-statuses new-status)
         prior-terminal? (and prior-status* (terminal? terminal-statuses prior-status*))
-        same-terminal? (and new-terminal? prior-terminal? (= new-status prior-status*))]
+        same-terminal?  (and new-terminal? prior-terminal? (= new-status prior-status*))]
     (cond
-      (and new-terminal? (not same-terminal?))
-      (assoc-ordered bumped :closed now)
+      ;; Crossing into terminal, or same-terminal but :closed somehow missing
+      ;; (defensive: terminal status implies :closed is set).
+      (and new-terminal?
+           (or (not same-terminal?) (not (contains? bumped :closed))))
+      (assoc-after bumped :updated :closed now)
 
       (not new-terminal?)
       (dissoc bumped :closed)
@@ -107,20 +125,28 @@
    the caller having to track it.
    Returns the written path. `opts` is `{:now <iso-string?> :terminal-statuses <set?>}`."
   [project-root tickets-dir id slug ticket {:keys [now terminal-statuses]}]
-  (let [now*      (or now (now-iso))
-        new-st    (get-in ticket [:frontmatter :status])
-        prior-st  (prior-status project-root tickets-dir id)
-        existing  (find-existing-path project-root tickets-dir id)
-        slug*     (or slug (slug-of-filename (some-> existing fs/file-name)) "")
-        target    (if (terminal? terminal-statuses new-st)
-                    (archive-path project-root tickets-dir id slug*)
-                    (ticket-path project-root tickets-dir id slug*))
-        fm*       (stamp-timestamps (:frontmatter ticket) new-st prior-st now* terminal-statuses)
-        ticket*   (assoc ticket :frontmatter fm*)]
+  (let [now*           (or now (now-iso))
+        new-st         (get-in ticket [:frontmatter :status])
+        existing-paths (find-all-paths project-root tickets-dir id)
+        prior-st       (when-let [p (first existing-paths)]
+                         (get-in (ticket/parse (slurp p)) [:frontmatter :status]))
+        slug*          (or slug
+                           (slug-of-filename (some-> (first existing-paths) fs/file-name))
+                           "")
+        target         (if (terminal? terminal-statuses new-st)
+                         (archive-path project-root tickets-dir id slug*)
+                         (ticket-path project-root tickets-dir id slug*))
+        fm*            (stamp-timestamps (:frontmatter ticket) new-st prior-st now* terminal-statuses)
+        ticket*        (assoc ticket :frontmatter fm*)]
     (fs/create-dirs (fs/parent target))
     (spit target (ticket/render ticket*))
-    (when (and existing (not= existing target))
-      (fs/delete-if-exists existing))
+    ;; Self-heal: remove every pre-existing copy of this id that isn't the
+    ;; new target. This sweeps stale duplicates across both live and archive,
+    ;; not just the first match — important when hand-edits or process races
+    ;; have left an id in two places.
+    (doseq [p existing-paths
+            :when (not= p target)]
+      (fs/delete-if-exists p))
     target))
 
 (defn load-one

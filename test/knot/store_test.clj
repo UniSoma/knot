@@ -112,7 +112,31 @@
                     :body "edited"}
             path (store/save! tmp ".tickets" "kno-01" "" ticket later)]
         (is (= "2026-01-01T00:00:00Z" (:closed (read-fm path)))
-            "same-terminal save should keep the original :closed timestamp")))))
+            "same-terminal save should keep the original :closed timestamp"))))
+
+  (testing "same-terminal save with :closed missing in input still stamps :closed"
+    (with-tmp tmp
+      (let [first-closed (assoc save-opts :now "2026-01-01T00:00:00Z")
+            _ (store/save! tmp ".tickets" "kno-01" ""
+                           (mk-ticket "kno-01" "closed") first-closed)
+            ;; Caller passes a frontmatter that's terminal but lacks :closed.
+            ;; The invariant "terminal → :closed is set" must hold.
+            later (assoc save-opts :now "2026-06-01T00:00:00Z")
+            path  (store/save! tmp ".tickets" "kno-01" ""
+                               (mk-ticket "kno-01" "closed") later)]
+        (is (= "2026-06-01T00:00:00Z" (:closed (read-fm path)))
+            "missing :closed on terminal save should be stamped, not silently dropped"))))
+
+  (testing ":closed is rendered immediately after :updated"
+    (with-tmp tmp
+      (let [path  (store/save! tmp ".tickets" "kno-01" ""
+                               (mk-ticket "kno-01" "closed") save-opts)
+            keys* (vec (keys (read-fm path)))
+            upd-i (.indexOf keys* :updated)
+            cls-i (.indexOf keys* :closed)]
+        (is (pos? upd-i))
+        (is (= cls-i (inc upd-i))
+            ":closed should be inserted directly after :updated")))))
 
 (deftest save-archive-move-test
   (testing "save! writes terminal-status tickets under <tickets-dir>/archive/"
@@ -196,7 +220,45 @@
                                 (mk-ticket "kno-01" "closed") save-opts)]
           (is (str/ends-with? path "kno-01--new-slug.md"))
           (is (not (fs/exists? stale-live))
-              "old-slug stale file should be removed even when new slug differs"))))))
+              "old-slug stale file should be removed even when new slug differs")))))
+
+  (testing "self-heal sweeps stale duplicates across both live and archive"
+    (with-tmp tmp
+      ;; Plant duplicates in BOTH locations (via hand-edit or process race).
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (let [stale-live    (str (fs/path tmp ".tickets" "kno-01--t.md"))
+            stale-archive (str (fs/path tmp ".tickets" "archive" "kno-01--t.md"))
+            rendered      (ticket/render
+                           {:frontmatter {:id "kno-01" :status "closed"} :body ""})]
+        (spit stale-live    rendered)
+        (spit stale-archive rendered)
+        ;; Save into archive (terminal). Both stale copies must be cleaned up:
+        ;; the live one (different location), and the archive one only if
+        ;; it isn't itself the target. Here the archive one IS the target, so
+        ;; only the live stale should be removed.
+        (let [path (store/save! tmp ".tickets" "kno-01" "t"
+                                (mk-ticket "kno-01" "closed") save-opts)]
+          (is (= path stale-archive))
+          (is (fs/exists? path))
+          (is (not (fs/exists? stale-live))
+              "stale live duplicate must be removed even when target is in archive")))))
+
+  (testing "self-heal removes stale archive copy when target is in live"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (let [stale-live    (str (fs/path tmp ".tickets" "kno-01--t.md"))
+            stale-archive (str (fs/path tmp ".tickets" "archive" "kno-01--t.md"))
+            rendered      (ticket/render
+                           {:frontmatter {:id "kno-01" :status "open"} :body ""})]
+        (spit stale-live    rendered)
+        (spit stale-archive rendered)
+        ;; Save to live (non-terminal). Stale archive must be removed.
+        (let [path (store/save! tmp ".tickets" "kno-01" "t"
+                                (mk-ticket "kno-01" "open") save-opts)]
+          (is (= path stale-live))
+          (is (fs/exists? path))
+          (is (not (fs/exists? stale-archive))
+              "stale archive duplicate must be removed when saving to live"))))))
 
 (deftest load-all-test
   (testing "load-all returns every ticket file in the live tickets dir"
