@@ -724,6 +724,19 @@
       (is (< cmds-i schema-i)
           "commands cheatsheet appears before the schema reference"))))
 
+(deftest prime-text-close-shows-summary-flag-test
+  (testing "Commands cheatsheet documents --summary on the close line, not buried in the user-says mapping"
+    (let [out      (output/prime-text sample-prime-data)
+          start    (str/index-of out "## Commands")
+          end      (str/index-of out "## Schema")
+          section  (subs out start end)
+          close-line (some (fn [l] (when (re-find #"^knot close\b" l) l))
+                           (str/split-lines section))]
+      (is (some? close-line)
+          "Commands section has a dedicated `knot close` line (not lumped with start)")
+      (is (str/includes? close-line "--summary")
+          "close line surfaces the --summary flag inline so the agent doesn't cross-reference"))))
+
 (deftest prime-text-section-nudges-test
   (testing "in-progress section carries a one-line behavioral nudge under its heading"
     (let [out (output/prime-text sample-prime-data)

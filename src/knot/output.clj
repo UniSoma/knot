@@ -373,14 +373,15 @@ before issuing other Knot commands.")
   "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
 
 (def ^:private prime-commands-cheatsheet
-  "knot ls                    list live tickets
-knot ready [--mode afk]    list non-blocked tickets (filter by mode)
-knot show <id>             show one ticket (frontmatter + body)
-knot create \"<title>\"      create a new ticket
-knot start|close <id>      transition status (close auto-archives)
-knot add-note <id> [text]  append a timestamped note
-knot dep <from> <to>       add a dependency edge (cycle-checked)
-knot dep tree <id>         show what's blocking a ticket")
+  "knot ls                          list live tickets
+knot ready [--mode afk]          list non-blocked tickets (filter by mode)
+knot show <id>                   show one ticket (frontmatter + body)
+knot create \"<title>\"            create a new ticket
+knot start <id>                  transition to in_progress
+knot close <id> [--summary <s>]  transition to terminal status + auto-archive
+knot add-note <id> [text]        append a timestamped note
+knot dep <from> <to>             add a dependency edge (cycle-checked)
+knot dep tree <id>               show what's blocking a ticket")
 
 (def ^:private prime-schema-cheatsheet
   "Fallback for direct file edits only — prefer the commands above.
