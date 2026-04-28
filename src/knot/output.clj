@@ -349,30 +349,45 @@
     (str/join "\n" (cons header-row data-rows))))
 
 (def ^:private prime-preamble-found
-  "You are working in a Knot project. Tickets are markdown files with YAML
-frontmatter under `.tickets/`. The sections below summarize active and
-ready work and end with a schema and command cheatsheet so a fresh
-agent has enough context to act without chained discovery commands.")
+  "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
+
+When the user says... → you do:
+  \"what's next?\" / \"what should I work on?\"        → `knot ready`
+  \"let's tackle <id>\" / \"start working on <id>\"    → `knot show <id>`, then `knot start <id>`
+  \"I'm done\" / \"shipped\" / \"let's close this\"      → `knot close <id> --summary \"...\"`
+  \"note that...\" / \"FYI...\" mid-task               → `knot add-note <id> \"...\"`
+  \"blocked on <other>\"                            → `knot dep <current> <other>`
+  \"what's blocking this?\"                         → `knot dep tree <id>`
+
+Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `edit` keep frontmatter valid.")
 
 (def ^:private prime-preamble-no-project
   "No Knot project was discovered from the current directory. Run `knot init`
 in the project root to create a `.knot.edn` config and `.tickets/` directory
 before issuing other Knot commands.")
 
+(def ^:private prime-in-progress-nudge
+  "Resume here if the user picks up mid-stream.")
+
+(def ^:private prime-ready-nudge
+  "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
+
+(def ^:private prime-commands-cheatsheet
+  "knot ls                    list live tickets
+knot ready [--mode afk]    list non-blocked tickets (filter by mode)
+knot show <id>             show one ticket (frontmatter + body)
+knot create \"<title>\"      create a new ticket
+knot start|close <id>      transition status (close auto-archives)
+knot add-note <id> [text]  append a timestamped note
+knot dep <from> <to>       add a dependency edge (cycle-checked)
+knot dep tree <id>         show what's blocking a ticket")
+
 (def ^:private prime-schema-cheatsheet
-  "Frontmatter keys: id, status (open|in_progress|closed), type, priority
+  "Fallback for direct file edits only — prefer the commands above.
+Frontmatter keys: id, status (open|in_progress|closed), type, priority
 (0=highest..4), mode (afk=agent-runnable, hitl=human-in-the-loop),
 created, updated, closed, assignee, parent, tags, deps, links,
-external_refs.
-
-Common commands:
-  knot ls                    list live tickets
-  knot ready [--mode afk]    list non-blocked tickets (filter by mode)
-  knot show <id>             show one ticket (frontmatter + body)
-  knot create \"<title>\"      create a new ticket
-  knot start|close <id>      transition status (close auto-archives)
-  knot add-note <id> [text]  append a timestamped note
-  knot dep <from> <to>       add a dependency edge (cycle-checked)")
+external_refs.")
 
 (defn- prime-ticket-line
   "Format a ticket as `id  mode  pri  title` for the prime in-progress and
@@ -388,14 +403,16 @@ Common commands:
     (str id "  " mode "  " pri "  " title)))
 
 (defn- prime-section
-  "Render a `## <header>` section followed by a blank line, the ticket
-   lines (one per ticket), and an optional trailing footer block. Empty
-   ticket sequences emit just the heading + blank line."
-  [header tickets footer]
-  (let [lines (mapv prime-ticket-line tickets)
+  "Render a `## <header>` section: heading, optional one-line behavioral
+   nudge (blank-line separated), the ticket lines, and an optional
+   trailing footer block. Empty ticket sequences still emit the heading
+   and nudge so the directive is visible even on a quiet project."
+  [header nudge tickets footer]
+  (let [nudge-block (if (str/blank? nudge) "" (str nudge "\n\n"))
+        lines (mapv prime-ticket-line tickets)
         body  (if (seq lines) (str (str/join "\n" lines) "\n") "")
         foot  (if (str/blank? footer) "" (str footer "\n"))]
-    (str "## " header "\n\n" body foot)))
+    (str "## " header "\n\n" nudge-block body foot)))
 
 (defn- prime-project-section
   "Render the `## Project` metadata section. Always shows prefix and
@@ -410,16 +427,18 @@ Common commands:
          "archive: " (or archive-count 0) "\n")))
 
 (defn prime-text
-  "Render the five-section markdown primer for the `prime` command:
-     1. Preamble paragraph (or `knot init` directive when no project found)
+  "Render the directive markdown primer for the `prime` command:
+     1. Directive preamble (or `knot init` directive when no project found)
      2. `## Project` metadata
-     3. `## In Progress` ticket lines
-     4. `## Ready` ticket lines (with optional truncation footer)
-     5. `## Schema` cheatsheet
+     3. `## In Progress` ticket lines (with behavioral nudge)
+     4. `## Ready` ticket lines (with behavioral nudge and optional footer)
+     5. `## Commands` cheatsheet
+     6. `## Schema` reference (framed as a fallback for direct edits)
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining]}]
-  (let [preamble (if (:found? project)
+  (let [found? (:found? project)
+        preamble (if found?
                    prime-preamble-found
                    prime-preamble-no-project)
         ready-footer (when ready-truncated?
@@ -427,9 +446,16 @@ Common commands:
                             " more (run `knot ready`)"))]
     (str preamble "\n\n"
          (prime-project-section project) "\n"
-         (prime-section "In Progress" in-progress nil) "\n"
-         (prime-section "Ready" ready ready-footer) "\n"
-         "## Schema and commands\n\n" prime-schema-cheatsheet "\n")))
+         (prime-section "In Progress"
+                        (when found? prime-in-progress-nudge)
+                        in-progress
+                        nil) "\n"
+         (prime-section "Ready"
+                        (when found? prime-ready-nudge)
+                        ready
+                        ready-footer) "\n"
+         "## Commands\n\n" prime-commands-cheatsheet "\n\n"
+         "## Schema\n\n" prime-schema-cheatsheet "\n")))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:

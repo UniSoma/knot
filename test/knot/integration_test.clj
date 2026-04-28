@@ -950,6 +950,46 @@
         (is (str/includes? out "+2 more"))
         (is (str/includes? out "knot ready")))))
 
+  (testing "prime opens with a directive line and surfaces the user-says mapping"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "prime")
+            first-line (->> (str/split-lines out)
+                            (remove str/blank?)
+                            first)]
+        (is (zero? exit) (str "prime err=" err))
+        (is (some? first-line) "prime emitted a non-blank line")
+        (is (re-find #"(?i)^use\b.*\bknot\b" first-line)
+            "first non-blank line is a directive about using `knot`")
+        (is (not (re-find #"^You are working in" first-line))
+            "first line is no longer the legacy descriptive preamble")
+        (is (str/includes? out "what's next")
+            "user-phrase mapping surfaces 'what's next'")
+        (is (str/includes? out "tackle")
+            "user-phrase mapping surfaces 'let's tackle <id>'")
+        (is (str/includes? out "blocked on")
+            "user-phrase mapping surfaces 'blocked on'")
+        (is (re-find #"(?i)don't|do not" out)
+            "negative-space directive present")
+        (is (str/includes? out ".tickets")
+            "negative-space directive references .tickets/"))))
+
+  (testing "prime --json shape unchanged: no directive prose key, snake_case envelope preserved"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "prime" "--json")]
+        (is (zero? exit) (str "prime --json err=" err))
+        (is (str/starts-with? (str/trim out) "{"))
+        (is (str/includes? out "\"project\""))
+        (is (str/includes? out "\"in_progress\""))
+        (is (str/includes? out "\"ready\""))
+        (is (str/includes? out "\"ready_truncated\""))
+        (is (str/includes? out "\"ready_remaining\""))
+        (is (not (re-find #"(?i)you are working in" out))
+            "JSON output carries no descriptive preamble")
+        (is (not (str/includes? out "what's next"))
+            "JSON output does not embed the user-says mapping prose"))))
+
   (testing "knot init does NOT modify .claude/settings.json"
     ;; Ensure a global SessionStart hook can be wired from the README
     ;; without `knot init` clobbering it. The init command writes only

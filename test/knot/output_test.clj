@@ -673,6 +673,81 @@
       (is (str/includes? out "knot init")
           "preamble references `knot init` so the agent knows how to bootstrap"))))
 
+(deftest prime-text-directive-opening-test
+  (testing "first non-blank line is a directive about using `knot`, not a description"
+    (let [out (output/prime-text sample-prime-data)
+          first-line (->> (str/split-lines out)
+                          (remove str/blank?)
+                          first)]
+      (is (some? first-line) "output has a non-blank line")
+      (is (not (re-find #"^You are working in" first-line))
+          "first line is not the legacy descriptive preamble")
+      (is (re-find #"(?i)^use\b.*\bknot\b" first-line)
+          "first line is a directive that names the knot CLI"))))
+
+(deftest prime-text-user-says-mapping-test
+  (testing "output contains a user-phrase mapping covering the canonical intents"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (str/includes? out "what's next")
+          "covers 'what's next?'")
+      (is (str/includes? out "tackle")
+          "covers 'let's tackle <id>'")
+      (is (or (str/includes? out "I'm done")
+              (str/includes? out "let's close"))
+          "covers 'I'm done / shipped / let's close'")
+      (is (or (str/includes? out "note that")
+              (str/includes? out "FYI"))
+          "covers 'note that / FYI'")
+      (is (str/includes? out "blocked on")
+          "covers 'blocked on'"))))
+
+(deftest prime-text-negative-space-test
+  (testing "output explicitly tells the agent NOT to cat or hand-edit ticket files"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (re-find #"(?i)don't|do not" out)
+          "output carries an explicit negative directive")
+      (is (str/includes? out "cat")
+          "output specifically calls out `cat`")
+      (is (str/includes? out ".tickets")
+          "output references the .tickets/ directory the agent might otherwise touch"))))
+
+(deftest prime-text-commands-before-schema-test
+  (testing "the commands cheatsheet appears before the schema reference in text output"
+    (let [out (output/prime-text sample-prime-data)
+          ;; `knot ls` is a unique anchor: only the commands cheatsheet lists
+          ;; the bare `ls` subcommand line.
+          cmds-i   (str/index-of out "knot ls")
+          ;; "Frontmatter keys" only appears in the schema reference.
+          schema-i (str/index-of out "Frontmatter keys")]
+      (is (some? cmds-i)   "commands cheatsheet present")
+      (is (some? schema-i) "schema reference present")
+      (is (< cmds-i schema-i)
+          "commands cheatsheet appears before the schema reference"))))
+
+(deftest prime-text-section-nudges-test
+  (testing "in-progress section carries a one-line behavioral nudge under its heading"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## In Progress")
+          end   (str/index-of out "## Ready")
+          section (subs out start end)]
+      (is (or (str/includes? section "Resume")
+              (str/includes? section "mid-stream"))
+          "In Progress section nudges the agent to resume mid-stream work")))
+
+  (testing "ready section carries a one-line behavioral nudge under its heading"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## Ready")
+          ;; Stop at the next `## ` heading after Ready (Commands or Schema)
+          ;; so the nudge match is scoped to the Ready section body.
+          next-sec (or (str/index-of out "## Commands" start)
+                       (str/index-of out "## Schema" start)
+                       (count out))
+          section  (subs out start next-sec)]
+      (is (or (str/includes? section "what's next")
+              (str/includes? section "recommend")
+              (str/includes? section "confirm"))
+          "Ready section nudges the agent about recommending the top entry"))))
+
 (deftest prime-json-shape-test
   (testing "renders a bare JSON object (no envelope)"
     (let [out (output/prime-json sample-prime-data)]
