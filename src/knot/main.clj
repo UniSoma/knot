@@ -7,9 +7,17 @@
             [clojure.string :as str]
             [knot.cli :as cli]
             [knot.config :as config]
+            [knot.help :as help]
             [knot.output :as output]
             [knot.store :as store]
             [knot.ticket :as ticket]))
+
+(defn- spec
+  "Look up a registry entry by id and derive its babashka.cli :spec map.
+   This is the single bridge between the help registry (source of truth
+   for flags) and the parser."
+  [cmd-key]
+  (help/derive-spec (get help/registry cmd-key)))
 
 (defn- discover-ctx
   "Build a command context: walk up from cwd to find the project root, load
@@ -36,25 +44,15 @@
   (binding [*out* *err*] (println msg))
   (System/exit 1))
 
-(def ^:private create-spec
-  ;; Body-section flags (`--description / --design / --acceptance`, plus the
-  ;; `-d` alias) are intentionally absent here — they are pre-extracted from
-  ;; argv by `extract-body-flags!` before delegating to `babashka.cli`. The
-  ;; reason: bb-cli splits a value on whitespace before binding, so a value
-  ;; like `"- [ ] item"` makes it interpret `-`/`[`/`]`/`item` as flags and
-  ;; either crashes coercion (`--priority`) or writes garbage into other
-  ;; spec entries. Body flags are the only ones whose values reasonably
-  ;; contain dashes, so scoping the workaround here is safe.
-  {:spec
-   {:type         {:alias :t}
-    :priority     {:alias :p :coerce :long}
-    :assignee     {:alias :a}
-    :external-ref {:coerce []}
-    :parent       {}
-    :tags         {}
-    :mode         {}
-    :afk          {:coerce :boolean}
-    :hitl         {:coerce :boolean}}})
+;; Body-section flags (`--description / --design / --acceptance`, plus the
+;; `-d` alias) are pre-extracted from argv by `extract-body-flags` before
+;; delegating to `babashka.cli`. They live in `knot.help/registry` with
+;; `:body? true`, which causes `derive-spec` to skip them — so they never
+;; appear in the parser spec, only in help output. The reason for the
+;; pre-extraction: bb-cli splits a value on whitespace before binding, so
+;; a value like `"- [ ] item"` makes it interpret `-`/`[`/`]`/`item` as
+;; flags and either crashes coercion (`--priority`) or writes garbage
+;; into other spec entries.
 
 (def ^:private body-flag->key
   "Body-section flag tokens (long form, `=` form prefix, and short alias)
@@ -116,7 +114,7 @@
 
 (defn- create-handler [argv]
   (let [{:keys [body-opts argv]} (extract-body-flags argv)
-        {:keys [opts args]}      (bcli/parse-args argv create-spec)
+        {:keys [opts args]}      (bcli/parse-args argv (spec :create))
         title (first args)]
     (when (or (nil? title) (str/blank? title))
       (die "knot create: a title is required"))
@@ -130,20 +128,6 @@
           path          (cli/create-cmd (discover-ctx) opts)]
       (println (str path)))))
 
-(def ^:private show-spec
-  {:spec
-   {:json     {:coerce :boolean}
-    :no-color {:coerce :boolean}}})
-
-(def ^:private ls-spec
-  {:spec
-   {:json     {:coerce :boolean}
-    :no-color {:coerce :boolean}
-    :status   {:coerce []}
-    :assignee {:coerce []}
-    :tag      {:coerce []}
-    :type     {:coerce []}
-    :mode     {:coerce []}}})
 
 (defn- ->set
   "Coerce an opt value to a non-empty set, or nil. babashka.cli with
@@ -179,7 +163,7 @@
   (flush))
 
 (defn- show-handler [argv]
-  (let [{:keys [opts args]} (bcli/parse-args argv show-spec)
+  (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
         id (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot show: an id is required"))
@@ -190,7 +174,7 @@
         (die (str "knot show: no ticket matching " id))))))
 
 (defn- ls-handler [argv]
-  (let [{:keys [opts]} (bcli/parse-args argv ls-spec)
+  (let [{:keys [opts]} (bcli/parse-args argv (spec :ls))
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -205,21 +189,12 @@
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
 
-(def ^:private init-spec
-  {:spec
-   {:prefix      {}
-    :tickets-dir {}
-    :force       {:coerce :boolean}}})
-
 (defn- init-handler [argv]
-  (let [{:keys [opts]} (bcli/parse-args argv init-spec)
+  (let [{:keys [opts]} (bcli/parse-args argv (spec :init))
         ;; init runs in cwd by design — it's how you create a project root
         ctx  {:project-root (str (fs/cwd))}
         path (cli/init-cmd ctx opts)]
     (println-out (str path))))
-
-(def ^:private transition-spec
-  {:spec {:summary {}}})
 
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
@@ -228,8 +203,8 @@
    used in error messages. The handler prints the new path on stdout.
    `--summary <text>` is threaded through; the cli layer rejects it on
    transitions to non-terminal statuses."
-  [cmd-name arg-count transition-fn argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv transition-spec)]
+  [cmd-name cmd-key arg-count transition-fn argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))]
     (when (< (count args) arg-count)
       (die (str "knot " cmd-name ": "
                 (case arg-count
@@ -265,13 +240,8 @@
             (die (str "knot " cmd-name ": " (.getMessage e)))
             (throw e)))))))
 
-(def ^:private dep-tree-spec
-  {:spec
-   {:json {:coerce :boolean}
-    :full {:coerce :boolean}}})
-
 (defn- dep-tree-handler [argv]
-  (let [{:keys [opts args]} (bcli/parse-args argv dep-tree-spec)
+  (let [{:keys [opts args]} (bcli/parse-args argv (spec :dep/tree))
         id (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot dep tree: an id is required"))
@@ -299,29 +269,6 @@
     "cycle" (dep-cycle-handler (rest argv))
     (edge-handler "dep" cli/dep-cmd argv)))
 
-(def ^:private list-spec
-  "Spec for `closed`/`blocked` — the narrow shape: output flags and
-   `--limit` only. `:restrict true` rejects unknown flags loudly so
-   typos and filter flags don't silently no-op."
-  {:spec
-   {:json     {:coerce :boolean}
-    :no-color {:coerce :boolean}
-    :limit    {:coerce :long}}
-   :restrict true})
-
-(def ^:private ready-spec
-  "Spec for `ready` — `list-spec` plus the composable filter flags. The
-   filter flags share their `:coerce []` shape with `ls-spec` so a
-   value like `--mode afk` parses identically across both commands."
-  {:spec
-   (merge (:spec list-spec)
-          {:status   {:coerce []}
-           :assignee {:coerce []}
-           :tag      {:coerce []}
-           :type     {:coerce []}
-           :mode     {:coerce []}})
-   :restrict true})
-
 (defn- list-handler
   "Run a non-mutating list command that shares the `ls`-like output
    shape: `--json`, `--no-color`, optionally `--limit`, optionally
@@ -329,8 +276,8 @@
    passes `ready-spec` (filters); `closed`/`blocked` pass `list-spec`
    (no filters). Filters that survive parsing apply BEFORE `--limit`
    truncation."
-  [spec list-fn argv]
-  (let [{:keys [opts]} (bcli/parse-args argv spec)
+  [cmd-key list-fn argv]
+  (let [{:keys [opts]} (bcli/parse-args argv (spec cmd-key))
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -470,13 +417,6 @@
         (println-out (str path))
         (die (str "knot edit: no ticket matching " id))))))
 
-(def ^:private prime-spec
-  {:spec
-   {:json  {:coerce :boolean}
-    :mode  {}
-    :limit {:coerce :long}}
-   :restrict true})
-
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
@@ -484,7 +424,7 @@
    so the command stays safe to wire into a global SessionStart hook."
   [argv]
   (let [out (try
-              (let [{:keys [opts]} (bcli/parse-args argv prime-spec)]
+              (let [{:keys [opts]} (bcli/parse-args argv (spec :prime))]
                 (cli/prime-cmd (discover-ctx)
                                {:json? (boolean (:json opts))
                                 :mode  (:mode opts)
@@ -496,57 +436,97 @@
                 (cli/prime-cmd {:project-found? false} {})))]
     (println-out out)))
 
-(defn- usage []
+(defn- usage
+  "One-line hint pointing the caller at `knot --help`. Used for bare
+   `knot` invocation and as the trailing line on the unknown-command
+   error path. The full grouped help lives behind `--help`."
+  []
   (binding [*out* *err*]
-    (println "Usage: knot <command> [args...]")
-    (println)
-    (println "Commands:")
-    (println "  init                       Write .knot.edn stub and create the tickets dir")
-    (println "  prime          [--json] [--mode <m>] [--limit N]")
-    (println "                             Emit a five-section primer for AI agent context-injection")
-    (println "  create <title> [flags]     Create a new ticket")
-    (println "  show   <id>    [--json]    Render the ticket with the given id")
-    (println "  ls             [--json]    List live (non-terminal) tickets")
-    (println "  status <id> <new-status> [--summary <text>]")
-    (println "                             Transition a ticket to a new status")
-    (println "  start  <id>                Transition a ticket to in_progress")
-    (println "  close  <id> [--summary <text>]")
-    (println "                             Transition a ticket to the first terminal status")
-    (println "  reopen <id>                Transition a ticket back to open")
-    (println "  add-note <id> [text]       Append a timestamped note (text arg, stdin, or editor)")
-    (println "  edit <id>                  Open the ticket file in $VISUAL/$EDITOR")
-    (println "  dep    <from> <to>         Add <to> to <from>'s :deps (cycle-checked)")
-    (println "  undep  <from> <to>         Remove <to> from <from>'s :deps")
-    (println "  dep tree <id> [--json]     Render the deps subtree (--full to expand dups)")
-    (println "  dep cycle                  Scan open tickets for cycles (exit 1 if any)")
-    (println "  link   <a> <b> [<c>...]    Create symmetric :links across every pair")
-    (println "  unlink <a> <b>             Remove the symmetric link between two ids")
-    (println "  ready           [--json] [--mode <m>] [--limit N]")
-    (println "                             List tickets whose deps are all closed")
-    (println "  blocked         [--json]   List tickets with at least one open dep")
-    (println "  closed          [--json] [--limit N]")
-    (println "                             List terminal tickets, newest closed first")))
+    (println "Usage: knot <command> [args...]. Run `knot --help` for the full list.")))
+
+(defn- color-enabled-on-stdout? []
+  (output/color-enabled? {:tty?         (output/tty?)
+                          :no-color-env (System/getenv "NO_COLOR")}))
+
+(defn- print-top-level-help []
+  (println-out (help/top-level-help-text help/registry
+                                         {:color? (color-enabled-on-stdout?)})))
+
+(defn- key->cmd-name
+  "Convert a registry key like `:init` or `:dep/tree` to its display
+   form `\"init\"` / `\"dep tree\"`."
+  [k]
+  (if-let [parent (namespace k)]
+    (str parent " " (name k))
+    (name k)))
+
+(defn- resolve-cmd-key
+  "Look at the first one or two non-flag tokens of `argv` and return the
+   matching registry key, preferring the two-token form when both match.
+   Returns nil when no token sequence matches."
+  [argv]
+  (let [[a b] argv]
+    (cond
+      (and a b (contains? help/registry (keyword a b))) (keyword a b)
+      (and a   (contains? help/registry (keyword a)))   (keyword a))))
+
+(defn- print-command-help [k]
+  (println-out (help/command-help-text (key->cmd-name k)
+                                       (get help/registry k)
+                                       {:color?   (color-enabled-on-stdout?)
+                                        :registry help/registry})))
+
+(defn- help-requested?
+  "True when `argv` (after body-flag extraction) contains `--help` or
+   `-h`. Body extraction keeps a literal `--help` inside a body string
+   from triggering a false positive."
+  [argv]
+  (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv)))))
 
 (defn -main [& argv]
   (try
     (let [[cmd & rest-argv] argv]
+      ;; Top-level help: `knot --help`, `knot -h`, `knot help` — only when
+      ;; there are no further args. With trailing args, the next branch
+      ;; treats the remainder as a per-command help target.
+      (when (and (#{"--help" "-h" "help"} cmd) (empty? rest-argv))
+        (print-top-level-help)
+        (System/exit 0))
+
+      ;; `knot help <cmd...>` / `knot --help <cmd...>` / `knot -h <cmd...>`:
+      ;; resolve the trailing tokens against the registry and render that
+      ;; command's per-command help. Unknown target → stderr, exit 1.
+      (when (or (#{"--help" "-h"} cmd) (= "help" cmd))
+        (if-let [k (resolve-cmd-key rest-argv)]
+          (do (print-command-help k) (System/exit 0))
+          (die (str "knot help: unknown command: " (str/join " " rest-argv)))))
+
+      ;; Per-command `--help` / `-h` anywhere in argv: pre-scan after
+      ;; extracting body flags so a literal `--help` inside a body value
+      ;; does not trigger help. Falls through if `cmd` is unknown so the
+      ;; existing case dispatch produces the unknown-command error.
+      (when (and cmd (help-requested? rest-argv))
+        (when-let [k (resolve-cmd-key (cons cmd rest-argv))]
+          (print-command-help k)
+          (System/exit 0)))
+
       (case cmd
         "init"   (init-handler rest-argv)
         "prime"  (prime-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         "ls"     (ls-handler rest-argv)
-        "status"  (transition-handler "status" 2 cli/status-cmd rest-argv)
-        "start"   (transition-handler "start"  1 cli/start-cmd  rest-argv)
-        "close"   (transition-handler "close"  1 cli/close-cmd  rest-argv)
-        "reopen"  (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
+        "status"  (transition-handler "status" :status 2 cli/status-cmd rest-argv)
+        "start"   (transition-handler "start"  :start  1 cli/start-cmd  rest-argv)
+        "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)
+        "reopen"  (transition-handler "reopen" :reopen 1 cli/reopen-cmd rest-argv)
         "dep"      (dep-handler rest-argv)
         "undep"    (edge-handler "undep" cli/undep-cmd rest-argv)
         "link"     (link-handler   rest-argv)
         "unlink"   (unlink-handler rest-argv)
-        "ready"    (list-handler ready-spec cli/ready-cmd   rest-argv)
-        "blocked"  (list-handler list-spec  cli/blocked-cmd rest-argv)
-        "closed"   (list-handler list-spec  cli/closed-cmd  rest-argv)
+        "ready"    (list-handler :ready   cli/ready-cmd   rest-argv)
+        "blocked"  (list-handler :blocked cli/blocked-cmd rest-argv)
+        "closed"   (list-handler :closed  cli/closed-cmd  rest-argv)
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
         nil      (do (usage) (System/exit 1))

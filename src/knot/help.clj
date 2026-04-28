@@ -1,0 +1,449 @@
+(ns knot.help
+  "Help system: command registry (source of truth for parse + display)
+   and renderers for top-level and per-command help."
+  (:require [clojure.string :as str]
+            [knot.output :as output]))
+
+(defn- bold
+  "Bold `s` when `color?` is true; otherwise return `s` unchanged. Used
+   for section/group headers."
+  [color? s]
+  (output/colorize color? [:bold] s))
+
+(defn- cyan
+  "Cyan `s` when `color?` is true; otherwise return `s` unchanged. Used
+   for the things a user types: synopses, flag labels, example commands,
+   and command lines in the top-level help."
+  [color? s]
+  (output/colorize color? [:cyan] s))
+
+(defn- arg-token
+  "Render a single :args entry as `<name>`, `[<name>]`, or `[<name>...]`."
+  [{:keys [name required variadic]}]
+  (cond
+    variadic (str "[<" name ">...]")
+    required (str "<" name ">")
+    :else    (str "[<" name ">]")))
+
+(defn synopsis
+  "Compose a one-line synopsis: `knot <cmd> <arg> [<arg>] [<rest>...] [flags]`.
+   `cmd-name` is the display string (`\"init\"`, `\"dep tree\"`); the trailing
+   `[flags]` is appended only when the entry has at least one flag."
+  [cmd-name {:keys [args flags]}]
+  (let [head     (str "knot " cmd-name)
+        arg-part (when (seq args)
+                   (str " " (str/join " " (map arg-token args))))
+        flag-part (when (seq flags) " [flags]")]
+    (str head arg-part flag-part)))
+
+(defn- flag-label
+  "Render a flag as `--name` or `--name, -alias`."
+  [{n :name a :alias}]
+  (str "--" (clojure.core/name n)
+       (when a (str ", -" (clojure.core/name a)))))
+
+(defn- flags-block
+  "Render a FLAGS section: header, then one line per flag with the label
+   column padded to a uniform width and `desc` after a two-space gap.
+   Returns nil when there are no flags so the caller can skip the section.
+   Padding is computed from the uncolored label width — ANSI escapes
+   carry no visual width but inflate `(count s)`, so we measure first
+   and colorize last."
+  [color? flags]
+  (when (seq flags)
+    (let [labels (map flag-label flags)
+          max-w  (apply max (map count labels))]
+      (str "\n" (bold color? "FLAGS") "\n"
+           (str/join "\n"
+                     (for [{:keys [desc] :as f} flags
+                           :let [label (flag-label f)
+                                 pad   (apply str (repeat (- max-w (count label)) \space))]]
+                       (str "  " (cyan color? label) pad "  " (or desc ""))))
+           "\n"))))
+
+(defn- examples-block
+  "Render an EXAMPLES section: each entry is `{:cmd ... :note ...}` printed
+   as a two-line stanza (command indented two spaces, note indented four).
+   Returns nil when there are no examples."
+  [color? examples]
+  (when (seq examples)
+    (str "\n" (bold color? "EXAMPLES") "\n"
+         (str/join "\n"
+                   (for [{:keys [cmd note]} examples]
+                     (str "  " (cyan color? cmd)
+                          (when note (str "\n    " note)))))
+         "\n")))
+
+(defn- key->cmd-name
+  "Convert a registry key like `:init` or `:dep/tree` into its display
+   form `\"init\"` or `\"dep tree\"`."
+  [k]
+  (if-let [parent (namespace k)]
+    (str parent " " (name k))
+    (name k)))
+
+(defn- subcommands-block
+  "Render a SUBCOMMANDS section for parent entries. `sub-keys` is a vector
+   of registry keys (e.g. `[:dep/tree :dep/cycle]`); each is resolved
+   against `registry` to pick up its display name and description.
+   Returns nil when there are no subcommands or no registry to resolve."
+  [color? registry sub-keys]
+  (when (and (seq sub-keys) registry)
+    (let [resolved (for [k sub-keys
+                         :let [entry (get registry k)]
+                         :when entry]
+                     {:cmd-name    (key->cmd-name k)
+                      :description (:description entry)})
+          labels   (map #(str "knot " (:cmd-name %)) resolved)
+          max-w    (apply max 0 (map count labels))]
+      (str "\n" (bold color? "SUBCOMMANDS") "\n"
+           (str/join "\n"
+                     (for [{:keys [cmd-name description]} resolved
+                           :let [label (str "knot " cmd-name)
+                                 pad   (apply str (repeat (- max-w (count label)) \space))]]
+                       (str "  " (cyan color? label) pad "  " description)))
+           "\n"))))
+
+(def ^:private default-exit-codes
+  "Convention for commands that don't override `:exit-codes` in the registry.
+   Renders as the standard 0/1 line under EXIT CODES."
+  [{:code 0 :when "on success"}
+   {:code 1 :when "on error"}])
+
+(defn- exit-codes-block
+  "Render an EXIT CODES section. When `codes` is empty/nil, falls back to
+   the standard 0/1 convention so every per-command page has the section."
+  [color? codes]
+  (let [codes (if (seq codes) codes default-exit-codes)]
+    (str "\n" (bold color? "EXIT CODES") "\n"
+         (str/join "\n"
+                   (for [{:keys [code] reason :when} codes]
+                     (str "  " code "  " reason)))
+         "\n")))
+
+(def registry
+  "Source of truth for every CLI command. Keys are registry IDs:
+   single-word commands use a bare keyword (`:init`); two-token
+   subcommands use a namespaced keyword (`:dep/tree`). Each entry
+   carries display fields (`:description`, `:flags[].desc`, `:examples`,
+   `:exit-codes`) and parse fields (`:flags[].coerce/:alias`,
+   `:restrict?`); `babashka.cli` specs are derived from the parse
+   fields by `derive-spec`."
+  {:init
+   {:group       :project
+    :description "Write .knot.edn stub and create the tickets dir."
+    :args        []
+    :flags       [{:name :prefix      :desc "Override the auto-derived ticket id prefix."}
+                  {:name :tickets-dir :desc "Override the default tickets directory name."}
+                  {:name :force :coerce :boolean
+                   :desc "Overwrite an existing .knot.edn."}]
+    :examples    [{:cmd "knot init"
+                   :note "Create .knot.edn and .tickets/ in the current directory."}]}
+
+   :prime
+   {:group       :project
+    :description "Emit a five-section primer for AI agent context-injection."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :json :coerce :boolean :desc "Emit JSON instead of markdown."}
+                  {:name :mode :desc "Filter primer ticket sections by mode (afk|hitl)."}
+                  {:name :limit :coerce :long
+                   :desc "Cap the number of ready-section tickets shown."}]
+    :examples    [{:cmd "knot prime"
+                   :note "Print the markdown primer for the current project."}]
+    :exit-codes  [{:code 0 :when "always (degrades to a no-project preamble)"}]}
+
+   :create
+   {:group       :lifecycle
+    :description "Create a new ticket."
+    :args        [{:name "title" :required true}]
+    :flags       [{:name :type        :alias :t :desc "Type label (default: task)."}
+                  {:name :priority    :alias :p :coerce :long :desc "Priority 0-4 (default 2)."}
+                  {:name :assignee    :alias :a :desc "Assignee handle."}
+                  {:name :external-ref :coerce [] :desc "External reference (repeatable)."}
+                  {:name :parent      :desc "Parent ticket id."}
+                  {:name :tags        :desc "Comma-separated tag list."}
+                  {:name :mode        :desc "Mode (afk|hitl)."}
+                  {:name :afk  :coerce :boolean :desc "Shortcut for --mode afk."}
+                  {:name :hitl :coerce :boolean :desc "Shortcut for --mode hitl."}
+                  {:name :description :alias :d :body? true :desc "## Description body section."}
+                  {:name :design      :body? true :desc "## Design body section."}
+                  {:name :acceptance  :body? true :desc "## Acceptance Criteria body section."}]
+    :examples    [{:cmd "knot create \"Fix login bug\" -p 1 --tags auth,p0"
+                   :note "Create a ticket at priority 1 with two tags."}]}
+
+   :show
+   {:group       :listing
+    :description "Render the ticket with the given id."
+    :args        [{:name "id" :required true}]
+    :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of text."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}]
+    :examples    [{:cmd "knot show kno-01abc"
+                   :note "Render the ticket whose id starts with 01abc."}]}
+
+   :ls
+   {:group       :listing
+    :description "List live (non-terminal) tickets."
+    :args        []
+    :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
+                  {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+    :examples    [{:cmd "knot ls --mode afk --tag p0"
+                   :note "Show afk-mode tickets tagged p0."}]}
+
+   :status
+   {:group       :lifecycle
+    :description "Transition a ticket to a new status."
+    :args        [{:name "id" :required true} {:name "new-status" :required true}]
+    :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}]
+    :examples    [{:cmd "knot status kno-01abc in_progress"
+                   :note "Move a ticket into in_progress."}]}
+
+   :start
+   {:group       :lifecycle
+    :description "Transition a ticket to in_progress."
+    :args        [{:name "id" :required true}]
+    :flags       []
+    :examples    [{:cmd "knot start kno-01abc"
+                   :note "Mark a ticket as in_progress."}]}
+
+   :close
+   {:group       :lifecycle
+    :description "Transition a ticket to the first terminal status."
+    :args        [{:name "id" :required true}]
+    :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}]
+    :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
+                   :note "Close with a summary."}]}
+
+   :reopen
+   {:group       :lifecycle
+    :description "Transition a ticket back to open."
+    :args        [{:name "id" :required true}]
+    :flags       []
+    :examples    [{:cmd "knot reopen kno-01abc"
+                   :note "Reopen a closed ticket."}]}
+
+   :dep
+   {:group       :graph
+    :description "Add <to> to <from>'s :deps (cycle-checked)."
+    :args        [{:name "from" :required true} {:name "to" :required true}]
+    :flags       []
+    :subcommands [:dep/tree :dep/cycle]
+    :examples    [{:cmd "knot dep kno-01abc kno-01def"
+                   :note "Make kno-01abc depend on kno-01def."}]
+    :exit-codes  [{:code 0 :when "edge saved"}
+                  {:code 1 :when "cycle detected or unknown id"}]}
+
+   :dep/tree
+   {:group       :graph
+    :description "Render the deps subtree (--full to expand duplicates)."
+    :args        [{:name "id" :required true}]
+    :flags       [{:name :json :coerce :boolean :desc "Emit JSON instead of text."}
+                  {:name :full :coerce :boolean
+                   :desc "Expand duplicate subtrees instead of marking them seen."}]
+    :examples    [{:cmd "knot dep tree kno-01abc"
+                   :note "Show what blocks kno-01abc."}]}
+
+   :dep/cycle
+   {:group       :graph
+    :description "Scan open tickets for dep cycles."
+    :args        []
+    :flags       []
+    :examples    [{:cmd "knot dep cycle"
+                   :note "Exit 0 if clean, 1 listing each cycle to stderr."}]
+    :exit-codes  [{:code 0 :when "no cycles found"}
+                  {:code 1 :when "one or more cycles printed to stderr"}]}
+
+   :undep
+   {:group       :graph
+    :description "Remove <to> from <from>'s :deps."
+    :args        [{:name "from" :required true} {:name "to" :required true}]
+    :flags       []
+    :examples    [{:cmd "knot undep kno-01abc kno-01def"
+                   :note "Drop the edge from kno-01abc to kno-01def."}]}
+
+   :link
+   {:group       :graph
+    :description "Create symmetric :links across every pair of ids."
+    :args        [{:name "a" :required true}
+                  {:name "b" :required true}
+                  {:name "rest" :variadic true}]
+    :flags       []
+    :examples    [{:cmd "knot link kno-01abc kno-01def kno-01ghi"
+                   :note "Link three tickets pairwise."}]}
+
+   :unlink
+   {:group       :graph
+    :description "Remove the symmetric link between two ids."
+    :args        [{:name "from" :required true} {:name "to" :required true}]
+    :flags       []
+    :examples    [{:cmd "knot unlink kno-01abc kno-01def"
+                   :note "Drop the link between two tickets."}]}
+
+   :ready
+   {:group       :listing
+    :description "List tickets whose deps are all closed."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}
+                  {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
+                  {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+    :examples    [{:cmd "knot ready --mode afk"
+                   :note "Show afk-mode tickets ready to start."}]}
+
+   :blocked
+   {:group       :listing
+    :description "List tickets with at least one open dependency."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}]
+    :examples    [{:cmd "knot blocked"
+                   :note "Show tickets currently blocked by an open dep."}]}
+
+   :closed
+   {:group       :listing
+    :description "List terminal tickets, newest closed first."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}]
+    :examples    [{:cmd "knot closed --limit 10"
+                   :note "Show the ten most-recently-closed tickets."}]}
+
+   :add-note
+   {:group       :notes
+    :description "Append a timestamped note (text arg, stdin, or editor)."
+    :args        [{:name "id" :required true}
+                  {:name "text" :variadic true}]
+    :flags       []
+    :examples    [{:cmd "knot add-note kno-01abc \"Tested locally\""
+                   :note "Append a one-line note."}
+                  {:cmd "knot add-note kno-01abc"
+                   :note "Open $EDITOR to compose a note interactively."}]
+    :exit-codes  [{:code 0 :when "note saved or editor cancellation (empty)"}
+                  {:code 1 :when "no ticket matches the id"}]}
+
+   :edit
+   {:group       :notes
+    :description "Open the ticket file in $VISUAL/$EDITOR."
+    :args        [{:name "id" :required true}]
+    :flags       []
+    :examples    [{:cmd "knot edit kno-01abc"
+                   :note "Edit the ticket's frontmatter and body."}]}})
+
+(def ^:private group-order
+  "Canonical group order and display headers. The renderer walks this
+   list and emits a section per group that has at least one command."
+  [[:project   "Project"]
+   [:lifecycle "Lifecycle"]
+   [:graph     "Graph"]
+   [:listing   "Listing"]
+   [:notes     "Notes"]])
+
+(def command-order
+  "Top-level command order for `top-level-help-text`. Subcommand keys
+   (e.g. `:dep/tree`) are intentionally absent — they render indented
+   beneath their parent via the parent's `:subcommands` field."
+  [:init :prime
+   :create :start :status :close :reopen
+   :dep :undep :link :unlink
+   :ls :show :ready :blocked :closed
+   :add-note :edit])
+
+(defn- cmd-line-label
+  "Render a top-level/subcommand line label: cmd-name + required positionals."
+  [cmd-name args]
+  (let [parts (concat [cmd-name]
+                      (for [{:keys [name required]} args
+                            :when required]
+                        (str "<" name ">")))]
+    (str/join " " parts)))
+
+(defn- group-lines
+  "Return the rendered lines for a single group: each top-level command
+   followed by its subcommands (indented). All labels in the group are
+   right-padded to a uniform width so descriptions align. Width math
+   uses the uncolored label so ANSI escapes do not throw alignment off."
+  [color? registry group-kw]
+  (let [entries (for [k command-order
+                      :let [entry (get registry k)]
+                      :when (and entry (= group-kw (:group entry)))]
+                  {:k k :entry entry})
+        rows    (mapcat
+                  (fn [{:keys [k entry]}]
+                    (cons {:label  (cmd-line-label (key->cmd-name k) (:args entry))
+                           :desc   (:description entry)
+                           :indent 2}
+                          (for [sk (:subcommands entry)
+                                :let [sentry (get registry sk)]
+                                :when sentry]
+                            {:label  (cmd-line-label (key->cmd-name sk) (:args sentry))
+                             :desc   (:description sentry)
+                             :indent 4})))
+                  entries)
+        max-w   (apply max 0 (map #(+ (:indent %) (count (:label %))) rows))]
+    (for [{:keys [label desc indent]} rows
+          :let [pad (apply str (repeat (- max-w (count label) indent) \space))]]
+      (str (apply str (repeat indent \space))
+           (cyan color? label) pad "  " (or desc "")))))
+
+(defn top-level-help-text
+  "Render the grouped top-level help: USAGE banner, hint pointing at
+   per-command help, then five group sections (Project, Lifecycle,
+   Graph, Listing, Notes) listing the commands present in `registry`.
+   `opts` may include `:color?` (bold for headers, cyan for command
+   names)."
+  [registry {:keys [color?]}]
+  (let [groups (for [[g header] group-order
+                     :let [lines (group-lines color? registry g)]
+                     :when (seq lines)]
+                 (str (bold color? header) "\n"
+                      (str/join "\n" lines)))]
+    (str (bold color? "USAGE") "\n  " (cyan color? "knot <command> [args...]") "\n"
+         "\n"
+         "Run `knot help <command>` for per-command details.\n"
+         "\n"
+         (str/join "\n\n" groups)
+         "\n")))
+
+(defn command-help-text
+  "Render the per-command help page as plain text. `cmd-name` is the display
+   name (`\"init\"`, `\"dep tree\"`). `entry` is a registry value. `opts`
+   may include `:color?` (bold for section headers, cyan for synopsis /
+   flag labels / example commands / subcommand labels) and `:registry`
+   (used to resolve `:subcommands` keys to their display names +
+   descriptions)."
+  [cmd-name {:keys [description flags examples exit-codes subcommands] :as entry}
+   {:keys [color? registry] :as _opts}]
+  (str (bold color? "USAGE") "\n  " (cyan color? (synopsis cmd-name entry)) "\n"
+       (when description
+         (str "\n" description "\n"))
+       (flags-block color? flags)
+       (subcommands-block color? registry subcommands)
+       (examples-block color? examples)
+       (exit-codes-block color? exit-codes)))
+
+(defn derive-spec
+  "Project a registry entry's :flags into a babashka.cli :spec map.
+   Body-extracted flags (`:body? true`) are skipped — they are pulled
+   from argv before babashka.cli sees them, so they must not appear
+   in the parser spec. `:restrict? true` on the entry surfaces as
+   `:restrict true` on the spec (rejects unknown flags loudly)."
+  [{:keys [flags restrict?]}]
+  (cond-> {:spec (into {}
+                       (for [{:keys [name body?] :as flag} flags
+                             :when (not body?)]
+                         [name (dissoc flag :name :body? :desc)]))}
+    restrict? (assoc :restrict true)))
