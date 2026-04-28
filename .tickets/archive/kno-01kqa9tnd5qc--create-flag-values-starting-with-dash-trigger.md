@@ -1,11 +1,12 @@
 ---
 id: kno-01kqa9tnd5qc
-status: open
+status: closed
 type: bug
 priority: 2
 mode: hitl
 created: '2026-04-28T15:02:54.117024754Z'
-updated: '2026-04-28T15:02:54.117024754Z'
+updated: '2026-04-28T20:20:07.609752815Z'
+closed: '2026-04-28T20:20:07.609752815Z'
 tags:
 - cli
 - parsing
@@ -61,3 +62,9 @@ Option 2 is preferred. Body-section flags are a special case — they're the onl
 - [ ] Existing flags (`--type`, `--priority`, `--tags`, etc.) still parse identically
 - [ ] Test: an end-to-end `run-knot` integration test creating a ticket whose acceptance contains `- [ ]` items
 - [ ] Stretch: explore whether the same workaround / pre-processor can apply to other flags accepting freeform text (e.g. `--summary`, `add-note` text)
+
+## Notes
+
+**2026-04-28T20:20:07.609752815Z**
+
+Pre-extract --description / --design / --acceptance (and -d alias) from argv before babashka.cli sees them, in both --flag value and --flag=value forms. Body-flag values are now consumed verbatim, so dash-prefixed bodies like '- [ ] item' survive bb-cli's whitespace splitting. Removed the body keys from create-spec since they no longer round-trip through bcli. Regression-test: create-body-flags-with-dash-prefixed-values-end-to-end-test (4 cases incl. mixed --priority/--type/--tags). All 137 tests / 1128 assertions pass.

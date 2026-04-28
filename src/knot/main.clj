@@ -37,11 +37,16 @@
   (System/exit 1))
 
 (def ^:private create-spec
+  ;; Body-section flags (`--description / --design / --acceptance`, plus the
+  ;; `-d` alias) are intentionally absent here — they are pre-extracted from
+  ;; argv by `extract-body-flags!` before delegating to `babashka.cli`. The
+  ;; reason: bb-cli splits a value on whitespace before binding, so a value
+  ;; like `"- [ ] item"` makes it interpret `-`/`[`/`]`/`item` as flags and
+  ;; either crashes coercion (`--priority`) or writes garbage into other
+  ;; spec entries. Body flags are the only ones whose values reasonably
+  ;; contain dashes, so scoping the workaround here is safe.
   {:spec
-   {:description  {:alias :d}
-    :design       {}
-    :acceptance   {}
-    :type         {:alias :t}
+   {:type         {:alias :t}
     :priority     {:alias :p :coerce :long}
     :assignee     {:alias :a}
     :external-ref {:coerce []}
@@ -50,6 +55,41 @@
     :mode         {}
     :afk          {:coerce :boolean}
     :hitl         {:coerce :boolean}}})
+
+(def ^:private body-flag->key
+  "Body-section flag tokens (long form, `=` form prefix, and short alias)
+   mapped to the opts key that `cli/create-cmd` expects."
+  {"--description" :description
+   "-d"            :description
+   "--design"      :design
+   "--acceptance"  :acceptance})
+
+(defn- extract-body-flags
+  "Walk argv and pull `--description / --design / --acceptance` (plus the
+   `-d` alias) out before babashka.cli sees them. Supports both the
+   `--flag value` and `--flag=value` shapes; values are consumed verbatim
+   so dash-prefixed bodies like `\"- [ ] item\"` survive intact. Returns
+   `{:body-opts {kw value} :argv [...]}` where `:argv` is argv with the
+   consumed tokens removed."
+  [argv]
+  (loop [in argv, out [], opts {}]
+    (if (empty? in)
+      {:body-opts opts :argv out}
+      (let [[head & tail] in
+            eq-idx        (when (and (string? head) (str/starts-with? head "--"))
+                            (str/index-of head "="))
+            eq-flag       (when eq-idx (subs head 0 eq-idx))]
+        (cond
+          (and eq-flag (contains? body-flag->key eq-flag))
+          (recur tail out
+                 (assoc opts (body-flag->key eq-flag) (subs head (inc eq-idx))))
+
+          (and (contains? body-flag->key head) (seq tail))
+          (recur (rest tail) out
+                 (assoc opts (body-flag->key head) (first tail)))
+
+          :else
+          (recur tail (conj out head) opts))))))
 
 (defn- resolve-mode
   "Reconcile `--mode`, `--afk`, `--hitl`. Explicit `:mode` wins; otherwise
@@ -75,12 +115,14 @@
          vec)))
 
 (defn- create-handler [argv]
-  (let [{:keys [opts args]} (bcli/parse-args argv create-spec)
+  (let [{:keys [body-opts argv]} (extract-body-flags argv)
+        {:keys [opts args]}      (bcli/parse-args argv create-spec)
         title (first args)]
     (when (or (nil? title) (str/blank? title))
       (die "knot create: a title is required"))
     (let [resolved-mode (resolve-mode opts)
           opts          (cond-> (-> opts
+                                    (merge body-opts)
                                     (dissoc :afk :hitl)
                                     (assoc :title title))
                           (:tags opts)        (assoc :tags (split-tags (:tags opts)))

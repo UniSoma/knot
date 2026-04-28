@@ -383,6 +383,61 @@
           (is (str/includes? text "mode: hitl")
               "explicit --mode hitl should override --afk shortcut"))))))
 
+(deftest create-body-flags-with-dash-prefixed-values-end-to-end-test
+  (testing "--acceptance with a dash-prefixed bullet value writes the body verbatim"
+    ;; Regression: babashka.cli mis-parsed body-section flag values whose
+    ;; first token began with `-`, treating each whitespace-split fragment
+    ;; as its own flag and (depending on neighbouring flags) either crashing
+    ;; or silently writing garbage. `--description / --design / --acceptance`
+    ;; must consume their next argv slot verbatim.
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "T"
+                      "--acceptance" "- [ ] some item")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "## Acceptance Criteria"))
+          (is (str/includes? text "- [ ] some item"))))))
+
+  (testing "--acceptance=<value> form also accepts dash-prefixed values"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "T"
+                      "--acceptance=- [ ] some item")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "## Acceptance Criteria"))
+          (is (str/includes? text "- [ ] some item"))))))
+
+  (testing "--description and --design accept dash-prefixed values"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "T"
+                      "--description" "- desc bullet"
+                      "--design"      "- design bullet")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "## Description"))
+          (is (str/includes? text "- desc bullet"))
+          (is (str/includes? text "## Design"))
+          (is (str/includes? text "- design bullet"))))))
+
+  (testing "ordinary flags still parse identically when mixed with body flags"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "T"
+                      "--priority"  "1"
+                      "--type"      "bug"
+                      "--tags"      "auth,p0"
+                      "--acceptance" "- [ ] item")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "priority: 1"))
+          (is (str/includes? text "type: bug"))
+          (is (str/includes? text "- auth"))
+          (is (str/includes? text "- p0"))
+          (is (str/includes? text "- [ ] item")))))))
+
 (deftest mode-missing-on-legacy-tickets-test
   (testing "tickets without :mode load and behave leniently"
     ;; Legacy tickets predating the :mode field must continue to work:
