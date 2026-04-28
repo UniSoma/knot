@@ -73,7 +73,7 @@
   "Throw with a clear message when any value in `merged` (defaults + user
    overrides) violates the schema. Returns `merged` unchanged on success."
   [merged]
-  (let [{:keys [tickets-dir prefix default-assignee default-type
+  (let [{:keys [tickets-dir prefix project-name default-assignee default-type
                 default-priority statuses terminal-statuses types modes
                 default-mode]} merged]
     (when-not (non-blank-string? tickets-dir)
@@ -81,6 +81,8 @@
     (when (and (some? prefix) (not (and (non-blank-string? prefix)
                                         (re-matches #"[a-z0-9]+" prefix))))
       (throw (ex-info ".knot.edn :prefix must be a non-empty [a-z0-9]+ string" {})))
+    (when (and (some? project-name) (not (non-blank-string? project-name)))
+      (throw (ex-info ".knot.edn :project-name must be a non-blank string" {})))
     (when (and (some? default-assignee) (not (non-blank-string? default-assignee)))
       (throw (ex-info ".knot.edn :default-assignee must be a non-blank string" {})))
     (when-not (list-of-non-blank-strings? statuses)

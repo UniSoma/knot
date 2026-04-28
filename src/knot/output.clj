@@ -429,7 +429,7 @@ Common commands:
          (prime-project-section project) "\n"
          (prime-section "In Progress" in-progress nil) "\n"
          (prime-section "Ready" ready ready-footer) "\n"
-         "## Schema\n\n" prime-schema-cheatsheet "\n")))
+         "## Schema and commands\n\n" prime-schema-cheatsheet "\n")))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:

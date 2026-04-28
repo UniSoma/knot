@@ -523,8 +523,7 @@
                                      :title "Ready lower"
                                      :created "2026-04-27T09:00:00Z"})]
    :ready-truncated? false
-   :ready-remaining 0
-   :limit 20})
+   :ready-remaining 0})
 
 (deftest prime-text-five-sections-test
   (testing "preamble paragraph appears at the top before all section headings"
@@ -656,8 +655,7 @@
                 :in-progress []
                 :ready []
                 :ready-truncated? false
-                :ready-remaining 0
-                :limit 20}
+                :ready-remaining 0}
           out (output/prime-text data)]
       (is (str/includes? out "## Project"))
       (is (str/includes? out "## In Progress"))
@@ -670,8 +668,7 @@
                 :in-progress []
                 :ready []
                 :ready-truncated? false
-                :ready-remaining 0
-                :limit 20}
+                :ready-remaining 0}
           out (output/prime-text data)]
       (is (str/includes? out "knot init")
           "preamble references `knot init` so the agent knows how to bootstrap"))))
@@ -727,8 +724,7 @@
                 :in-progress []
                 :ready []
                 :ready-truncated? false
-                :ready-remaining 0
-                :limit 20}
+                :ready-remaining 0}
           out (output/prime-json data)]
       (is (str/starts-with? out "{"))
       (is (str/includes? out "\"in_progress\":[]"))

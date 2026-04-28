@@ -561,17 +561,28 @@
                                     (get-in t [:frontmatter :status])))
                  tickets)))
 
+(defn- prime-cap
+  "Resolve the ready-section cap. Positive integers win; any non-positive
+   or non-integer value silently falls back to `prime-default-limit` so
+   `knot prime` honours its always-exit-0 contract even on garbage input."
+  [limit]
+  (if (and (integer? limit) (pos? limit)) limit prime-default-limit))
+
 (defn prime-cmd
-  "Render the agent context primer for the project. Always returns a
-   string — never throws and never returns nil — so the caller can wire
-   it into a global Claude Code `SessionStart` hook with confidence.
+  "Render the agent context primer for the project. Returns a string for
+   the markdown text or JSON payload. Pair with `main/prime-handler`,
+   which wraps the call in a try/catch to honour the always-exit-0
+   contract for the global Claude Code `SessionStart` hook — `prime-cmd`
+   itself can still propagate exceptions from `store/load-all` on a
+   corrupted ticket file.
 
    `ctx` carries the usual project context plus `:project-found?` (set
    when the walk-up discovery hit a `.knot.edn`/`.tickets/` marker) and
    an optional `:project-name`.
    `opts` supports `:mode` (filter ready section to that mode), `:limit`
-   (override the default ready cap of 20), and `:json?` (emit the
-   actionable bare-object payload instead of markdown).
+   (override the default ready cap of 20; non-positive values fall back
+   to the default), and `:json?` (emit the actionable bare-object
+   payload instead of markdown).
 
    The ready section is filtered by `:mode` BEFORE the cap is applied,
    so `--mode afk --limit 5` yields up to 5 afk-mode ready tickets, not
@@ -582,8 +593,7 @@
                 :in-progress      []
                 :ready            []
                 :ready-truncated? false
-                :ready-remaining  0
-                :limit            (or limit prime-default-limit)}]
+                :ready-remaining  0}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))
@@ -596,7 +606,7 @@
           ready*       (query/ready all terminal-statuses)
           mode-filter  (when mode {:mode #{mode}})
           ready-filtered (query/filter-tickets ready* (or mode-filter {}))
-          cap          (or limit prime-default-limit)
+          cap          (prime-cap limit)
           ready-shown  (vec (take cap ready-filtered))
           ready-total  (count ready-filtered)
           truncated?   (> ready-total cap)
@@ -609,8 +619,7 @@
                         :in-progress      in-progress*
                         :ready            ready-shown
                         :ready-truncated? truncated?
-                        :ready-remaining  remaining
-                        :limit            cap}]
+                        :ready-remaining  remaining}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))
@@ -634,6 +643,9 @@
      "\n"
      " ;; Project shortcode prefixed onto every generated ticket id.\n"
      pr-line "\n"
+     "\n"
+     " ;; Optional human-readable project name shown in `knot prime`.\n"
+     " ;; :project-name \"my project\"\n"
      "\n"
      " ;; Default assignee on `knot create` when git user.name is unavailable.\n"
      " ;; :default-assignee \"alice\"\n"
