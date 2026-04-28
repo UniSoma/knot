@@ -1,11 +1,12 @@
 ---
 id: kno-01kqa6xff7ya
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-04-28T14:12:00.615581953Z'
-updated: '2026-04-28T14:32:05.233158049Z'
+updated: '2026-04-28T21:20:53.339307617Z'
+closed: '2026-04-28T21:20:53.339307617Z'
 parent: kno-01kqa804gmgx
 external_refs:
 - docs/prd/knot-v0.md
@@ -42,3 +43,9 @@ Make Knot installable via `bbin install io.github.<user>/knot --as knot` and shi
 ## Blocked by
 
 - issue-0010 (`issues/0010-prime-and-session-start.md`)
+
+## Notes
+
+**2026-04-28T21:20:53.339307617Z**
+
+Added :bbin/bin entry to bb.edn pointing at knot.main, plus a minimal deps.edn so bbin's generated shim can resolve :local/root via clojure.tools.deps (same pattern clj-surgeon uses). Rewrote README with required sections: install (bbin-only — no Homebrew/AUR/Makefile), quick tour, .knot.edn schema table, AI-agent integration with SessionStart hook snippet, and philosophy notes covering no-locks/last-writer-wins/single-machine personal-driver scope. Verified bbin install . --as knot end-to-end in a fresh tmp dir: knot init + knot create + knot ls (table and JSON) + knot prime all work via the installed shim. 140 tests / 1179 assertions still green.

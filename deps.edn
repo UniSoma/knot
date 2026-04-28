@@ -1,0 +1,5 @@
+;; Minimal deps.edn for `bbin install`. bbin's generated shim uses
+;; `clojure.tools.deps` with `--config`/`:local/root`, which requires a
+;; deps.edn manifest at the project root. Runtime deps (clj-yaml, etc.)
+;; ship bundled with babashka and live in bb.edn alongside :bbin/bin.
+{:paths ["src"]}

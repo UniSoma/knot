@@ -6,6 +6,11 @@
  ;; here (ordered-map iteration, clj-yaml ordered preservation) is stable.
  :min-bb-version "1.3.0"
 
+ ;; bbin install metadata. `bbin install <coords> --as knot` reads this
+ ;; map and wires up `knot` on PATH to invoke `bb -m knot.main` with the
+ ;; project's :paths on the classpath.
+ :bbin/bin {knot {:main-opts ["-m" "knot.main"]}}
+
  :tasks
  {:requires ([babashka.classpath :as cp]
              [babashka.fs :as fs]
