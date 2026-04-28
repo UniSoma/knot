@@ -303,3 +303,58 @@
               {:kind :deps   :id "o"}
               {:kind :parent :id "p"}]
              (query/broken-refs t others))))))
+
+(deftest blocking-test
+  (testing "blocking returns tickets that have id in their :deps"
+    (let [a (ticket "a" "open" ["x"])
+          b (ticket "b" "open" ["x" "y"])
+          c (ticket "c" "open" ["y"])
+          d (ticket "d" "open" [])]
+      (is (= ["a" "b"] (mapv #(get-in % [:frontmatter :id])
+                             (query/blocking [a b c d] "x"))))
+      (is (= ["b" "c"] (mapv #(get-in % [:frontmatter :id])
+                             (query/blocking [a b c d] "y"))))))
+
+  (testing "blocking returns empty when no ticket has id in :deps"
+    (let [a (ticket "a" "open" ["x"])
+          b (ticket "b" "open" [])]
+      (is (empty? (query/blocking [a b] "z")))))
+
+  (testing "blocking is nil-safe on tickets without :deps"
+    (let [a {:frontmatter {:id "a" :status "open"}}
+          b (ticket "b" "open" ["a"])]
+      (is (= ["b"] (mapv #(get-in % [:frontmatter :id])
+                         (query/blocking [a b] "a"))))))
+
+  (testing "blocking preserves input order"
+    (let [a (ticket "a" "open" ["t"])
+          b (ticket "b" "open" ["t"])
+          c (ticket "c" "open" ["t"])]
+      (is (= ["a" "b" "c"] (mapv #(get-in % [:frontmatter :id])
+                                 (query/blocking [a b c] "t")))))))
+
+(deftest children-test
+  (testing "children returns tickets whose :parent is id"
+    (let [p {:frontmatter {:id "p" :status "open"}}
+          c1 {:frontmatter {:id "c1" :status "open" :parent "p"}}
+          c2 {:frontmatter {:id "c2" :status "open" :parent "p"}}
+          o  {:frontmatter {:id "o" :status "open" :parent "other"}}]
+      (is (= ["c1" "c2"] (mapv #(get-in % [:frontmatter :id])
+                               (query/children [p c1 c2 o] "p"))))))
+
+  (testing "children returns empty when no ticket has the parent"
+    (let [a {:frontmatter {:id "a" :status "open"}}]
+      (is (empty? (query/children [a] "p")))))
+
+  (testing "children is nil-safe on tickets without :parent"
+    (let [a {:frontmatter {:id "a" :status "open"}}
+          b {:frontmatter {:id "b" :status "open" :parent "p"}}]
+      (is (= ["b"] (mapv #(get-in % [:frontmatter :id])
+                         (query/children [a b] "p"))))))
+
+  (testing "children preserves input order"
+    (let [c1 {:frontmatter {:id "c1" :status "open" :parent "p"}}
+          c2 {:frontmatter {:id "c2" :status "open" :parent "p"}}
+          c3 {:frontmatter {:id "c3" :status "open" :parent "p"}}]
+      (is (= ["c1" "c2" "c3"] (mapv #(get-in % [:frontmatter :id])
+                                    (query/children [c1 c2 c3] "p")))))))

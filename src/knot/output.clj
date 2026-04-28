@@ -5,12 +5,59 @@
             [clojure.string :as str]
             [knot.ticket :as ticket]))
 
+(defn- extract-title
+  "Return the H1 title from a markdown body (the first `# ...` line),
+   trimmed. Returns nil when no H1 is present."
+  [body]
+  (when body
+    (some (fn [line]
+            (let [m (re-matches #"#\s+(.*)" line)]
+              (when m (str/trim (second m)))))
+          (str/split-lines body))))
+
+(defn- inverse-line
+  "Format a single inverse entry as `- <id>  <title>` or
+   `- <id>  [missing]`."
+  [{:keys [id ticket missing?]}]
+  (str "- " id "  "
+       (cond
+         missing?  "[missing]"
+         :else     (or (extract-title (:body ticket)) ""))))
+
+(def ^:private inverse-section-order
+  "Canonical render order: Blockers, Blocking, Children, Linked."
+  [[:blockers "## Blockers"]
+   [:blocking "## Blocking"]
+   [:children "## Children"]
+   [:linked   "## Linked"]])
+
+(defn- render-inverse-sections
+  "Build the trailing inverse-section markdown for `show-text`. Empty
+   sections are omitted; sections are separated by a blank line. Returns
+   `\"\"` when every section is empty."
+  [inverses]
+  (let [parts (for [[k header] inverse-section-order
+                    :let [entries (get inverses k)]
+                    :when (seq entries)]
+                (str header "\n\n"
+                     (str/join "\n" (map inverse-line entries))
+                     "\n"))]
+    (if (empty? parts)
+      ""
+      (str "\n" (str/join "\n" parts)))))
+
 (defn show-text
-  "Render a ticket map for the `show` command. Returns a string containing the
-   YAML frontmatter and the markdown body. Computed inverse sections are
-   deferred to a later slice."
-  [ticket]
-  (ticket/render ticket))
+  "Render a ticket map for the `show` command. Returns a string containing
+   the YAML frontmatter, the markdown body, and (when supplied) the four
+   computed inverse sections — `## Blockers`, `## Blocking`, `## Children`,
+   `## Linked` — appended after the body. Each inverse entry is
+   `{:id ... :ticket <full-ticket>}` for a resolved ref or
+   `{:id ... :missing? true}` for a broken one. Empty sections are omitted."
+  ([ticket]
+   (ticket/render ticket))
+  ([ticket inverses]
+   (str (ticket/render ticket)
+        (render-inverse-sections inverses))))
 
 (def ^:private ansi-codes
   "Map of friendly names to ANSI SGR parameters (numbers as strings)."
@@ -61,11 +108,36 @@
   (cond-> frontmatter
     include-body? (assoc :body body)))
 
+(defn- jsonify-inverse-entry
+  "Project an inverse-section entry into the JSON shape: resolved entries
+   carry `{id, title, status}`; missing entries carry `{id, missing:true}`."
+  [{:keys [id ticket missing?]}]
+  (if missing?
+    {:id id :missing true}
+    {:id     id
+     :title  (or (extract-title (:body ticket)) "")
+     :status (get-in ticket [:frontmatter :status])}))
+
+(defn- inverses->json-fields
+  [inverses]
+  (when inverses
+    {:blockers (mapv jsonify-inverse-entry (:blockers inverses))
+     :blocking (mapv jsonify-inverse-entry (:blocking inverses))
+     :children (mapv jsonify-inverse-entry (:children inverses))
+     :linked   (mapv jsonify-inverse-entry (:linked   inverses))}))
+
 (defn show-json
   "Render a ticket map as a bare JSON object. Keys are snake_case; no
-   envelope is added around the object."
-  [ticket]
-  (json/generate-string (jsonify-ticket ticket {:include-body? true})))
+   envelope is added around the object. With `inverses`, adds top-level
+   `blockers`, `blocking`, `children`, `linked` arrays whose entries are
+   `{id, title, status}` for resolved refs or `{id, missing:true}` for
+   broken ones."
+  ([ticket]
+   (json/generate-string (jsonify-ticket ticket {:include-body? true})))
+  ([ticket inverses]
+   (json/generate-string
+    (merge (jsonify-ticket ticket {:include-body? true})
+           (inverses->json-fields inverses)))))
 
 (defn ls-json
   "Render a sequence of ticket maps as a bare JSON array of objects.
@@ -98,16 +170,6 @@
 
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
-
-(defn- extract-title
-  "Return the H1 title from a markdown body (the first `# ...` line),
-   trimmed. Returns nil when no H1 is present."
-  [body]
-  (when body
-    (some (fn [line]
-            (let [m (re-matches #"#\s+(.*)" line)]
-              (when m (str/trim (second m)))))
-          (str/split-lines body))))
 
 (defn- value-of
   "Plain string for a single ls cell — no padding, no color."

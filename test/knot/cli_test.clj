@@ -288,6 +288,86 @@
         (is (str/includes? out "kno-ghost")
             "raw :deps field including the broken id is in show output")))))
 
+(deftest show-cmd-inverses-test
+  (testing "show text includes ## Blockers when this ticket has :deps"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id a-id}))]
+        (is (str/includes? out "## Blockers"))
+        (is (str/includes? out (str "- " b-id "  Beta"))))))
+
+  (testing "show text includes ## Blocking on the dep target"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id b-id}))]
+        (is (str/includes? out "## Blocking"))
+        (is (str/includes? out (str "- " a-id "  Alpha"))))))
+
+  (testing "show text includes ## Children when other tickets parent into this"
+    (with-tmp tmp
+      (let [p (cli/create-cmd (ctx tmp) {:title "Parent"})
+            p-id (id-of-created p "parent")
+            c (cli/create-cmd (ctx tmp) {:title "Child" :parent p-id})
+            c-id (id-of-created c "child")
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id p-id}))]
+        (is (str/includes? out "## Children"))
+        (is (str/includes? out (str "- " c-id "  Child"))))))
+
+  (testing "computed sections are omitted when empty"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Solo"})
+            a-id (id-of-created a "solo")
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id a-id}))]
+        (is (not (str/includes? out "## Blockers")))
+        (is (not (str/includes? out "## Blocking")))
+        (is (not (str/includes? out "## Children")))
+        (is (not (str/includes? out "## Linked"))))))
+
+  (testing "broken :deps refs render with [missing] in the Blockers section"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id (id-of-created a "alpha")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to "kno-ghost"})
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id a-id}))]
+        (is (str/includes? out "## Blockers"))
+        (is (str/includes? out "- kno-ghost  [missing]")))))
+
+  (testing "show --json includes blockers/blocking/children/linked top-level fields"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id (id-of-created a "alpha")
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id a-id :json? true}))]
+        (is (str/includes? out "\"blockers\":[]"))
+        (is (str/includes? out "\"blocking\":[]"))
+        (is (str/includes? out "\"children\":[]"))
+        (is (str/includes? out "\"linked\":[]")))))
+
+  (testing "show --json populates the inverse fields with resolved entries"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (binding [*err* (java.io.StringWriter.)]
+                   (cli/show-cmd (ctx tmp) {:id a-id :json? true}))]
+        (is (str/includes? out (str "\"id\":\"" b-id "\"")))
+        (is (str/includes? out "\"title\":\"Beta\""))))))
+
 (deftest status-cmd-test
   (testing "status-cmd transitions a ticket to the given status"
     (with-tmp tmp
@@ -751,6 +831,157 @@
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
             err  (with-err-str (cli/dep-tree-cmd (ctx tmp) {:id a-id}))]
         (is (= "" err))))))
+
+(deftest link-cmd-test
+  (testing "link-cmd writes a symmetric pair: each id appears in the other's :links"
+    (with-tmp tmp
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b-path (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id   (id-of-created a-path "alpha")
+            b-id   (id-of-created b-path "beta")
+            _      (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            la     (store/load-one tmp ".tickets" a-id)
+            lb     (store/load-one tmp ".tickets" b-id)]
+        (is (= [b-id] (vec (get-in la [:frontmatter :links]))))
+        (is (= [a-id] (vec (get-in lb [:frontmatter :links])))))))
+
+  (testing "link-cmd with three ids creates symmetric links across every pair"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id c-id]})
+            la   (store/load-one tmp ".tickets" a-id)
+            lb   (store/load-one tmp ".tickets" b-id)
+            lc   (store/load-one tmp ".tickets" c-id)]
+        (is (= #{b-id c-id} (set (get-in la [:frontmatter :links]))))
+        (is (= #{a-id c-id} (set (get-in lb [:frontmatter :links]))))
+        (is (= #{a-id b-id} (set (get-in lc [:frontmatter :links])))))))
+
+  (testing "link-cmd is idempotent: relinking does not duplicate"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            la   (store/load-one tmp ".tickets" a-id)
+            lb   (store/load-one tmp ".tickets" b-id)]
+        (is (= [b-id] (vec (get-in la [:frontmatter :links]))))
+        (is (= [a-id] (vec (get-in lb [:frontmatter :links]))))
+        (is (= 1 (count (get-in la [:frontmatter :links])))
+            "no duplicate entries on relink"))))
+
+  (testing "link-cmd refuses fewer than two ids"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (thrown-with-msg? Exception #"two or more"
+            (cli/link-cmd (ctx tmp) {:ids ["only-one"]})))
+      (is (thrown-with-msg? Exception #"two or more"
+            (cli/link-cmd (ctx tmp) {:ids []})))))
+
+  (testing "link-cmd returns a vector of all saved paths (one per ticket)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            paths (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})]
+        (is (vector? paths))
+        (is (= 2 (count paths)))
+        (is (every? #(str/ends-with? % ".md") paths)))))
+
+  (testing "link-cmd preserves links across additional sessions (stable order)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id c-id]})
+            la   (store/load-one tmp ".tickets" a-id)]
+        (is (= [b-id c-id] (vec (get-in la [:frontmatter :links])))
+            "subsequent links append; no reorder"))))
+
+  (testing "link-cmd raises a clear error when an id does not resolve"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id (id-of-created a "alpha")]
+        (is (thrown-with-msg? Exception #"kno-ghost"
+              (cli/link-cmd (ctx tmp) {:ids [a-id "kno-ghost"]})))))))
+
+(deftest unlink-cmd-test
+  (testing "unlink-cmd removes the link from both files"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/link-cmd   (ctx tmp) {:ids [a-id b-id]})
+            _    (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id})
+            la   (store/load-one tmp ".tickets" a-id)
+            lb   (store/load-one tmp ".tickets" b-id)]
+        (is (not (contains? (:frontmatter la) :links))
+            "removing the only link should drop :links from a")
+        (is (not (contains? (:frontmatter lb) :links))
+            "removing the only link should drop :links from b"))))
+
+  (testing "unlink-cmd preserves other links across the symmetric removal"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            ;; a↔b, a↔c, b↔c after link a b c
+            _    (cli/link-cmd   (ctx tmp) {:ids [a-id b-id c-id]})
+            _    (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id})
+            la   (store/load-one tmp ".tickets" a-id)
+            lb   (store/load-one tmp ".tickets" b-id)
+            lc   (store/load-one tmp ".tickets" c-id)]
+        (is (= [c-id] (vec (get-in la [:frontmatter :links])))
+            "a-c link survives the a-b removal")
+        (is (= [c-id] (vec (get-in lb [:frontmatter :links])))
+            "b-c link survives the a-b removal")
+        (is (= #{a-id b-id} (set (get-in lc [:frontmatter :links])))
+            "c is unaffected by the a-b removal"))))
+
+  (testing "unlink-cmd is idempotent: removing a non-existent link is a no-op"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            ;; never linked; unlink should be a clean no-op
+            _    (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id})
+            la   (store/load-one tmp ".tickets" a-id)
+            lb   (store/load-one tmp ".tickets" b-id)]
+        (is (not (contains? (:frontmatter la) :links)))
+        (is (not (contains? (:frontmatter lb) :links))))))
+
+  (testing "unlink-cmd raises a clear error when from does not resolve"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (thrown-with-msg? Exception #"kno-ghost"
+            (cli/unlink-cmd (ctx tmp) {:from "kno-ghost" :to "kno-other"})))))
+
+  (testing "unlink-cmd returns a vector of saved paths"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            paths (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id})]
+        (is (vector? paths))
+        (is (= 2 (count paths)))))))
 
 (deftest load-config-malformed-edn-test
   (testing "malformed EDN error includes the file path for context"

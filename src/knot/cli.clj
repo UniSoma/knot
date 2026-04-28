@@ -115,18 +115,21 @@
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. With `:json? true`, returns a bare JSON
-   object instead. Returns nil when no matching ticket exists. Broken
+   object instead. Returns nil when no matching ticket exists. Output
+   includes the four computed inverse sections — Blockers, Blocking,
+   Children, Linked — for both human and JSON modes. Broken
    `:deps`/`:parent` references emit one stderr warning each — they
    never abort the command."
   [ctx opts]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
         loaded (store/load-one project-root tickets-dir (:id opts))]
     (when loaded
-      (warn-broken-refs! loaded
-                         (store/load-all project-root tickets-dir))
-      (if (:json? opts)
-        (output/show-json loaded)
-        (output/show-text loaded)))))
+      (let [all       (store/load-all project-root tickets-dir)
+            inverses* (query/inverses loaded all)]
+        (warn-broken-refs! loaded all)
+        (if (:json? opts)
+          (output/show-json loaded inverses*)
+          (output/show-text loaded inverses*))))))
 
 (defn- first-terminal-status
   "Return the first status from `statuses` that is also in `terminal-statuses`,
@@ -222,6 +225,86 @@
             ticket*  (assoc loaded :frontmatter new-fm)]
         (store/save! project-root tickets-dir from nil ticket*
                      {:now now :terminal-statuses terminal-statuses})))))
+
+(defn- add-link
+  "Add `other` to `ticket`'s `:links`, idempotent. Returns the updated
+   ticket; nil-safe on missing `:links`."
+  [ticket other]
+  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))]
+    (if (some #{other} existing)
+      ticket
+      (assoc-in ticket [:frontmatter :links] (conj existing other)))))
+
+(defn link-cmd
+  "Create symmetric `:links` between every pair of ids in `(:ids opts)`.
+   Requires two or more ids. Each id must resolve to an existing ticket;
+   a missing id raises an `ex-info` naming it. Idempotent on each side
+   — re-linking is a no-op (no duplicate entries). Returns a vector of
+   the saved paths, one per modified ticket, in the order ids appear."
+  [ctx {:keys [ids]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)
+        ids* (vec ids)]
+    (when (< (count ids*) 2)
+      (throw (ex-info "link requires two or more ticket ids"
+                      {:ids ids*})))
+    (let [loaded (reduce
+                  (fn [acc id]
+                    (if-let [t (store/load-one project-root tickets-dir id)]
+                      (assoc acc id t)
+                      (throw (ex-info (str "no ticket matching " id)
+                                      {:id id}))))
+                  {}
+                  ids*)
+          updated (reduce
+                   (fn [acc id]
+                     (let [others (remove #{id} ids*)
+                           t      (reduce add-link (get acc id) others)]
+                       (assoc acc id t)))
+                   loaded
+                   ids*)]
+      (mapv (fn [id]
+              (store/save! project-root tickets-dir id nil
+                           (get updated id)
+                           {:now now :terminal-statuses terminal-statuses}))
+            ids*))))
+
+(defn- remove-link
+  "Remove `other` from `ticket`'s `:links`. When the resulting list is
+   empty, drop the `:links` key entirely (mirrors `undep-cmd`'s on-disk
+   cleanliness rule)."
+  [ticket other]
+  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))
+        kept     (vec (remove #{other} existing))]
+    (if (empty? kept)
+      (update ticket :frontmatter dissoc :links)
+      (assoc-in ticket [:frontmatter :links] kept))))
+
+(defn unlink-cmd
+  "Remove the symmetric link between `(:from opts)` and `(:to opts)`.
+   `from` must resolve to an existing ticket; a missing `from` raises
+   `ex-info`. A missing `to` is tolerated — the removal from `from`'s
+   `:links` still happens, and the (non-existent) other side is a no-op.
+   Idempotent: removing a non-present link is a clean no-op (still bumps
+   `:updated`). Returns a vector of saved paths (1 when only `from`
+   exists, 2 when both exist)."
+  [ctx {:keys [from to]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)
+        save-opts {:now now :terminal-statuses terminal-statuses}
+        from-t (store/load-one project-root tickets-dir from)]
+    (when-not from-t
+      (throw (ex-info (str "no ticket matching " from) {:id from})))
+    (let [to-t      (store/load-one project-root tickets-dir to)
+          from-saved (store/save! project-root tickets-dir from nil
+                                  (remove-link from-t to)
+                                  save-opts)]
+      (if to-t
+        [from-saved
+         (store/save! project-root tickets-dir to nil
+                      (remove-link to-t from)
+                      save-opts)]
+        [from-saved]))))
 
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.

@@ -407,15 +407,17 @@
 
         ;; the rejected edge must not have been written
         (let [shown-b (run-knot tmp "show" b-id)]
-          (is (not (str/includes? (:out shown-b) (str "- " a-id)))
-              "rejected dep must not be persisted"))
+          (is (not (str/includes? (:out shown-b) "## Blockers"))
+              "rejected dep must not be persisted (b has no :deps)")
+          (is (not (str/includes? (:out shown-b) "deps:"))
+              "b's frontmatter must not contain a :deps key"))
 
         ;; undep removes the edge
         (let [{:keys [exit]} (run-knot tmp "undep" a-id b-id)
               shown-a (run-knot tmp "show" a-id)]
           (is (zero? exit))
-          (is (not (str/includes? (:out shown-a) (str "- " b-id)))
-              "undep should drop the entry"))))))
+          (is (not (str/includes? (:out shown-a) "## Blockers"))
+              "undep should drop the only :deps entry"))))))
 
 (deftest dep-tree-end-to-end-test
   (testing "dep tree renders ASCII; --json emits a nested object"
@@ -480,6 +482,80 @@
         (is (zero? (:exit blocked)))
         (is (str/includes? (:out blocked) "Alpha task"))
         (is (not (str/includes? (:out blocked) "Beta task")))))))
+
+(deftest link-unlink-end-to-end-test
+  (testing "link writes symmetric :links to both files"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            {:keys [exit err]} (run-knot tmp "link" a-id b-id)]
+        (is (zero? exit) (str "link err=" err))
+        ;; show on either ticket should now expose the symmetric Linked section
+        (let [{a-out :out} (run-knot tmp "show" a-id)
+              {b-out :out} (run-knot tmp "show" b-id)]
+          (is (str/includes? a-out "## Linked"))
+          (is (str/includes? a-out (str "- " b-id "  Beta")))
+          (is (str/includes? b-out "## Linked"))
+          (is (str/includes? b-out (str "- " a-id "  Alpha")))))))
+
+  (testing "link a b c creates all three pairs in one shot"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            c-id (id-from-create-out (:out (run-knot tmp "create" "Gamma")) "gamma")
+            {:keys [exit]} (run-knot tmp "link" a-id b-id c-id)]
+        (is (zero? exit))
+        (let [{a-out :out} (run-knot tmp "show" a-id "--json")
+              {b-out :out} (run-knot tmp "show" b-id "--json")
+              {c-out :out} (run-knot tmp "show" c-id "--json")]
+          (is (str/includes? a-out (str "\"id\":\"" b-id "\"")))
+          (is (str/includes? a-out (str "\"id\":\"" c-id "\"")))
+          (is (str/includes? b-out (str "\"id\":\"" a-id "\"")))
+          (is (str/includes? b-out (str "\"id\":\"" c-id "\"")))
+          (is (str/includes? c-out (str "\"id\":\"" a-id "\"")))
+          (is (str/includes? c-out (str "\"id\":\"" b-id "\"")))))))
+
+  (testing "unlink removes the link from both files"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            _    (run-knot tmp "link"   a-id b-id)
+            {:keys [exit]} (run-knot tmp "unlink" a-id b-id)
+            {a-out :out} (run-knot tmp "show" a-id)
+            {b-out :out} (run-knot tmp "show" b-id)]
+        (is (zero? exit))
+        (is (not (str/includes? a-out "## Linked")))
+        (is (not (str/includes? b-out "## Linked"))))))
+
+  (testing "link too few args fails with a clear stderr message"
+    (with-tmp tmp
+      (let [_ (run-knot tmp "create" "Alpha")
+            {:keys [exit err]} (run-knot tmp "link" "kno-only-one")]
+        (is (= 1 exit))
+        (is (str/includes? err "two or more")))))
+
+  (testing "links survive archive transitions (closing one ticket leaves the other's link intact)"
+    ;; AC: links survive archive transitions because :links references IDs not paths
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            _    (run-knot tmp "link"  a-id b-id)
+            ;; close A — its file moves to .tickets/archive/
+            {close-exit :exit} (run-knot tmp "close" a-id)
+            archived-a (str (fs/path tmp ".tickets" "archive"))]
+        (is (zero? close-exit))
+        (is (some #(str/starts-with? (str (fs/file-name %)) a-id)
+                  (when (fs/directory? archived-a) (fs/list-dir archived-a)))
+            "A's file should now be in archive")
+        ;; B is still live — its :links reference to A must still resolve via load-all
+        (let [{b-out :out} (run-knot tmp "show" b-id)
+              {b-json :out} (run-knot tmp "show" b-id "--json")]
+          (is (str/includes? b-out "## Linked")
+              "B's Linked section still computed even though A is archived")
+          (is (str/includes? b-out (str "- " a-id "  Alpha"))
+              "B's Linked entry resolves the archived A's title")
+          (is (str/includes? b-json (str "\"id\":\"" a-id "\""))
+              "B's --json linked array still names the archived A"))))))
 
 (deftest broken-ref-warning-end-to-end-test
   (testing "show on a ticket with a broken :deps ref emits a stderr warning, exits 0"

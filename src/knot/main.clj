@@ -218,6 +218,34 @@
                            :color? color?})]
     (println-out out)))
 
+(defn- link-handler
+  "Run `knot link <a> <b> [<c> ...]`: requires at least two ids; writes
+   symmetric `:links` across every pair. Prints each saved path on its
+   own stdout line."
+  [argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+    (when (< (count args) 2)
+      (die "knot link: two or more ticket ids are required"))
+    (try
+      (doseq [path (cli/link-cmd (discover-ctx) {:ids (vec args)})]
+        (println-out (str path)))
+      (catch Exception e
+        (die (str "knot link: " (or (.getMessage e) (.toString e))))))))
+
+(defn- unlink-handler
+  "Run `knot unlink <from> <to>`: removes the symmetric link between the
+   two ids. Prints each saved path on its own stdout line."
+  [argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+    (when (< (count args) 2)
+      (die "knot unlink: <from> and <to> ids are required"))
+    (try
+      (doseq [path (cli/unlink-cmd (discover-ctx)
+                                   {:from (first args) :to (second args)})]
+        (println-out (str path)))
+      (catch Exception e
+        (die (str "knot unlink: " (or (.getMessage e) (.toString e))))))))
+
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
@@ -235,6 +263,8 @@
     (println "  undep  <from> <to>        Remove <to> from <from>'s :deps")
     (println "  dep tree <id> [--json]    Render the deps subtree (--full to expand dups)")
     (println "  dep cycle                 Scan open tickets for cycles (exit 1 if any)")
+    (println "  link   <a> <b> [<c>...]   Create symmetric :links across every pair")
+    (println "  unlink <a> <b>            Remove the symmetric link between two ids")
     (println "  ready          [--json]   List tickets whose deps are all closed")
     (println "  blocked        [--json]   List tickets with at least one open dep")))
 
@@ -252,6 +282,8 @@
         "reopen"  (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
         "dep"     (dep-handler rest-argv)
         "undep"   (edge-handler "undep" cli/undep-cmd rest-argv)
+        "link"    (link-handler   rest-argv)
+        "unlink"  (unlink-handler rest-argv)
         "ready"   (list-handler cli/ready-cmd   rest-argv)
         "blocked" (list-handler cli/blocked-cmd rest-argv)
         nil      (do (usage) (System/exit 1))

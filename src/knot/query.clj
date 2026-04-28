@@ -134,6 +134,58 @@
          (sort compare-ready-order)
          vec)))
 
+(defn blocking
+  "Return tickets whose `:deps` contains `id` — i.e. the tickets that the
+   ticket with `id` is blocking. Preserves input order. Tickets without
+   `:deps` are skipped (nil-safe)."
+  [tickets id]
+  (filter (fn [t] (some #{id} (or (get-in t [:frontmatter :deps]) [])))
+          tickets))
+
+(defn children
+  "Return tickets whose `:parent` equals `id`. Preserves input order.
+   Tickets without `:parent` are skipped (nil-safe)."
+  [tickets id]
+  (filter (fn [t] (= id (get-in t [:frontmatter :parent])))
+          tickets))
+
+(defn- resolve-ref-list
+  "Map a sequence of ids to inverse-section entries: `{:id ... :ticket ...}`
+   for known ids, `{:id ... :missing? true}` for unknown ones. Preserves
+   input order."
+  [ids index]
+  (mapv (fn [id]
+          (if-let [t (get index id)]
+            {:id id :ticket t}
+            {:id id :missing? true}))
+        ids))
+
+(defn- ticket->entry
+  "Project a full ticket into the resolved-ref entry shape used by inverse
+   sections."
+  [t]
+  {:id (get-in t [:frontmatter :id]) :ticket t})
+
+(defn inverses
+  "Compute the four inverse sections for `ticket` against `tickets`:
+     :blockers — entries built from `ticket`'s `:deps` ids
+     :blocking — entries for tickets that have `ticket`'s id in their `:deps`
+     :children — entries for tickets whose `:parent` is `ticket`'s id
+     :linked   — entries built from `ticket`'s `:links` ids
+   Each entry is `{:id ... :ticket <full-ticket>}` for resolved refs or
+   `{:id ... :missing? true}` for broken ones. `:blocking` and `:children`
+   come from query results so they can never be missing; `:blockers` and
+   `:linked` come from the source ticket's own ref lists and may include
+   missing entries."
+  [ticket tickets]
+  (let [index (index-by-id tickets)
+        fm    (:frontmatter ticket)
+        id    (:id fm)]
+    {:blockers (resolve-ref-list (or (:deps fm) []) index)
+     :blocking (mapv ticket->entry (blocking tickets id))
+     :children (mapv ticket->entry (children tickets id))
+     :linked   (resolve-ref-list (or (:links fm) []) index)}))
+
 (defn broken-refs
   "Return a vector of broken reference descriptors for `ticket` against
    the id-set defined by `tickets`. Each entry is `{:kind <:deps|:parent>
