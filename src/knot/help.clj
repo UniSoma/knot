@@ -74,7 +74,7 @@
                           (when note (str "\n    " note)))))
          "\n")))
 
-(defn- key->cmd-name
+(defn key->cmd-name
   "Convert a registry key like `:init` or `:dep/tree` into its display
    form `\"init\"` or `\"dep tree\"`."
   [k]
@@ -166,9 +166,9 @@
                   {:name :mode        :desc "Mode (afk|hitl)."}
                   {:name :afk  :coerce :boolean :desc "Shortcut for --mode afk."}
                   {:name :hitl :coerce :boolean :desc "Shortcut for --mode hitl."}
-                  {:name :description :alias :d :body? true :desc "## Description body section."}
-                  {:name :design      :body? true :desc "## Design body section."}
-                  {:name :acceptance  :body? true :desc "## Acceptance Criteria body section."}]
+                  {:name :description :alias :d :body? true :desc "Body content for the Description section."}
+                  {:name :design      :body? true :desc "Body content for the Design section."}
+                  {:name :acceptance  :body? true :desc "Body content for the Acceptance Criteria section."}]
     :examples    [{:cmd "knot create \"Fix login bug\" -p 1 --tags auth,p0"
                    :note "Create a ticket at priority 1 with two tags."}]}
 

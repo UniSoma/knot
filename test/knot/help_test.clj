@@ -411,6 +411,50 @@
       (is (zero? exit))
       (is (str/includes? out "knot create")))))
 
+(deftest body-flag-help-interaction-test
+  ;; help-requested? runs `extract-body-flags` first so that a literal
+  ;; `--help` inside a body value (`-d "--help"`, `--design --help`, etc.)
+  ;; does not trigger the help router. The assertions below verify the
+  ;; non-help fall-through path: with no title, create-handler dies with
+  ;; a "title is required" error on stderr — proving help routing did
+  ;; NOT fire (which would have printed USAGE to stdout and exited 0).
+  (testing "literal --help inside --description value does not trigger help"
+    (let [{:keys [exit out err]} (run-knot "create" "--description" "--help text")]
+      (is (= 1 exit) (str "expected create-handler fall-through, got exit=" exit))
+      (is (str/blank? out) (str "no help should print to stdout: " out))
+      (is (str/includes? err "title is required"))))
+
+  (testing "literal --help after the -d alias does not trigger help"
+    (let [{:keys [exit out err]} (run-knot "create" "-d" "--help text")]
+      (is (= 1 exit))
+      (is (str/blank? out))
+      (is (str/includes? err "title is required"))))
+
+  (testing "--design=--help (= form) does not trigger help"
+    (let [{:keys [exit out err]} (run-knot "create" "--design=--help")]
+      (is (= 1 exit))
+      (is (str/blank? out))
+      (is (str/includes? err "title is required")))))
+
+(deftest help-help-collapse-test
+  (testing "knot help help is treated as bare top-level help (exit 0, USAGE)"
+    (let [{:keys [exit out err]} (run-knot "help" "help")]
+      (is (zero? exit) (str "expected exit 0; err=" err))
+      (is (str/includes? out "USAGE"))
+      (is (str/includes? out "Lifecycle"))
+      (is (str/blank? err))))
+
+  (testing "knot --help -h collapses leading help tokens to top-level help"
+    (let [{:keys [exit out]} (run-knot "--help" "-h")]
+      (is (zero? exit))
+      (is (str/includes? out "USAGE"))))
+
+  (testing "knot help help create still resolves to per-command help"
+    (let [{:keys [exit out]} (run-knot "help" "help" "create")]
+      (is (zero? exit))
+      (is (str/includes? out "knot create"))
+      (is (str/includes? out "FLAGS")))))
+
 (deftest help-error-paths-test
   (testing "knot help bogus → stderr error, exit 1"
     (let [{:keys [exit out err]} (run-knot "help" "bogus")]

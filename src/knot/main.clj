@@ -452,14 +452,6 @@
   (println-out (help/top-level-help-text help/registry
                                          {:color? (color-enabled-on-stdout?)})))
 
-(defn- key->cmd-name
-  "Convert a registry key like `:init` or `:dep/tree` to its display
-   form `\"init\"` / `\"dep tree\"`."
-  [k]
-  (if-let [parent (namespace k)]
-    (str parent " " (name k))
-    (name k)))
-
 (defn- resolve-cmd-key
   "Look at the first one or two non-flag tokens of `argv` and return the
    matching registry key, preferring the two-token form when both match.
@@ -471,7 +463,7 @@
       (and a   (contains? help/registry (keyword a)))   (keyword a))))
 
 (defn- print-command-help [k]
-  (println-out (help/command-help-text (key->cmd-name k)
+  (println-out (help/command-help-text (help/key->cmd-name k)
                                        (get help/registry k)
                                        {:color?   (color-enabled-on-stdout?)
                                         :registry help/registry})))
@@ -486,20 +478,21 @@
 (defn -main [& argv]
   (try
     (let [[cmd & rest-argv] argv]
-      ;; Top-level help: `knot --help`, `knot -h`, `knot help` — only when
-      ;; there are no further args. With trailing args, the next branch
-      ;; treats the remainder as a per-command help target.
-      (when (and (#{"--help" "-h" "help"} cmd) (empty? rest-argv))
-        (print-top-level-help)
-        (System/exit 0))
+      ;; Top-level / per-command help. `knot help`, `knot --help`, `knot -h`
+      ;; (alone or chained with other help tokens like `knot help help`,
+      ;; `knot --help -h`) all collapse to top-level help. With a trailing
+      ;; non-help token, the remainder is resolved as a per-command help
+      ;; target. Unknown target → stderr, exit 1.
+      (when (#{"--help" "-h" "help"} cmd)
+        (let [tail (drop-while #{"help" "--help" "-h"} rest-argv)]
+          (cond
+            (empty? tail)
+            (do (print-top-level-help) (System/exit 0))
 
-      ;; `knot help <cmd...>` / `knot --help <cmd...>` / `knot -h <cmd...>`:
-      ;; resolve the trailing tokens against the registry and render that
-      ;; command's per-command help. Unknown target → stderr, exit 1.
-      (when (or (#{"--help" "-h"} cmd) (= "help" cmd))
-        (if-let [k (resolve-cmd-key rest-argv)]
-          (do (print-command-help k) (System/exit 0))
-          (die (str "knot help: unknown command: " (str/join " " rest-argv)))))
+            :else
+            (if-let [k (resolve-cmd-key tail)]
+              (do (print-command-help k) (System/exit 0))
+              (die (str "knot help: unknown command: " (str/join " " tail)))))))
 
       ;; Per-command `--help` / `-h` anywhere in argv: pre-scan after
       ;; extracting body flags so a literal `--help` inside a body value

@@ -1,11 +1,12 @@
 ---
 id: kno-01kqaw5aqxm1
-status: open
+status: closed
 type: feature
 priority: 2
 mode: hitl
 created: '2026-04-28T20:23:18.013529700Z'
-updated: '2026-04-28T20:23:18.013529700Z'
+updated: '2026-04-28T23:32:52.637736467Z'
+closed: '2026-04-28T23:32:52.637736467Z'
 ---
 
 # Structured help system with per-command --help support
@@ -42,3 +43,9 @@ Help is rendered as plain text with no ANSI escapes when stdout is piped, matchi
 - [ ] knot help unknown-cmd exits 1 with a clear stderr error
 - [ ] Integration tests cover: --help at root, --help on at least two subcommands (create + dep tree), and the unknown-help-target error path
 - [ ] Help output contains no ANSI escapes when stdout is piped
+
+## Notes
+
+**2026-04-28T23:32:52.637736467Z**
+
+Structured help system shipped: data-driven registry in src/knot/help.clj is single source of truth for parser spec + display; routing in main.clj handles --help/-h/help at root, knot help <cmd>, and <cmd> --help/-h with stdout/stderr discipline. All 9 acceptance criteria met. Code review (against base f3e88d6) flagged minor polish items only — folded in: (1) collapsed knot help help / chained help tokens to top-level help, (2) deduped key->cmd-name (now public on knot.help), (3) reworded body-flag :desc strings to drop the literal '##' prefix, (4) added regression test that --help inside a body value does not trigger help routing. Final test suite: 161 tests, 1456 assertions, 0 failures.
