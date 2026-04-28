@@ -358,3 +358,84 @@
           c3 {:frontmatter {:id "c3" :status "open" :parent "p"}}]
       (is (= ["c1" "c2" "c3"] (mapv #(get-in % [:frontmatter :id])
                                     (query/children [c1 c2 c3] "p")))))))
+
+(defn- ft
+  "Compact ticket constructor for filter tests."
+  [id & {:as fm}]
+  {:frontmatter (merge {:id id} fm)})
+
+(deftest filter-tickets-test
+  (testing "nil/empty criteria returns input unchanged (preserves order)"
+    (let [ts [(ft "a" :status "open")
+              (ft "b" :status "closed")]]
+      (is (= ts (query/filter-tickets ts nil)))
+      (is (= ts (query/filter-tickets ts {})))))
+
+  (testing ":status criteria filters by ticket status (set semantics)"
+    (let [ts [(ft "a" :status "open")
+              (ft "b" :status "in_progress")
+              (ft "c" :status "closed")]]
+      (is (= ["a"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:status #{"open"}}))))
+      (is (= ["a" "b"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:status #{"open" "in_progress"}}))))))
+
+  (testing ":mode criteria filters by ticket mode"
+    (let [ts [(ft "a" :mode "afk")
+              (ft "b" :mode "hitl")
+              (ft "c" :mode "afk")]]
+      (is (= ["a" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:mode #{"afk"}}))))))
+
+  (testing ":assignee criteria filters by ticket assignee"
+    (let [ts [(ft "a" :assignee "alice")
+              (ft "b" :assignee "bob")
+              (ft "c" :assignee "alice")]]
+      (is (= ["a" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:assignee #{"alice"}}))))))
+
+  (testing ":type criteria filters by ticket type"
+    (let [ts [(ft "a" :type "bug")
+              (ft "b" :type "feature")
+              (ft "c" :type "bug")]]
+      (is (= ["a" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:type #{"bug"}}))))))
+
+  (testing ":tag criteria matches when any tag overlaps"
+    (let [ts [(ft "a" :tags ["urgent" "backend"])
+              (ft "b" :tags ["frontend"])
+              (ft "c" :tags ["urgent"])
+              (ft "d")]]
+      (is (= ["a" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:tag #{"urgent"}}))))
+      (is (= ["a" "b" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:tag #{"urgent" "frontend"}}))))))
+
+  (testing "multiple criteria keys AND together"
+    (let [ts [(ft "a" :status "open" :mode "afk")
+              (ft "b" :status "open" :mode "hitl")
+              (ft "c" :status "in_progress" :mode "afk")]]
+      (is (= ["a"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:status #{"open"}
+                                             :mode   #{"afk"}}))))))
+
+  (testing "criteria with empty set is ignored (treated as no filter)"
+    (let [ts [(ft "a" :status "open")
+              (ft "b" :status "closed")]]
+      (is (= ts (query/filter-tickets ts {:status #{}})))))
+
+  (testing "filter preserves input order"
+    (let [ts [(ft "z" :mode "afk")
+              (ft "y" :mode "afk")
+              (ft "x" :mode "afk")]]
+      (is (= ["z" "y" "x"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:mode #{"afk"}})))))))

@@ -354,6 +354,35 @@
                            ":default-priority")
             "stub should be back after --force")))))
 
+(deftest create-mode-flags-end-to-end-test
+  (testing "--afk is sugar for --mode afk"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Afk job" "--afk")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "mode: afk"))))))
+
+  (testing "--hitl is sugar for --mode hitl"
+    (with-tmp tmp
+      ;; Use a config with default-mode "afk" so --hitl actually changes
+      ;; the result and can't pass by accident on the global default.
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:default-mode "afk"}))
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Hitl job" "--hitl")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "mode: hitl"))))))
+
+  (testing "explicit --mode wins over inferred --afk/--hitl shortcut"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "Mixed" "--afk" "--mode" "hitl")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "mode: hitl")
+              "explicit --mode hitl should override --afk shortcut"))))))
+
 (deftest config-flows-into-create-test
   (testing ".knot.edn :default-type and :default-priority show up in created tickets"
     (with-tmp tmp
@@ -497,6 +526,103 @@
         (is (zero? (:exit blocked)))
         (is (str/includes? (:out blocked) "Alpha task"))
         (is (not (str/includes? (:out blocked) "Beta task")))))))
+
+(deftest ls-filter-flags-end-to-end-test
+  (testing "ls --mode afk filters out hitl tickets"
+    (with-tmp tmp
+      (run-knot tmp "create" "Afk job"  "--afk")
+      (run-knot tmp "create" "Hitl job" "--hitl")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--mode" "afk")]
+        (is (zero? exit) (str "ls err=" err))
+        (is (str/includes? out "Afk job"))
+        (is (not (str/includes? out "Hitl job"))))))
+
+  (testing "ls --status open --mode afk ANDs the filters"
+    (with-tmp tmp
+      (run-knot tmp "create" "Afk open"  "--afk")
+      (run-knot tmp "create" "Hitl open" "--hitl")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--status" "open"
+                                              "--mode" "afk")]
+        (is (zero? exit) (str "ls err=" err))
+        (is (str/includes? out "Afk open"))
+        (is (not (str/includes? out "Hitl open"))))))
+
+  (testing "ls --type bug filters by type"
+    (with-tmp tmp
+      (run-knot tmp "create" "A bug"     "-t" "bug")
+      (run-knot tmp "create" "A feature" "-t" "feature")
+      (let [{:keys [out]} (run-knot tmp "ls" "--type" "bug")]
+        (is (str/includes? out "A bug"))
+        (is (not (str/includes? out "A feature"))))))
+
+  (testing "ls --status closed surfaces archived tickets"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live one")
+      (let [created (run-knot tmp "create" "Will close")
+            id      (id-from-create-out (:out created) "will-close")
+            _       (run-knot tmp "close" id)
+            {:keys [out]} (run-knot tmp "ls" "--status" "closed")]
+        (is (str/includes? out "Will close"))
+        (is (not (str/includes? out "Live one")))))))
+
+(deftest ready-mode-filter-end-to-end-test
+  (testing "ready --mode afk hides hitl tickets even when ready"
+    (with-tmp tmp
+      (run-knot tmp "create" "Afk job"  "--afk")
+      (run-knot tmp "create" "Hitl job" "--hitl")
+      (let [{:keys [exit out err]} (run-knot tmp "ready" "--mode" "afk")]
+        (is (zero? exit) (str "ready err=" err))
+        (is (str/includes? out "Afk job"))
+        (is (not (str/includes? out "Hitl job"))))))
+
+  (testing "ready --mode afk --limit caps after filtering"
+    (with-tmp tmp
+      (run-knot tmp "create" "Hitl one"   "--hitl")
+      (run-knot tmp "create" "Hitl two"   "--hitl")
+      (run-knot tmp "create" "Afk one"    "--afk")
+      (run-knot tmp "create" "Afk two"    "--afk")
+      (run-knot tmp "create" "Afk three"  "--afk")
+      (let [{:keys [exit out]} (run-knot tmp "ready" "--mode" "afk"
+                                         "--limit" "2")
+            afk-hits  (count (re-seq #"Afk " out))
+            hitl-hits (count (re-seq #"Hitl " out))]
+        (is (zero? exit))
+        (is (= 2 afk-hits))
+        (is (zero? hitl-hits))))))
+
+(deftest closed-end-to-end-test
+  (testing "closed lists terminal tickets, closed --limit caps to newest"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta"))  "beta")
+            c-id (id-from-create-out (:out (run-knot tmp "create" "Gamma")) "gamma")
+            _    (run-knot tmp "close" a-id)
+            ;; Sleep a real wall-clock millisecond between closes — store/save!
+            ;; uses Instant/now when :now is not threaded in. The integration
+            ;; harness invokes a fresh JVM per command, so this is the only way
+            ;; to differentiate :closed timestamps.
+            _    (Thread/sleep 5)
+            _    (run-knot tmp "close" b-id)
+            _    (Thread/sleep 5)
+            _    (run-knot tmp "close" c-id)
+            {full :out :as full-result} (run-knot tmp "closed")
+            {capped :out} (run-knot tmp "closed" "--limit" "2")]
+        (is (zero? (:exit full-result)))
+        (is (str/includes? full "Alpha"))
+        (is (str/includes? full "Beta"))
+        (is (str/includes? full "Gamma"))
+        ;; --limit 2 keeps the two most-recently closed (Beta, Gamma)
+        (is (str/includes? capped "Gamma"))
+        (is (str/includes? capped "Beta"))
+        (is (not (str/includes? capped "Alpha"))))))
+
+  (testing "closed --json returns a bare JSON array"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            _    (run-knot tmp "close" a-id)
+            {:keys [out]} (run-knot tmp "closed" "--json")]
+        (is (str/starts-with? (str/trim out) "["))
+        (is (str/includes? out "\"status\":\"closed\""))))))
 
 (deftest link-unlink-end-to-end-test
   (testing "link writes symmetric :links to both files"

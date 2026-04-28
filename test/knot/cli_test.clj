@@ -5,7 +5,8 @@
             [knot.cli :as cli]
             [knot.config :as config]
             [knot.git :as git]
-            [knot.store :as store]))
+            [knot.store :as store]
+            [knot.ticket :as ticket]))
 
 (defmacro with-tmp [bind & body]
   `(let [tmp# (str (fs/create-temp-dir))
@@ -243,6 +244,68 @@
       (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "ID"))
         (is (str/includes? out "TITLE"))))))
+
+(deftest ls-cmd-filter-test
+  (testing "ls --mode afk filters out hitl tickets"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Afk task"  :mode "afk"})
+      (cli/create-cmd (ctx tmp) {:title "Hitl task" :mode "hitl"})
+      (let [out (cli/ls-cmd (ctx tmp)
+                            {:tty? false :color? false :mode #{"afk"}})]
+        (is (str/includes? out "Afk task"))
+        (is (not (str/includes? out "Hitl task"))))))
+
+  (testing "ls --type bug filters by type"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "A bug"     :type "bug"})
+      (cli/create-cmd (ctx tmp) {:title "A feature" :type "feature"})
+      (let [out (cli/ls-cmd (ctx tmp)
+                            {:tty? false :color? false :type #{"bug"}})]
+        (is (str/includes? out "A bug"))
+        (is (not (str/includes? out "A feature"))))))
+
+  (testing "ls --assignee filters by assignee"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "For alice" :assignee "alice"})
+      (cli/create-cmd (ctx tmp) {:title "For bob"   :assignee "bob"})
+      (let [out (cli/ls-cmd (ctx tmp)
+                            {:tty? false :color? false :assignee #{"alice"}})]
+        (is (str/includes? out "For alice"))
+        (is (not (str/includes? out "For bob"))))))
+
+  (testing "ls --tag filters by tag overlap"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Urgent one" :tags ["urgent"]})
+      (cli/create-cmd (ctx tmp) {:title "Other one"  :tags ["calm"]})
+      (let [out (cli/ls-cmd (ctx tmp)
+                            {:tty? false :color? false :tag #{"urgent"}})]
+        (is (str/includes? out "Urgent one"))
+        (is (not (str/includes? out "Other one"))))))
+
+  (testing "ls --status open --mode afk ANDs the filters"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Afk open"  :mode "afk"})
+            b (cli/create-cmd (ctx tmp) {:title "Hitl open" :mode "hitl"})
+            _ b
+            _ a
+            out (cli/ls-cmd (ctx tmp)
+                            {:tty? false :color? false
+                             :status #{"open"} :mode #{"afk"}})]
+        (is (str/includes? out "Afk open"))
+        (is (not (str/includes? out "Hitl open"))))))
+
+  (testing "ls --status closed surfaces terminal tickets (overrides default live filter)"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Live one"})
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "Will close"})
+            a-id   (->> (fs/file-name a-path)
+                        (re-matches #"(.+)--will-close\.md")
+                        second)
+            _      (cli/close-cmd (ctx tmp) {:id a-id})
+            out    (cli/ls-cmd (ctx tmp)
+                               {:tty? false :color? false :status #{"closed"}})]
+        (is (str/includes? out "Will close"))
+        (is (not (str/includes? out "Live one")))))))
 
 (defn- id-of-created [path slug-pat]
   (->> (fs/file-name path)
@@ -775,7 +838,187 @@
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (let [out (cli/ready-cmd (ctx tmp) {:json? true})]
         (is (str/starts-with? out "["))
-        (is (str/includes? out "\"status\":\"open\""))))))
+        (is (str/includes? out "\"status\":\"open\"")))))
+
+  (testing "ready-cmd --mode afk excludes hitl tickets"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Afk job"  :mode "afk"})
+      (cli/create-cmd (ctx tmp) {:title "Hitl job" :mode "hitl"})
+      (let [out (cli/ready-cmd (ctx tmp)
+                               {:tty? false :color? false :mode #{"afk"}})]
+        (is (str/includes? out "Afk job"))
+        (is (not (str/includes? out "Hitl job"))))))
+
+  (testing "ready-cmd applies :mode filter BEFORE :limit truncation"
+    ;; Three afk + three hitl tickets, all ready (no deps).
+    ;; --limit 2 with --mode afk must return up to 2 *afk* tickets,
+    ;; not 2 from the unfiltered ready set (which would have included hitl).
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Hitl one"   :mode "hitl"})
+      (cli/create-cmd (ctx tmp) {:title "Hitl two"   :mode "hitl"})
+      (cli/create-cmd (ctx tmp) {:title "Hitl three" :mode "hitl"})
+      (cli/create-cmd (ctx tmp) {:title "Afk one"    :mode "afk"})
+      (cli/create-cmd (ctx tmp) {:title "Afk two"    :mode "afk"})
+      (cli/create-cmd (ctx tmp) {:title "Afk three"  :mode "afk"})
+      (let [out (cli/ready-cmd (ctx tmp)
+                               {:tty? false :color? false
+                                :mode #{"afk"} :limit 2})
+            afk-hits (count (re-seq #"Afk " out))
+            hitl-hits (count (re-seq #"Hitl " out))]
+        (is (= 2 afk-hits)
+            "exactly two afk rows after limit applied to afk-only ready set")
+        (is (zero? hitl-hits)
+            "no hitl rows leak through when --mode afk is set"))))
+
+  (testing "ready-cmd --limit without :mode caps the unfiltered ready set"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Job alpha"})
+      (cli/create-cmd (ctx tmp) {:title "Job beta"})
+      (cli/create-cmd (ctx tmp) {:title "Job gamma"})
+      (let [out (cli/ready-cmd (ctx tmp)
+                               {:tty? false :color? false :limit 2})
+            hits (count (re-seq #"Job " out))]
+        (is (= 2 hits))))))
+
+(deftest freeform-body-round-trip-test
+  (testing "freeform body sections survive save! → load → save! unchanged"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Bug"})
+            id     (->> (fs/file-name path)
+                        (re-matches #"(.+)--bug\.md")
+                        second)
+            ;; replace body with freeform sections that knot does NOT
+            ;; produce by default; their survival proves there is no
+            ;; section enforcement.
+            custom "# Bug
+
+## Reproduction Steps
+
+1. Click foo
+2. Observe bar
+
+## Expected vs Actual
+
+Expected: green
+Actual: red
+
+## Workaround
+
+Restart the daemon.
+"
+            loaded (store/load-one tmp ".tickets" id)
+            ticket {:frontmatter (:frontmatter loaded) :body custom}
+            _      (store/save! tmp ".tickets" id nil ticket
+                                {:now "2026-04-28T11:00:00Z"
+                                 :terminal-statuses #{"closed"}})
+            re-loaded (store/load-one tmp ".tickets" id)]
+        (is (= custom (:body re-loaded))
+            "custom freeform sections preserved verbatim across save/load"))))
+
+  (testing "edit-cmd preserves freeform sections (no enforcement on reload)"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Bug"})
+            id     (->> (fs/file-name path)
+                        (re-matches #"(.+)--bug\.md")
+                        second)
+            custom "# Bug\n\n## Reproduction Steps\n\nstep 1\nstep 2\n"
+            ;; simulate an editor session by rewriting the on-disk file
+            edit-fn (fn [p]
+                      (let [existing (slurp p)
+                            parsed   (ticket/parse existing)
+                            edited   (assoc parsed :body custom)]
+                        (spit p (ticket/render edited))))
+            _      (cli/edit-cmd (ctx tmp) {:id id :editor-fn edit-fn})
+            after  (store/load-one tmp ".tickets" id)]
+        (is (= custom (:body after))
+            "edit-cmd reload+resave does not strip custom body sections")))))
+
+(deftest closed-cmd-test
+  (testing "closed-cmd returns terminal-status tickets sorted by :closed desc"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Alpha"})
+            b (cli/create-cmd c {:title "Beta"})
+            d (cli/create-cmd c {:title "Gamma"})
+            _ a _ b _ d
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            d-id (id-of-created d "gamma")
+            ;; close each at a distinct timestamp; gamma closed last → first
+            _    (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z") {:id a-id})
+            _    (cli/close-cmd (assoc c :now "2026-04-28T12:00:00Z") {:id b-id})
+            _    (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id d-id})
+            out  (cli/closed-cmd c {:tty? false :color? false})
+            ;; Beta is alphabetically before alpha and gamma — title order
+            ;; can't accidentally produce the right ordering, so the order
+            ;; of titles in the rendered table proves the :closed sort.
+            ai   (str/index-of out "Alpha")
+            bi   (str/index-of out "Beta")
+            gi   (str/index-of out "Gamma")]
+        (is (and ai bi gi) "all three closed tickets present")
+        (is (< gi bi ai)
+            "rows ordered Gamma → Beta → Alpha by :closed desc"))))
+
+  (testing "closed-cmd with :limit caps result count, taking newest first"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Alpha"})
+            b (cli/create-cmd c {:title "Beta"})
+            d (cli/create-cmd c {:title "Gamma"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            d-id (id-of-created d "gamma")
+            _    (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z") {:id a-id})
+            _    (cli/close-cmd (assoc c :now "2026-04-28T12:00:00Z") {:id b-id})
+            _    (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id d-id})
+            out  (cli/closed-cmd c {:tty? false :color? false :limit 2})]
+        (is (str/includes? out "Gamma") "newest closed kept")
+        (is (str/includes? out "Beta")  "second-newest kept")
+        (is (not (str/includes? out "Alpha"))
+            "oldest closed dropped beyond --limit"))))
+
+  (testing "closed-cmd without :limit returns every closed ticket"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Alpha"})
+            b (cli/create-cmd c {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/close-cmd c {:id a-id})
+            _    (cli/close-cmd c {:id b-id})
+            out  (cli/closed-cmd c {:tty? false :color? false})]
+        (is (str/includes? out "Alpha"))
+        (is (str/includes? out "Beta")))))
+
+  (testing "closed-cmd excludes live tickets"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Live one"})
+            b (cli/create-cmd c {:title "Will close"})
+            _ a
+            b-id (id-of-created b "will-close")
+            _    (cli/close-cmd c {:id b-id})
+            out  (cli/closed-cmd c {:tty? false :color? false})]
+        (is (str/includes? out "Will close"))
+        (is (not (str/includes? out "Live one"))))))
+
+  (testing "closed-cmd with :json? true returns a bare JSON array"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Alpha"})
+            a-id (id-of-created a "alpha")
+            _    (cli/close-cmd c {:id a-id})
+            out  (cli/closed-cmd c {:json? true})]
+        (is (str/starts-with? out "["))
+        (is (str/includes? out "\"status\":\"closed\"")))))
+
+  (testing "closed-cmd returns an empty-table (header only) when none closed"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (cli/create-cmd (ctx tmp) {:title "Live"})
+      (let [out (cli/closed-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "ID"))
+        (is (not (str/includes? out "Live")))))))
 
 (deftest blocked-cmd-test
   (testing "blocked-cmd lists tickets with non-terminal deps"

@@ -44,7 +44,23 @@
     :external-ref {:coerce []}
     :parent       {}
     :tags         {}
-    :mode         {}}})
+    :mode         {}
+    :afk          {:coerce :boolean}
+    :hitl         {:coerce :boolean}}})
+
+(defn- resolve-mode
+  "Reconcile `--mode`, `--afk`, `--hitl`. Explicit `:mode` wins; otherwise
+   `:afk` → \"afk\", `:hitl` → \"hitl\". When both shortcuts are set with
+   no explicit `--mode`, throw — the caller's intent is ambiguous."
+  [{:keys [mode afk hitl]}]
+  (cond
+    (some? mode)         mode
+    (and afk hitl)
+    (throw (ex-info "knot create: --afk and --hitl are mutually exclusive"
+                    {:afk afk :hitl hitl}))
+    afk                  "afk"
+    hitl                 "hitl"
+    :else                nil))
 
 (defn- split-tags
   "Split a `--tags` value on commas, trimming whitespace and dropping empties."
@@ -60,9 +76,13 @@
         title (first args)]
     (when (or (nil? title) (str/blank? title))
       (die "knot create: a title is required"))
-    (let [opts (cond-> (assoc opts :title title)
-                 (:tags opts) (assoc :tags (split-tags (:tags opts))))
-          path (cli/create-cmd (discover-ctx) opts)]
+    (let [resolved-mode (resolve-mode opts)
+          opts          (cond-> (-> opts
+                                    (dissoc :afk :hitl)
+                                    (assoc :title title))
+                          (:tags opts)        (assoc :tags (split-tags (:tags opts)))
+                          (some? resolved-mode) (assoc :mode resolved-mode))
+          path          (cli/create-cmd (discover-ctx) opts)]
       (println (str path)))))
 
 (def ^:private show-spec
@@ -73,7 +93,35 @@
 (def ^:private ls-spec
   {:spec
    {:json     {:coerce :boolean}
-    :no-color {:coerce :boolean}}})
+    :no-color {:coerce :boolean}
+    :status   {:coerce []}
+    :assignee {:coerce []}
+    :tag      {:coerce []}
+    :type     {:coerce []}
+    :mode     {:coerce []}}})
+
+(defn- ->set
+  "Coerce an opt value to a non-empty set, or nil. babashka.cli with
+   `:coerce []` always returns a vector even for a single occurrence; a
+   bare string is also tolerated. Empty inputs become nil so the cli
+   primitive treats the dimension as unfiltered."
+  [v]
+  (cond
+    (nil? v)        nil
+    (string? v)     #{v}
+    (sequential? v) (when (seq v) (set v))
+    :else           nil))
+
+(defn- filter-opts-from-cli
+  "Project the parsed CLI `opts` map onto the keyword-set shape that
+   `cli/ls-cmd` and `cli/ready-cmd` expect for `query/filter-tickets`."
+  [opts]
+  (cond-> {}
+    (->set (:status   opts)) (assoc :status   (->set (:status   opts)))
+    (->set (:assignee opts)) (assoc :assignee (->set (:assignee opts)))
+    (->set (:tag      opts)) (assoc :tag      (->set (:tag      opts)))
+    (->set (:type     opts)) (assoc :type     (->set (:type     opts)))
+    (->set (:mode     opts)) (assoc :mode     (->set (:mode     opts)))))
 
 (defn- println-out
   "Print a string to stdout. Adds a trailing newline only when `s` does
@@ -104,9 +152,10 @@
                   {:tty?         tty?
                    :no-color?    (boolean (:no-color opts))
                    :no-color-env (System/getenv "NO_COLOR")})
-        ls-opts  (cond-> {:json?  json?
-                          :tty?   tty?
-                          :color? color?}
+        ls-opts  (cond-> (merge (filter-opts-from-cli opts)
+                                {:json?  json?
+                                 :tty?   tty?
+                                 :color? color?})
                    tty? (assoc :width (output/terminal-width)))
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
@@ -208,12 +257,18 @@
 (def ^:private list-spec
   {:spec
    {:json     {:coerce :boolean}
-    :no-color {:coerce :boolean}}})
+    :no-color {:coerce :boolean}
+    :status   {:coerce []}
+    :assignee {:coerce []}
+    :tag      {:coerce []}
+    :type     {:coerce []}
+    :mode     {:coerce []}
+    :limit    {:coerce :long}}})
 
 (defn- list-handler
-  "Run a non-mutating list command (`ready`/`blocked`) that has the same
-   shape as `ls`: optional `--json` and `--no-color`, otherwise text
-   table output."
+  "Run a non-mutating list command (`ready`/`blocked`/`closed`) that has
+   the same shape as `ls`: optional `--json`, `--no-color`, filter flags,
+   and `--limit`. Filters apply BEFORE `--limit` truncation."
   [list-fn argv]
   (let [{:keys [opts]} (bcli/parse-args argv list-spec)
         json?    (boolean (:json opts))
@@ -222,11 +277,13 @@
                   {:tty?         tty?
                    :no-color?    (boolean (:no-color opts))
                    :no-color-env (System/getenv "NO_COLOR")})
-        out      (list-fn (discover-ctx)
-                          (cond-> {:json?  json?
-                                   :tty?   tty?
-                                   :color? color?}
-                            tty? (assoc :width (output/terminal-width))))]
+        cmd-opts (cond-> (merge (filter-opts-from-cli opts)
+                                {:json?  json?
+                                 :tty?   tty?
+                                 :color? color?})
+                   (:limit opts) (assoc :limit (:limit opts))
+                   tty?          (assoc :width (output/terminal-width)))
+        out      (list-fn (discover-ctx) cmd-opts)]
     (println-out out)))
 
 (defn- link-handler
@@ -371,8 +428,11 @@
     (println "  dep cycle                  Scan open tickets for cycles (exit 1 if any)")
     (println "  link   <a> <b> [<c>...]    Create symmetric :links across every pair")
     (println "  unlink <a> <b>             Remove the symmetric link between two ids")
-    (println "  ready           [--json]   List tickets whose deps are all closed")
-    (println "  blocked         [--json]   List tickets with at least one open dep")))
+    (println "  ready           [--json] [--mode <m>] [--limit N]")
+    (println "                             List tickets whose deps are all closed")
+    (println "  blocked         [--json]   List tickets with at least one open dep")
+    (println "  closed          [--json] [--limit N]")
+    (println "                             List terminal tickets, newest closed first")))
 
 (defn -main [& argv]
   (try
@@ -392,6 +452,7 @@
         "unlink"   (unlink-handler rest-argv)
         "ready"    (list-handler cli/ready-cmd   rest-argv)
         "blocked"  (list-handler cli/blocked-cmd rest-argv)
+        "closed"   (list-handler cli/closed-cmd  rest-argv)
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
         nil      (do (usage) (System/exit 1))

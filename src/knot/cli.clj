@@ -387,15 +387,35 @@
         (store/save! project-root tickets-dir id nil reloaded
                      {:now now :terminal-statuses terminal-statuses})))))
 
+(defn- filter-criteria
+  "Project the filter-relevant keys out of `opts` into the criteria map
+   accepted by `query/filter-tickets`. Empty/nil values are dropped so the
+   primitive treats absent flags as no-filter."
+  [opts]
+  (into {}
+        (keep (fn [k]
+                (when-let [v (get opts k)]
+                  (when (seq v) [k v]))))
+        [:status :assignee :tag :type :mode]))
+
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.
    With `:json? true`, returns a bare JSON array. Otherwise returns the
    rendered text table. Pass `:tty?` and `:color?` to control the table
-   format; pass `:width` to constrain TITLE truncation when on a TTY."
+   format; pass `:width` to constrain TITLE truncation when on a TTY.
+
+   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
+   set of strings) compose via `query/filter-tickets`. An explicit
+   `:status` set replaces the default non-terminal filter — so
+   `--status closed` surfaces archived tickets."
   [ctx opts]
   (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
-        all     (store/load-all project-root tickets-dir)
-        visible (query/non-terminal all terminal-statuses)]
+        all      (store/load-all project-root tickets-dir)
+        criteria (filter-criteria opts)
+        base     (if (contains? criteria :status)
+                   all
+                   (query/non-terminal all terminal-statuses))
+        visible  (query/filter-tickets base criteria)]
     (if (:json? opts)
       (output/ls-json visible)
       (output/ls-table visible (select-keys opts [:tty? :color? :width])))))
@@ -443,15 +463,63 @@
         live (query/non-terminal all terminal-statuses)]
     (vec (query/project-cycles live))))
 
+(defn- apply-limit
+  "Take the first `n` items of `xs` when `n` is a positive integer; return
+   `xs` unchanged otherwise."
+  [xs n]
+  (if (and (integer? n) (pos? n))
+    (vec (take n xs))
+    xs))
+
 (defn ready-cmd
   "List tickets that are non-terminal AND whose `:deps` are all in
    terminal status. With `:json? true`, returns a bare JSON array.
    Otherwise returns the rendered text table. Pass `:tty?`/`:color?`
-   to control table formatting (same conventions as `ls-cmd`)."
+   to control table formatting (same conventions as `ls-cmd`).
+
+   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
+   set of strings) compose via `query/filter-tickets`. Filters apply
+   BEFORE `:limit` truncation so `--mode afk --limit 5` returns up to
+   five afk-mode ready tickets, not five from the unfiltered set."
   [ctx opts]
   (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
-        all     (store/load-all project-root tickets-dir)
-        result  (query/ready all terminal-statuses)]
+        all      (store/load-all project-root tickets-dir)
+        ready*   (query/ready all terminal-statuses)
+        filtered (query/filter-tickets ready* (filter-criteria opts))
+        result   (apply-limit filtered (:limit opts))]
+    (if (:json? opts)
+      (output/ls-json result)
+      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
+
+(defn- closed?
+  "True when the ticket's `:status` is in `terminal-statuses`."
+  [terminal-statuses t]
+  (contains? (or terminal-statuses #{})
+             (get-in t [:frontmatter :status])))
+
+(defn- by-closed-desc
+  "Sort comparator: tickets with a `:closed` timestamp first (newest to
+   oldest), then tickets without a stamp last in stable input order."
+  [a b]
+  (let [ca (get-in a [:frontmatter :closed])
+        cb (get-in b [:frontmatter :closed])]
+    (cond
+      (and ca cb)       (compare cb ca)
+      (and ca (nil? cb)) -1
+      (and cb (nil? ca)) 1
+      :else              0)))
+
+(defn closed-cmd
+  "List terminal-status (closed) tickets, sorted by `:closed` descending —
+   newest first. Optional `:limit` truncates after the sort. With
+   `:json? true`, returns a bare JSON array; otherwise a rendered text
+   table. Tickets missing a `:closed` stamp sort last."
+  [ctx opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+        all      (store/load-all project-root tickets-dir)
+        terminal (filter (partial closed? terminal-statuses) all)
+        sorted   (sort by-closed-desc terminal)
+        result   (apply-limit sorted (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table result (select-keys opts [:tty? :color? :width])))))

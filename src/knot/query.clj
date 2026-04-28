@@ -11,6 +11,39 @@
                        (get-in t [:frontmatter :status])))
           tickets))
 
+(defn- match-criterion?
+  "True when ticket `t` matches the value-set `vs` under criteria key `k`.
+   Empty/nil `vs` is a no-op match. `:tag` checks set overlap with the
+   ticket's `:tags`; all other keys do equality lookup on the matching
+   frontmatter key (`:type`, `:status`, `:mode`, `:assignee`)."
+  [k vs t]
+  (if (empty? vs)
+    true
+    (let [fm (:frontmatter t)]
+      (case k
+        :tag      (boolean (some vs (or (:tags fm) [])))
+        :status   (contains? vs (:status fm))
+        :mode     (contains? vs (:mode fm))
+        :assignee (contains? vs (:assignee fm))
+        :type     (contains? vs (:type fm))
+        true))))
+
+(defn filter-tickets
+  "Return tickets matching every criterion in `criteria`. Composable filter
+   primitive shared by `ls` and `ready`. `criteria` is a map from criterion
+   key to a set of allowed values:
+     :status, :type, :mode, :assignee — equality on the corresponding
+       frontmatter key.
+     :tag — set overlap with the ticket's `:tags` list.
+   nil/empty `criteria`, or a key with an empty set, applies no filter for
+   that dimension. Preserves input order."
+  [tickets criteria]
+  (if (or (nil? criteria) (empty? criteria))
+    tickets
+    (filter (fn [t]
+              (every? (fn [[k vs]] (match-criterion? k vs t)) criteria))
+            tickets)))
+
 (defn- index-by-id
   "Build an `{id -> ticket}` map from a tickets seq."
   [tickets]
