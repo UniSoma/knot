@@ -300,3 +300,76 @@
         (is (str/includes? out "Live ticket"))
         (is (not (str/includes? out "Closed ticket"))
             "default ls should hide terminal-status tickets")))))
+
+(deftest init-end-to-end-test
+  (testing "knot init writes .knot.edn and creates the tickets dir"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "init")]
+        (is (zero? exit) (str "init err=" err))
+        (is (str/includes? (str/trim out) ".knot.edn"))
+        (is (fs/exists? (fs/path tmp ".knot.edn")))
+        (is (fs/directory? (fs/path tmp ".tickets"))))))
+
+  (testing "knot init --tickets-dir tasks --prefix abc honors flags"
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "init"
+                                         "--tickets-dir" "tasks"
+                                         "--prefix" "abc")]
+        (is (zero? exit) (str "init err=" err))
+        (is (fs/directory? (fs/path tmp "tasks")))
+        (let [content (slurp (str (fs/path tmp ".knot.edn")))]
+          (is (str/includes? content ":tickets-dir \"tasks\""))
+          (is (str/includes? content ":prefix \"abc\""))))))
+
+  (testing "knot init aborts when .knot.edn already exists"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit err]} (run-knot tmp "init")]
+        (is (= 1 exit))
+        (is (str/includes? err "already exists")))))
+
+  (testing "knot init --force overwrites an existing .knot.edn"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      ;; Hand-edit so we can detect the overwrite
+      (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"feature\"}")
+      (let [{:keys [exit err]} (run-knot tmp "init" "--force")]
+        (is (zero? exit) (str "init --force err=" err))
+        (is (str/includes? (slurp (str (fs/path tmp ".knot.edn")))
+                           ":default-priority")
+            "stub should be back after --force")))))
+
+(deftest config-flows-into-create-test
+  (testing ".knot.edn :default-type and :default-priority show up in created tickets"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:default-type "feature"
+                     :default-priority 0}))
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Configured")]
+        (is (zero? exit) (str "create err=" err))
+        (let [path  (str/trim out)
+              text  (slurp path)]
+          (is (str/includes? text "type: feature")
+              "config :default-type should override the hardcoded default")
+          (is (str/includes? text "priority: 0")
+              "config :default-priority should override the hardcoded default")))))
+
+  (testing "custom :tickets-dir from .knot.edn is honored on create"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:tickets-dir "tasks"}))
+      (fs/create-dirs (fs/path tmp "tasks"))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Routed")]
+        (is (zero? exit) (str "create err=" err))
+        (is (str/starts-with? (str/trim out) (str tmp "/tasks/"))
+            "ticket should be written under the configured tickets-dir"))))
+
+  (testing "invalid .knot.edn fails fast with a clear stderr error"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:default-priority "high"}))
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "create" "X")]
+        (is (= 1 exit))
+        (is (str/includes? err "default-priority"))))))

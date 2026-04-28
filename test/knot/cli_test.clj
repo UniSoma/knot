@@ -327,3 +327,58 @@
             "reopen should clear :closed entirely")
         (is (not (str/includes? new-path "/archive/"))
             "reopened file should live in the live directory again")))))
+
+(deftest init-cmd-test
+  (testing "writes .knot.edn with all default keys present, each commented"
+    (with-tmp tmp
+      (let [path (cli/init-cmd {:project-root tmp} {})]
+        (is (= (str (fs/path tmp ".knot.edn")) path))
+        (is (fs/exists? path))
+        (let [content (slurp path)]
+          ;; every known key should appear in the stub
+          (doseq [k [":tickets-dir" ":prefix" ":default-assignee"
+                     ":default-type" ":default-priority" ":statuses"
+                     ":terminal-statuses" ":types" ":modes" ":default-mode"]]
+            (is (str/includes? content k)
+                (str "stub should mention " k)))
+          ;; the stub should be self-documenting (contain comments)
+          (is (str/includes? content ";")
+              "stub should include EDN line comments")))))
+
+  (testing "creates the tickets-dir if missing"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (is (fs/directory? (fs/path tmp ".tickets")))))
+
+  (testing "--prefix sets the :prefix value"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {:prefix "abc"})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))]
+        (is (str/includes? content ":prefix \"abc\"")))))
+
+  (testing "--tickets-dir sets the :tickets-dir value AND creates that dir"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {:tickets-dir "tasks"})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))]
+        (is (str/includes? content ":tickets-dir \"tasks\"")))
+      (is (fs/directory? (fs/path tmp "tasks")))
+      (is (not (fs/directory? (fs/path tmp ".tickets")))
+          "default .tickets/ should NOT be created when overridden")))
+
+  (testing "without --force, aborts on existing .knot.edn (throws)"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"feature\"}")
+      (is (thrown-with-msg? Exception #"already exists"
+            (cli/init-cmd {:project-root tmp} {})))
+      (is (= "{:default-type \"feature\"}"
+             (slurp (str (fs/path tmp ".knot.edn"))))
+          "existing config should be untouched on abort")))
+
+  (testing "--force overwrites an existing .knot.edn"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"feature\"}")
+      (cli/init-cmd {:project-root tmp} {:force true})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))]
+        (is (str/includes? content ":default-priority"))
+        (is (not= "{:default-type \"feature\"}" content)
+            "existing config should be overwritten with --force")))))

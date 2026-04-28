@@ -1,6 +1,8 @@
 (ns knot.config
   "Project root walk-up discovery and `.knot.edn` parsing with defaults."
-  (:require [babashka.fs :as fs]))
+  (:require [babashka.fs :as fs]
+            [clojure.edn :as edn]
+            [clojure.string :as str]))
 
 (def ^:private default-config
   {:tickets-dir       ".tickets"
@@ -13,7 +15,8 @@
    :default-mode      "hitl"})
 
 (defn defaults
-  "Return the v0 schema defaults. `.knot.edn` overrides are not yet wired."
+  "Return the v0 schema defaults. `load-config` merges `.knot.edn`
+   overrides on top of these."
   []
   default-config)
 
@@ -54,3 +57,87 @@
        (let [parent (fs/parent d)]
          (when (and parent (not= (str parent) (str d)))
            (recur parent)))))))
+
+(def ^:private known-keys
+  #{:tickets-dir :prefix :default-assignee :default-type :default-priority
+    :statuses :terminal-statuses :types :modes :default-mode})
+
+(defn- warn! [msg]
+  (binding [*out* *err*] (println msg)))
+
+(defn- non-blank-string? [v]
+  (and (string? v) (not (str/blank? v))))
+
+(defn- list-of-non-blank-strings? [v]
+  (and (sequential? v)
+       (seq v)
+       (every? non-blank-string? v)))
+
+(defn- validate!
+  "Throw with a clear message when any value in `merged` (defaults + user
+   overrides) violates the schema. Returns `merged` unchanged on success."
+  [merged]
+  (let [{:keys [tickets-dir prefix default-assignee default-type
+                default-priority statuses terminal-statuses types modes
+                default-mode]} merged]
+    (when-not (non-blank-string? tickets-dir)
+      (throw (ex-info ".knot.edn :tickets-dir must be a non-blank string" {})))
+    (when (and (some? prefix) (not (and (non-blank-string? prefix)
+                                        (re-matches #"[a-z0-9]+" prefix))))
+      (throw (ex-info ".knot.edn :prefix must be a non-empty [a-z0-9]+ string" {})))
+    (when (and (some? default-assignee) (not (non-blank-string? default-assignee)))
+      (throw (ex-info ".knot.edn :default-assignee must be a non-blank string" {})))
+    (when-not (list-of-non-blank-strings? statuses)
+      (throw (ex-info ".knot.edn :statuses must be a non-empty list of strings" {})))
+    (when-not (and (set? terminal-statuses)
+                   (every? non-blank-string? terminal-statuses)
+                   (every? (set statuses) terminal-statuses))
+      (throw (ex-info (str ".knot.edn :terminal-statuses must be a set of "
+                           "strings, all present in :statuses") {})))
+    (when-not (list-of-non-blank-strings? types)
+      (throw (ex-info ".knot.edn :types must be a non-empty list of strings" {})))
+    (when-not ((set types) default-type)
+      (throw (ex-info ".knot.edn :default-type must be one of :types" {})))
+    (when-not (list-of-non-blank-strings? modes)
+      (throw (ex-info ".knot.edn :modes must be a non-empty list of strings" {})))
+    (when-not ((set modes) default-mode)
+      (throw (ex-info ".knot.edn :default-mode must be one of :modes" {})))
+    (when-not (and (integer? default-priority) (<= 0 default-priority 4))
+      (throw (ex-info ".knot.edn :default-priority must be an integer 0..4" {}))))
+  merged)
+
+(defn load-config
+  "Read `<root>/.knot.edn` (when present), validate, and merge on top of
+   `defaults`. Unknown keys are dropped with a stderr warning. Invalid
+   values throw with a clear message. Returns the merged map."
+  [root]
+  (let [path (fs/path root ".knot.edn")
+        defs (defaults)]
+    (if-not (fs/exists? path)
+      defs
+      (let [raw     (edn/read-string (slurp (str path)))
+            unknown (remove known-keys (keys raw))]
+        (when (seq unknown)
+          (warn! (str "knot: ignoring unknown .knot.edn keys: "
+                      (str/join ", " (map name unknown)))))
+        (validate! (merge defs (select-keys raw known-keys)))))))
+
+(defn discover
+  "Walk up from `start-dir` for the project root and load `.knot.edn`.
+   The first ancestor containing either `.knot.edn` or `.tickets/` (the
+   default tickets-dir) is the project root. When that ancestor has a
+   `.knot.edn`, the config's `:tickets-dir` wins over any on-disk dir
+   name. Returns `{:project-root <path> :config <merged>}` or nil when
+   no marker is found."
+  [start-dir]
+  (when-let [root (find-project-root start-dir)]
+    {:project-root root
+     :config       (load-config root)}))
+
+(defn discover-within
+  "Like `discover`, but stops walking at `boundary` (exclusive). Useful for
+   tests that need to bound the walk to a temp directory tree."
+  [start-dir boundary]
+  (when-let [root (find-project-root-within start-dir boundary)]
+    {:project-root root
+     :config       (load-config root)}))

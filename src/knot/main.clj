@@ -10,15 +10,18 @@
             [knot.ticket :as ticket]))
 
 (defn- discover-ctx
-  "Build a command context: walk up from cwd to find the project root, fall
-   back to cwd, and derive the prefix from the project directory name."
+  "Build a command context: walk up from cwd to find the project root, load
+   `.knot.edn` (when present), and derive the prefix from config (when set)
+   or from the project directory name. Falls back to cwd + defaults when no
+   project marker is found anywhere up the tree."
   []
-  (let [cwd      (str (fs/cwd))
-        defaults (config/defaults)
-        root     (or (config/find-project-root cwd (:tickets-dir defaults))
-                     cwd)
-        prefix   (ticket/derive-prefix (str (fs/file-name root)))]
-    (merge defaults
+  (let [cwd       (str (fs/cwd))
+        discovered (config/discover cwd)
+        root      (or (:project-root discovered) cwd)
+        cfg       (or (:config discovered) (config/defaults))
+        prefix    (or (:prefix cfg)
+                      (ticket/derive-prefix (str (fs/file-name root))))]
+    (merge cfg
            {:project-root root
             :prefix       prefix})))
 
@@ -105,6 +108,19 @@
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
 
+(def ^:private init-spec
+  {:spec
+   {:prefix      {}
+    :tickets-dir {}
+    :force       {:coerce :boolean}}})
+
+(defn- init-handler [argv]
+  (let [{:keys [opts]} (bcli/parse-args argv init-spec)
+        ;; init runs in cwd by design — it's how you create a project root
+        ctx  {:project-root (str (fs/cwd))}
+        path (cli/init-cmd ctx opts)]
+    (println-out (str path))))
+
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
@@ -131,6 +147,7 @@
     (println "Usage: knot <command> [args...]")
     (println)
     (println "Commands:")
+    (println "  init                      Write .knot.edn stub and create the tickets dir")
     (println "  create <title> [flags]    Create a new ticket")
     (println "  show   <id>   [--json]    Render the ticket with the given id")
     (println "  ls            [--json]    List live (non-terminal) tickets")
@@ -143,6 +160,7 @@
   (try
     (let [[cmd & rest-argv] argv]
       (case cmd
+        "init"   (init-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         "ls"     (ls-handler rest-argv)

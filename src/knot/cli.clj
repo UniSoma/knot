@@ -1,7 +1,8 @@
 (ns knot.cli
   "Per-command argument specs and handlers. Wired by knot.main via
    babashka.cli/dispatch."
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [flatland.ordered.map :as om]
             [knot.config :as config]
             [knot.git :as git]
@@ -56,12 +57,13 @@
 
 (defn- resolve-ctx
   "Fill in defaults and lazy lookups (git user.name, current time) when the
-   caller did not provide them."
+   caller did not provide them. Assignee precedence: explicit ctx value
+   wins; else git user.name; else `:default-assignee` from config."
   [ctx]
   (let [defaults (config/defaults)]
     (merge defaults
            {:assignee (when-not (contains? ctx :assignee)
-                        (git/user-name))}
+                        (or (git/user-name) (:default-assignee ctx)))}
            ctx
            ;; deterministic 'now' for tests; fall back to wall clock
            (when-not (:now ctx) {:now (now-iso)}))))
@@ -162,3 +164,66 @@
     (if (:json? opts)
       (output/ls-json visible)
       (output/ls-table visible (select-keys opts [:tty? :color? :width])))))
+
+(defn- stub-config
+  "Render a self-documenting `.knot.edn` stub with every known key present
+   and inline-commented. `tickets-dir` and `prefix` default to PRD values
+   when not overridden via `--tickets-dir` / `--prefix`."
+  [{:keys [tickets-dir prefix]}]
+  (let [d (config/defaults)
+        td (or tickets-dir (:tickets-dir d))
+        pr-line (if prefix
+                  (str " :prefix \"" prefix "\"")
+                  " ;; :prefix \"abc\"           ; auto-derived from project dir name when omitted")]
+    (str
+     ";; Knot project config. All keys are optional; sensible defaults apply.\n"
+     ";; See `knot help` (or the project README) for the full schema.\n"
+     "{\n"
+     " ;; Where ticket files live, relative to this file.\n"
+     " :tickets-dir \"" td "\"\n"
+     "\n"
+     " ;; Project shortcode prefixed onto every generated ticket id.\n"
+     pr-line "\n"
+     "\n"
+     " ;; Default assignee on `knot create` when git user.name is unavailable.\n"
+     " ;; :default-assignee \"alice\"\n"
+     "\n"
+     " ;; Default ticket type on `knot create` (must be in :types below).\n"
+     " :default-type \"" (:default-type d) "\"\n"
+     "\n"
+     " ;; Default priority on `knot create` — integer 0..4 (0 = highest).\n"
+     " :default-priority " (:default-priority d) "\n"
+     "\n"
+     " ;; Status workflow, in display order. Edit to add e.g. \"review\".\n"
+     " :statuses " (pr-str (:statuses d)) "\n"
+     "\n"
+     " ;; Statuses that are terminal — files of tickets in these statuses\n"
+     " ;; auto-move to <tickets-dir>/archive/.\n"
+     " :terminal-statuses " (pr-str (:terminal-statuses d)) "\n"
+     "\n"
+     " ;; Allowed values for the :type field on each ticket.\n"
+     " :types " (pr-str (:types d)) "\n"
+     "\n"
+     " ;; Allowed values for the :mode field — `afk` is agent-runnable,\n"
+     " ;; `hitl` requires a human.\n"
+     " :modes " (pr-str (:modes d)) "\n"
+     "\n"
+     " ;; Default mode on `knot create` (must be in :modes above).\n"
+     " :default-mode \"" (:default-mode d) "\"\n"
+     "}\n")))
+
+(defn init-cmd
+  "Write a self-documenting `.knot.edn` stub at the project root and ensure
+   the `:tickets-dir` exists. `ctx` carries `:project-root`. `opts` may
+   include `:prefix`, `:tickets-dir`, and `:force`. Without `:force`,
+   throws if `.knot.edn` already exists. Returns the written config path."
+  [ctx opts]
+  (let [{:keys [project-root]} ctx
+        target (str (fs/path project-root ".knot.edn"))]
+    (when (and (fs/exists? target) (not (:force opts)))
+      (throw (ex-info (str ".knot.edn already exists at " target
+                           " — pass --force to overwrite") {})))
+    (let [td (or (:tickets-dir opts) (:tickets-dir (config/defaults)))]
+      (fs/create-dirs (fs/path project-root td))
+      (spit target (stub-config opts))
+      target)))
