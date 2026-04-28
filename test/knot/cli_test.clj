@@ -381,4 +381,37 @@
       (let [content (slurp (str (fs/path tmp ".knot.edn")))]
         (is (str/includes? content ":default-priority"))
         (is (not= "{:default-type \"feature\"}" content)
-            "existing config should be overwritten with --force")))))
+            "existing config should be overwritten with --force"))))
+
+  (testing "the generated stub is itself a valid .knot.edn that load-config accepts"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (is (= (config/defaults) (config/load-config tmp))
+          "round-trip: load-config of the stub equals the defaults")))
+
+  (testing "the stub generated with --prefix round-trips through load-config"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {:prefix "abc"})
+      (is (= "abc" (:prefix (config/load-config tmp))))))
+
+  (testing "init refuses an invalid --prefix before writing"
+    (with-tmp tmp
+      (is (thrown-with-msg? Exception #"prefix"
+            (cli/init-cmd {:project-root tmp} {:prefix "BAD!"})))
+      (is (not (fs/exists? (fs/path tmp ".knot.edn")))
+          "no stub should have been written on validation failure")
+      (is (not (fs/directory? (fs/path tmp ".tickets")))
+          "no tickets dir should have been created on validation failure")))
+
+  (testing "init refuses an invalid --tickets-dir before writing"
+    (with-tmp tmp
+      (is (thrown-with-msg? Exception #"tickets-dir"
+            (cli/init-cmd {:project-root tmp} {:tickets-dir ""})))
+      (is (not (fs/exists? (fs/path tmp ".knot.edn")))))))
+
+(deftest load-config-malformed-edn-test
+  (testing "malformed EDN error includes the file path for context"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"task\"")  ;; missing }
+      (is (thrown-with-msg? Exception #"\.knot\.edn at .* is not valid EDN"
+            (config/load-config tmp))))))

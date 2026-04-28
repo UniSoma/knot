@@ -177,7 +177,7 @@
                   " ;; :prefix \"abc\"           ; auto-derived from project dir name when omitted")]
     (str
      ";; Knot project config. All keys are optional; sensible defaults apply.\n"
-     ";; See `knot help` (or the project README) for the full schema.\n"
+     ";; See the project README for the full schema.\n"
      "{\n"
      " ;; Where ticket files live, relative to this file.\n"
      " :tickets-dir \"" td "\"\n"
@@ -216,13 +216,18 @@
   "Write a self-documenting `.knot.edn` stub at the project root and ensure
    the `:tickets-dir` exists. `ctx` carries `:project-root`. `opts` may
    include `:prefix`, `:tickets-dir`, and `:force`. Without `:force`,
-   throws if `.knot.edn` already exists. Returns the written config path."
+   throws if `.knot.edn` already exists. Validates `:prefix` and
+   `:tickets-dir` against the same schema `load-config` uses, so the
+   written stub is guaranteed to load cleanly. Returns the written config
+   path."
   [ctx opts]
   (let [{:keys [project-root]} ctx
         target (str (fs/path project-root ".knot.edn"))]
     (when (and (fs/exists? target) (not (:force opts)))
       (throw (ex-info (str ".knot.edn already exists at " target
                            " — pass --force to overwrite") {})))
+    (config/validate! (merge (config/defaults)
+                             (select-keys opts [:prefix :tickets-dir])))
     (let [td (or (:tickets-dir opts) (:tickets-dir (config/defaults)))]
       (fs/create-dirs (fs/path project-root td))
       (spit target (stub-config opts))

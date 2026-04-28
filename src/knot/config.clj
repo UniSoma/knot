@@ -27,36 +27,31 @@
       (fs/directory? (fs/path dir tickets-dir))))
 
 (defn find-project-root-within
-  "Walk up from `start-dir` searching for `.knot.edn` or `<tickets-dir>/`,
-   stopping at `boundary` (exclusive). Returns the path string of the first
-   matching ancestor, or nil. `tickets-dir` defaults to `.tickets`."
-  ([start-dir boundary]
-   (find-project-root-within start-dir boundary ".tickets"))
-  ([start-dir boundary tickets-dir]
-   (let [boundary-canon (fs/canonicalize boundary)]
-     (loop [d (fs/canonicalize start-dir)]
-       (cond
-         (= (str d) (str boundary-canon)) nil
-         (has-marker? d tickets-dir)      (str d)
-         :else
-         (let [parent (fs/parent d)]
-           (when (and parent (not= (str parent) (str d)))
-             (recur parent))))))))
+  "Walk up from `start-dir` searching for `.knot.edn` or `.tickets/`, stopping
+   at `boundary` (exclusive). Returns the path string of the first matching
+   ancestor, or nil."
+  [start-dir boundary]
+  (let [boundary-canon (fs/canonicalize boundary)]
+    (loop [d (fs/canonicalize start-dir)]
+      (cond
+        (= (str d) (str boundary-canon)) nil
+        (has-marker? d ".tickets")       (str d)
+        :else
+        (let [parent (fs/parent d)]
+          (when (and parent (not= (str parent) (str d)))
+            (recur parent)))))))
 
 (defn find-project-root
-  "Walk up from `start-dir` searching for `.knot.edn` or `<tickets-dir>/`.
-   Returns the path string of the first matching ancestor, or nil if none.
-   `tickets-dir` defaults to `.tickets`."
-  ([start-dir]
-   (find-project-root start-dir ".tickets"))
-  ([start-dir tickets-dir]
-   (loop [d (fs/canonicalize start-dir)]
-     (cond
-       (has-marker? d tickets-dir) (str d)
-       :else
-       (let [parent (fs/parent d)]
-         (when (and parent (not= (str parent) (str d)))
-           (recur parent)))))))
+  "Walk up from `start-dir` searching for `.knot.edn` or `.tickets/`.
+   Returns the path string of the first matching ancestor, or nil if none."
+  [start-dir]
+  (loop [d (fs/canonicalize start-dir)]
+    (cond
+      (has-marker? d ".tickets") (str d)
+      :else
+      (let [parent (fs/parent d)]
+        (when (and parent (not= (str parent) (str d)))
+          (recur parent))))))
 
 (def ^:private known-keys
   #{:tickets-dir :prefix :default-assignee :default-type :default-priority
@@ -73,7 +68,7 @@
        (seq v)
        (every? non-blank-string? v)))
 
-(defn- validate!
+(defn validate!
   "Throw with a clear message when any value in `merged` (defaults + user
    overrides) violates the schema. Returns `merged` unchanged on success."
   [merged]
@@ -115,7 +110,13 @@
         defs (defaults)]
     (if-not (fs/exists? path)
       defs
-      (let [raw     (edn/read-string (slurp (str path)))
+      (let [raw     (try
+                      (edn/read-string (slurp (str path)))
+                      (catch Exception e
+                        (throw (ex-info (str ".knot.edn at " path
+                                             " is not valid EDN: "
+                                             (.getMessage e))
+                                        {:path (str path)} e))))
             unknown (remove known-keys (keys raw))]
         (when (seq unknown)
           (warn! (str "knot: ignoring unknown .knot.edn keys: "
