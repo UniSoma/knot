@@ -83,4 +83,10 @@ RUN chmod -R 777 /etc/clojure \
 
 # Alias 'agilis' to 'bb agilis'
 RUN echo "alias agilis='bb agilis'" >> /etc/bash.bashrc
-RUN echo "alias knot='bb knot'" >> /etc/bash.bashrc
+
+# 'knot' shim: defers to `bb knot` in the current working directory's bb.edn,
+# so editing src/ in a mounted project is picked up immediately (no install).
+# A script on PATH (vs. a bash alias) means it also works in non-interactive
+# shells — scripts, subagents, `sh -c`, IDE terminals.
+RUN printf '%s\n' '#!/usr/bin/env bash' 'exec bb knot "$@"' > /usr/local/bin/knot \
+    && chmod +x /usr/local/bin/knot
