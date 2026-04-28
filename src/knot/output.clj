@@ -1,7 +1,8 @@
 (ns knot.output
   "Renderers: human (markdown/text + ANSI), JSON, dep-tree.
    stdout = data; stderr = warnings/errors."
-  (:require [cheshire.core :as json]
+  (:require [babashka.process :as p]
+            [cheshire.core :as json]
             [clojure.string :as str]
             [knot.ticket :as ticket]))
 
@@ -76,6 +77,41 @@
    returns nil when stdout is piped or redirected."
   []
   (some? (System/console)))
+
+(defn- positive-int
+  "Parse `s` as an integer; return it when positive, else nil. Never throws."
+  [s]
+  (try
+    (let [n (Integer/parseInt (str/trim (str s)))]
+      (when (pos? n) n))
+    (catch Exception _ nil)))
+
+(defn- env-cols
+  "Read $COLUMNS as a positive integer; nil if unset/invalid."
+  []
+  (positive-int (System/getenv "COLUMNS")))
+
+(defn- stty-cols
+  "Probe the controlling terminal via `stty size </dev/tty`. Returns the
+   column count as a positive integer, or nil when stty is unavailable,
+   no controlling tty exists, or the output can't be parsed.
+   `stty size` prints `<rows> <cols>`; the second token is what we want."
+  []
+  (try
+    (let [{:keys [exit out]} (deref (p/process ["sh" "-c" "stty size </dev/tty"]
+                                               {:out :string :err :string}))]
+      (when (zero? exit)
+        (some-> out str/trim (str/split #"\s+") second positive-int)))
+    (catch Exception _ nil)))
+
+(defn terminal-width
+  "Best-effort detection of the current terminal's column count.
+   Tries $COLUMNS first, then probes the controlling terminal with
+   `stty size`, then falls back to `default` (80). Always returns a
+   positive integer."
+  ([] (terminal-width 80))
+  ([default]
+   (or (env-cols) (stty-cols) default)))
 
 (defn color-enabled?
   "Return true when ANSI color output is appropriate.

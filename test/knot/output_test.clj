@@ -122,6 +122,25 @@
                                        :no-color? false
                                        :no-color-env ""})))))
 
+(deftest terminal-width-test
+  (testing "$COLUMNS, when a positive integer, wins over every other source"
+    (with-redefs [knot.output/env-cols (constantly 137)
+                  knot.output/stty-cols (constantly 999)]
+      (is (= 137 (output/terminal-width)))))
+  (testing "stty fallback is used when $COLUMNS is unset"
+    (with-redefs [knot.output/env-cols (constantly nil)
+                  knot.output/stty-cols (constantly 200)]
+      (is (= 200 (output/terminal-width)))))
+  (testing "default is used when neither probe yields a value"
+    (with-redefs [knot.output/env-cols (constantly nil)
+                  knot.output/stty-cols (constantly nil)]
+      (is (= 80 (output/terminal-width)))
+      (is (= 100 (output/terminal-width 100)))))
+  (testing "the function never throws and always returns a positive int"
+    (let [w (output/terminal-width)]
+      (is (integer? w))
+      (is (pos? w)))))
+
 (defn- strip-ansi [s]
   (str/replace s #"\[[0-9;]*m" ""))
 

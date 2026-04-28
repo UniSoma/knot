@@ -104,9 +104,10 @@
                   {:tty?         tty?
                    :no-color?    (boolean (:no-color opts))
                    :no-color-env (System/getenv "NO_COLOR")})
-        ls-opts  {:json?  json?
-                  :tty?   tty?
-                  :color? color?}
+        ls-opts  (cond-> {:json?  json?
+                          :tty?   tty?
+                          :color? color?}
+                   tty? (assoc :width (output/terminal-width)))
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
 
@@ -222,9 +223,10 @@
                    :no-color?    (boolean (:no-color opts))
                    :no-color-env (System/getenv "NO_COLOR")})
         out      (list-fn (discover-ctx)
-                          {:json?  json?
-                           :tty?   tty?
-                           :color? color?})]
+                          (cond-> {:json?  json?
+                                   :tty?   tty?
+                                   :color? color?}
+                            tty? (assoc :width (output/terminal-width))))]
     (println-out out)))
 
 (defn- link-handler
