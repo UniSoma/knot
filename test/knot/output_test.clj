@@ -210,3 +210,116 @@
   (testing "empty code list returns text unchanged regardless of color?"
     (is (= "x" (output/colorize true [] "x")))
     (is (= "x" (output/colorize false [] "x")))))
+
+(defn- node
+  "Test helper: build a dep-tree node mirroring `knot.query/dep-tree`'s
+   shape. Children are nested; pass opts in `extras` like {:missing? true}."
+  [id title & {:keys [children seen-before? missing?]}]
+  (cond-> {:id id}
+    missing?       (assoc :missing? true)
+    (not missing?) (assoc :ticket {:frontmatter {:id id :status "open"}
+                                   :body (str "# " title "\n")})
+    seen-before?   (assoc :seen-before? true)
+    children       (assoc :children children)))
+
+(deftest dep-tree-text-root-only-test
+  (testing "root node with no children renders as a single id+title line"
+    (let [tree (node "kno-A" "Alpha")
+          out  (output/dep-tree-text tree)]
+      (is (= "kno-A  Alpha" (str/trim out))))))
+
+(deftest dep-tree-text-children-test
+  (testing "single child uses a └── connector"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-B" "Beta")])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (= 2 (count lines)))
+      (is (= "kno-A  Alpha" (first lines)))
+      (is (str/starts-with? (second lines) "└── "))
+      (is (str/includes? (second lines) "kno-B"))
+      (is (str/includes? (second lines) "Beta"))))
+
+  (testing "multiple children use ├── for non-last and └── for last"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-B" "Beta")
+                                (node "kno-C" "Gamma")])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (= 3 (count lines)))
+      (is (str/starts-with? (nth lines 1) "├── "))
+      (is (str/starts-with? (nth lines 2) "└── ")))))
+
+(deftest dep-tree-text-nested-prefix-test
+  (testing "a non-last branch's grandchildren get a │ continuation prefix"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-B" "Beta"
+                                      :children [(node "kno-D" "Delta")])
+                                (node "kno-C" "Gamma")])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      ;; Expected:
+      ;; kno-A  Alpha
+      ;; ├── kno-B  Beta
+      ;; │   └── kno-D  Delta
+      ;; └── kno-C  Gamma
+      (is (= 4 (count lines)))
+      (is (str/starts-with? (nth lines 2) "│   "))))
+
+  (testing "a last branch's grandchildren get spaces (no │)"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-C" "Gamma"
+                                      :children [(node "kno-D" "Delta")])])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (str/starts-with? (nth lines 2) "    "))
+      (is (not (str/starts-with? (nth lines 2) "│"))))))
+
+(deftest dep-tree-text-seen-before-test
+  (testing "seen-before? nodes get a trailing ↑ marker"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-D" "Delta" :seen-before? true)])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (str/includes? (last lines) "↑"))
+      (is (str/includes? (last lines) "Delta")))))
+
+(deftest dep-tree-text-missing-test
+  (testing "missing? nodes render with [missing] marker (no title)"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-ghost" nil :missing? true)])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (str/includes? (last lines) "kno-ghost"))
+      (is (str/includes? (last lines) "[missing]"))))
+
+  (testing "missing? root renders as a single line"
+    (let [tree (node "kno-ghost" nil :missing? true)
+          out  (output/dep-tree-text tree)]
+      (is (str/includes? out "kno-ghost"))
+      (is (str/includes? out "[missing]")))))
+
+(deftest dep-tree-json-test
+  (testing "root with no children: bare JSON object with id, title, status, deps:[]"
+    (let [tree (node "kno-A" "Alpha")
+          out  (output/dep-tree-json tree)]
+      (is (str/starts-with? out "{"))
+      (is (str/includes? out "\"id\":\"kno-A\""))
+      (is (str/includes? out "\"title\":\"Alpha\""))
+      (is (str/includes? out "\"status\":\"open\""))
+      (is (str/includes? out "\"deps\":[]"))))
+
+  (testing "nested children appear under :deps as a JSON array"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-B" "Beta")])
+          out  (output/dep-tree-json tree)]
+      (is (str/includes? out "\"deps\":[{"))
+      (is (str/includes? out "\"id\":\"kno-B\""))
+      (is (str/includes? out "\"title\":\"Beta\""))))
+
+  (testing "missing nodes serialize with \"missing\":true and no title/status"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-ghost" nil :missing? true)])
+          out  (output/dep-tree-json tree)]
+      (is (str/includes? out "\"id\":\"kno-ghost\""))
+      (is (str/includes? out "\"missing\":true"))))
+
+  (testing "seen-before? nodes serialize with \"seen_before\":true"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-D" "Delta" :seen-before? true)])
+          out  (output/dep-tree-json tree)]
+      (is (str/includes? out "\"seen_before\":true")))))

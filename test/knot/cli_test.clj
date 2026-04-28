@@ -156,6 +156,14 @@
               loaded (store/load-one tmp ".tickets" id)]
           (is (not (contains? (:frontmatter loaded) :assignee))))))))
 
+(defmacro ^:private with-err-str
+  "Capture writes to *err* during `body`, returning the captured string."
+  [& body]
+  `(let [sw# (java.io.StringWriter.)]
+     (binding [*err* sw#]
+       ~@body
+       (str sw#))))
+
 (deftest show-cmd-test
   (testing "show returns the rendered ticket content for a known id"
     (with-tmp tmp
@@ -240,6 +248,45 @@
   (->> (fs/file-name path)
        (re-matches (re-pattern (str "(.+)--" slug-pat "\\.md")))
        second))
+
+(deftest show-cmd-broken-refs-warn-test
+  (testing "show-cmd does not warn when refs all resolve"
+    (with-tmp tmp
+      (let [from (cli/create-cmd (ctx tmp) {:title "From"})
+            to   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id (id-of-created from "from")
+            to-id   (id-of-created to "to")
+            _       (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            err     (with-err-str (cli/show-cmd (ctx tmp) {:id from-id}))]
+        (is (= "" err)))))
+
+  (testing "show-cmd warns to stderr on a broken :deps reference"
+    (with-tmp tmp
+      (let [from    (cli/create-cmd (ctx tmp) {:title "From"})
+            from-id (id-of-created from "from")
+            _       (cli/dep-cmd (ctx tmp) {:from from-id :to "kno-ghost"})
+            err     (with-err-str (cli/show-cmd (ctx tmp) {:id from-id}))]
+        (is (str/includes? err "kno-ghost"))
+        (is (str/includes? err "missing")))))
+
+  (testing "show-cmd warns to stderr on a broken :parent reference"
+    (with-tmp tmp
+      (let [t   (cli/create-cmd (ctx tmp) {:title "Hello" :parent "kno-ghost"})
+            id  (id-of-created t "hello")
+            err (with-err-str (cli/show-cmd (ctx tmp) {:id id}))]
+        (is (str/includes? err "kno-ghost"))
+        (is (str/includes? err "missing")))))
+
+  (testing "show-cmd still returns the rendered ticket despite broken refs"
+    (with-tmp tmp
+      (let [from    (cli/create-cmd (ctx tmp) {:title "From"})
+            from-id (id-of-created from "from")
+            _       (cli/dep-cmd (ctx tmp) {:from from-id :to "kno-ghost"})
+            out     (binding [*err* (java.io.StringWriter.)]
+                      (cli/show-cmd (ctx tmp) {:id from-id}))]
+        (is (str/includes? out "From"))
+        (is (str/includes? out "kno-ghost")
+            "raw :deps field including the broken id is in show output")))))
 
 (deftest status-cmd-test
   (testing "status-cmd transitions a ticket to the given status"
@@ -408,6 +455,282 @@
       (is (thrown-with-msg? Exception #"tickets-dir"
             (cli/init-cmd {:project-root tmp} {:tickets-dir ""})))
       (is (not (fs/exists? (fs/path tmp ".knot.edn")))))))
+
+(deftest dep-cmd-test
+  (testing "dep-cmd writes the target id to from's :deps"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (= [to-id] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "dep-cmd is idempotent: adding the same dep twice doesn't duplicate"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (= [to-id] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "dep-cmd rejects a self-loop with the offending path"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            from-id   (id-of-created from-path "from")]
+        (is (thrown-with-msg? Exception #"cycle"
+              (cli/dep-cmd (ctx tmp) {:from from-id :to from-id}))))))
+
+  (testing "dep-cmd rejects an edge that would close a cycle"
+    (with-tmp tmp
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "A"})
+            b-path (cli/create-cmd (ctx tmp) {:title "B"})
+            a-id   (id-of-created a-path "a")
+            b-id   (id-of-created b-path "b")
+            _      (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})]
+        ;; now adding b -> a would close a cycle
+        (try
+          (cli/dep-cmd (ctx tmp) {:from b-id :to a-id})
+          (is false "expected an exception")
+          (catch Exception e
+            (let [data (ex-data e)]
+              (is (contains? data :cycle))
+              (is (vector? (:cycle data)))
+              (is (= b-id (first (:cycle data))))
+              (is (= b-id (last (:cycle data))))))))))
+
+  (testing "dep-cmd allows a forward ref to a non-existent ticket (broken refs are lenient)"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            from-id   (id-of-created from-path "from")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to "kno-ghost"})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (= ["kno-ghost"] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "dep-cmd returns nil when from ticket does not exist"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/dep-cmd (ctx tmp) {:from "kno-nope" :to "kno-other"}))))))
+
+(deftest undep-cmd-test
+  (testing "undep-cmd removes the dep entry"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            _         (cli/undep-cmd (ctx tmp) {:from from-id :to to-id})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (not (contains? (:frontmatter loaded) :deps))
+            "removing the last dep should drop the :deps key entirely"))))
+
+  (testing "undep-cmd preserves other deps"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            b-path    (cli/create-cmd (ctx tmp) {:title "B"})
+            c-path    (cli/create-cmd (ctx tmp) {:title "C"})
+            from-id   (id-of-created from-path "from")
+            b-id      (id-of-created b-path "b")
+            c-id      (id-of-created c-path "c")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to b-id})
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to c-id})
+            _         (cli/undep-cmd (ctx tmp) {:from from-id :to b-id})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (= [c-id] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "undep-cmd is idempotent: removing a non-existent dep is a no-op"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            from-id   (id-of-created from-path "from")
+            ;; no dep added; undep-cmd should be a clean no-op
+            _         (cli/undep-cmd (ctx tmp) {:from from-id :to "kno-other"})
+            loaded    (store/load-one tmp ".tickets" from-id)]
+        (is (not (contains? (:frontmatter loaded) :deps))))))
+
+  (testing "undep-cmd returns nil when from ticket does not exist"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/undep-cmd (ctx tmp) {:from "kno-nope" :to "kno-other"}))))))
+
+(deftest ready-cmd-test
+  (testing "ready-cmd lists open tickets with all-terminal deps"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha task"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta task"})
+            a-id (id-of-created a "alpha-task")
+            b-id (id-of-created b "beta-task")
+            ;; depend Alpha on Beta, then close Beta — Alpha becomes ready
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            _    (cli/close-cmd (ctx tmp) {:id b-id})
+            out  (cli/ready-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "Alpha task")
+            "ready ticket Alpha task appears in the table")
+        (is (not (str/includes? out "Beta task"))
+            "closed ticket Beta task does not appear"))))
+
+  (testing "ready-cmd excludes blocked tickets"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha task"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta task"})
+            a-id (id-of-created a "alpha-task")
+            b-id (id-of-created b "beta-task")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            ;; Beta is open ⇒ Alpha is blocked
+            out  (cli/ready-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (not (str/includes? out "Alpha task")) "blocked Alpha excluded")
+        (is (str/includes? out "Beta task") "Beta has no deps, is ready"))))
+
+  (testing "ready-cmd with :json? returns a bare JSON array"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (let [out (cli/ready-cmd (ctx tmp) {:json? true})]
+        (is (str/starts-with? out "["))
+        (is (str/includes? out "\"status\":\"open\""))))))
+
+(deftest blocked-cmd-test
+  (testing "blocked-cmd lists tickets with non-terminal deps"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha task"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta task"})
+            a-id (id-of-created a "alpha-task")
+            b-id (id-of-created b "beta-task")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (cli/blocked-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "Alpha task") "blocked Alpha appears")
+        (is (not (str/includes? out "Beta task")) "Beta has no deps, not blocked"))))
+
+  (testing "blocked-cmd with :json? returns a bare JSON array"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (cli/blocked-cmd (ctx tmp) {:json? true})]
+        (is (str/starts-with? out "["))))))
+
+(deftest dep-cycle-cmd-test
+  (testing "dep-cycle-cmd returns an empty vector when there are no cycles"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})]
+        (is (empty? (cli/dep-cycle-cmd (ctx tmp) {}))))))
+
+  (testing "dep-cycle-cmd surfaces a pre-existing cycle introduced by hand-edit"
+    ;; create two tickets, dep one on the other normally, then hand-edit
+    ;; the second ticket's frontmatter to add a back-edge — bypassing
+    ;; the cycle check that `dep-cmd` would have done at insert time.
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            ;; bypass cycle check by writing through store directly
+            b-loaded (store/load-one tmp ".tickets" b-id)
+            _ (store/save! tmp ".tickets" b-id nil
+                           (assoc b-loaded :frontmatter
+                                  (assoc (:frontmatter b-loaded) :deps [a-id]))
+                           {:now "2026-04-28T11:00:00Z"
+                            :terminal-statuses #{"closed"}})
+            cycles (cli/dep-cycle-cmd (ctx tmp) {})]
+        (is (= 1 (count cycles)))
+        (let [c (set (first cycles))]
+          (is (contains? c a-id))
+          (is (contains? c b-id))))))
+
+  (testing "dep-cycle-cmd ignores closed tickets (cycles among archived only do not count)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            b-loaded (store/load-one tmp ".tickets" b-id)
+            _ (store/save! tmp ".tickets" b-id nil
+                           (assoc b-loaded :frontmatter
+                                  (assoc (:frontmatter b-loaded) :deps [a-id]))
+                           {:now "2026-04-28T11:00:00Z"
+                            :terminal-statuses #{"closed"}})
+            ;; close both — the cycle is now wholly within archived tickets
+            _ (cli/close-cmd (ctx tmp) {:id a-id})
+            _ (cli/close-cmd (ctx tmp) {:id b-id})]
+        (is (empty? (cli/dep-cycle-cmd (ctx tmp) {})))))))
+
+(deftest dep-tree-cmd-test
+  (testing "dep-tree-cmd renders the root id and its deps"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            out  (cli/dep-tree-cmd (ctx tmp) {:id a-id})]
+        (is (string? out))
+        (is (str/includes? out a-id))
+        (is (str/includes? out "Alpha"))
+        (is (str/includes? out b-id))
+        (is (str/includes? out "Beta"))
+        (is (str/includes? out "└──")))))
+
+  (testing "dep-tree-cmd dedupes diamond branches by default (↑ on second occurrence)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            d (cli/create-cmd (ctx tmp) {:title "Delta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            d-id (id-of-created d "delta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to c-id})
+            _    (cli/dep-cmd (ctx tmp) {:from b-id :to d-id})
+            _    (cli/dep-cmd (ctx tmp) {:from c-id :to d-id})
+            out  (cli/dep-tree-cmd (ctx tmp) {:id a-id})]
+        (is (str/includes? out "↑")
+            "the second occurrence of Delta should be marked with ↑"))))
+
+  (testing "dep-tree-cmd --full expands diamond branches fully (no ↑)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            d (cli/create-cmd (ctx tmp) {:title "Delta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            d-id (id-of-created d "delta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to c-id})
+            _    (cli/dep-cmd (ctx tmp) {:from b-id :to d-id})
+            _    (cli/dep-cmd (ctx tmp) {:from c-id :to d-id})
+            out  (cli/dep-tree-cmd (ctx tmp) {:id a-id :full? true})]
+        (is (not (str/includes? out "↑"))
+            "no ↑ markers in --full mode"))))
+
+  (testing "dep-tree-cmd --json returns a bare JSON object"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id (id-of-created a "alpha")
+            out  (cli/dep-tree-cmd (ctx tmp) {:id a-id :json? true})]
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out (str "\"id\":\"" a-id "\""))))))
+
+  (testing "dep-tree-cmd renders [missing] for an unknown root id"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/dep-tree-cmd (ctx tmp) {:id "kno-ghost"})]
+        (is (str/includes? out "kno-ghost"))
+        (is (str/includes? out "[missing]"))))))
 
 (deftest load-config-malformed-edn-test
   (testing "malformed EDN error includes the file path for context"

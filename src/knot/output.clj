@@ -142,6 +142,71 @@
     :type     [:faint]
     []))
 
+(defn- node-label
+  "Format a single dep-tree node line: `<id>  <title>` (or `[missing]`),
+   with a trailing ` ↑` for seen-before? leaves."
+  [{:keys [id ticket missing? seen-before?]}]
+  (cond
+    missing?     (str id "  [missing]")
+    seen-before? (str id "  " (or (extract-title (:body ticket)) "") " ↑")
+    :else        (str id "  " (or (extract-title (:body ticket)) ""))))
+
+(defn- render-tree-lines
+  "Recursively render a dep-tree node into a flat seq of strings using
+   box-drawing characters. `prefix` is the cumulative whitespace/`│`
+   stack that comes before the connector; `connector` is `├── `, `└── `,
+   or `\"\"` for the root. `child-prefix` is what every descendant of
+   this node will inherit (no connector yet)."
+  [node prefix connector child-prefix]
+  (let [head     (str prefix connector (node-label node))
+        children (or (:children node) [])
+        n        (count children)]
+    (cons head
+          (mapcat (fn [i c]
+                    (let [last? (= i (dec n))
+                          c-conn  (if last? "└── " "├── ")
+                          c-cp    (if last? "    " "│   ")]
+                      (render-tree-lines c child-prefix c-conn
+                                         (str child-prefix c-cp))))
+                  (range n)
+                  children))))
+
+(defn dep-tree-text
+  "Render a dep-tree node (from `knot.query/dep-tree`) as ASCII text using
+   box-drawing characters. Seen-before nodes are flagged with ` ↑`;
+   missing referents render as `<id>  [missing]`."
+  [tree]
+  (str/join "\n" (render-tree-lines tree "" "" "")))
+
+(defn- jsonify-tree-node
+  "Project a dep-tree node into the JSON map shape: `{id, title?, status?,
+   missing?, seen_before?, deps?}`. Title/status are derived from the
+   embedded ticket and omitted when the node is `:missing?`. `:deps`
+   recurses for normal nodes; omitted for missing or seen-before leaves."
+  [{:keys [id ticket children missing? seen-before?]}]
+  (cond-> {:id id}
+    missing?
+    (assoc :missing true)
+
+    (and (not missing?) ticket)
+    (merge {:title  (or (extract-title (:body ticket)) "")
+            :status (get-in ticket [:frontmatter :status])})
+
+    seen-before?
+    (assoc :seen_before true)
+
+    (and (not missing?) (not seen-before?))
+    (assoc :deps (mapv jsonify-tree-node (or children [])))))
+
+(defn dep-tree-json
+  "Render a dep-tree node as a bare nested JSON object (no envelope).
+   Each node carries `id`; non-missing nodes also carry `title` and
+   `status`; non-leaf nodes carry a `deps` array of children. Missing
+   referents add `missing:true` and stop. Seen-before? nodes add
+   `seen_before:true` and stop."
+  [tree]
+  (json/generate-string (jsonify-tree-node tree)))
+
 (defn ls-table
   "Render `tickets` as a fixed-width text table with the columns
      ID  STATUS  PRI  MODE  TYPE  ASSIGNEE  TITLE

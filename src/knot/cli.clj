@@ -97,14 +97,33 @@
     (store/save! project-root tickets-dir id slug ticket
                  {:now now :terminal-statuses terminal-statuses})))
 
+(defn- warn!
+  "Emit a single line to stderr."
+  [msg]
+  (binding [*out* *err*] (println msg)))
+
+(defn- warn-broken-refs!
+  "Print one stderr warning per broken `:deps` or `:parent` reference on
+   the loaded ticket, framed by the source ticket's id for context. No
+   output when there are no broken refs."
+  [loaded all-tickets]
+  (let [src-id (get-in loaded [:frontmatter :id])]
+    (doseq [{:keys [kind id]} (query/broken-refs loaded all-tickets)]
+      (warn! (str "knot: " src-id ": " (name kind)
+                  " reference " id " is missing")))))
+
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. With `:json? true`, returns a bare JSON
-   object instead. Returns nil when no matching ticket exists."
+   object instead. Returns nil when no matching ticket exists. Broken
+   `:deps`/`:parent` references emit one stderr warning each — they
+   never abort the command."
   [ctx opts]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
         loaded (store/load-one project-root tickets-dir (:id opts))]
     (when loaded
+      (warn-broken-refs! loaded
+                         (store/load-all project-root tickets-dir))
       (if (:json? opts)
         (output/show-json loaded)
         (output/show-text loaded)))))
@@ -152,6 +171,58 @@
   [ctx opts]
   (status-cmd ctx (assoc opts :status "open")))
 
+(defn- format-cycle-path
+  "Format a cycle path `[a b c a]` as `a → b → c → a` for human messages."
+  [cycle]
+  (str/join " → " cycle))
+
+(defn dep-cmd
+  "Add `(:to opts)` to the `:deps` array of the ticket whose id is
+   `(:from opts)`. Idempotent on the deps list (no duplicates). Runs
+   cycle detection on the would-be graph before persisting; throws
+   `ex-info` with `:cycle` data and a human-readable message when the
+   edge would close a cycle. Returns the saved path, or nil when `from`
+   does not exist. A non-existent `to` is allowed — broken refs are
+   tolerated and surface as `[missing]` markers at render time."
+  [ctx {:keys [from to]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)]
+    (when-let [loaded (store/load-one project-root tickets-dir from)]
+      (let [existing-deps (vec (or (get-in loaded [:frontmatter :deps]) []))
+            already?      (some #{to} existing-deps)]
+        (when-not already?
+          (let [tickets (store/load-all project-root tickets-dir)
+                cycle   (query/would-create-cycle? tickets from to)]
+            (when cycle
+              (throw (ex-info (str "cycle detected: "
+                                   (format-cycle-path cycle))
+                              {:cycle cycle})))))
+        (let [new-deps (if already? existing-deps (conj existing-deps to))
+              new-fm   (assoc (:frontmatter loaded) :deps new-deps)
+              ticket*  (assoc loaded :frontmatter new-fm)]
+          (store/save! project-root tickets-dir from nil ticket*
+                       {:now now :terminal-statuses terminal-statuses}))))))
+
+(defn undep-cmd
+  "Remove `(:to opts)` from the `:deps` array of the ticket whose id is
+   `(:from opts)`. Idempotent: removing a non-present dep is a no-op
+   (still bumps `:updated`). When the resulting deps array is empty,
+   the `:deps` key is dropped from frontmatter so the on-disk file
+   stays clean. Returns the saved path, or nil when `from` does not
+   exist."
+  [ctx {:keys [from to]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)]
+    (when-let [loaded (store/load-one project-root tickets-dir from)]
+      (let [existing (vec (or (get-in loaded [:frontmatter :deps]) []))
+            kept     (vec (remove #{to} existing))
+            new-fm   (if (empty? kept)
+                       (dissoc (:frontmatter loaded) :deps)
+                       (assoc (:frontmatter loaded) :deps kept))
+            ticket*  (assoc loaded :frontmatter new-fm)]
+        (store/save! project-root tickets-dir from nil ticket*
+                     {:now now :terminal-statuses terminal-statuses})))))
+
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.
    With `:json? true`, returns a bare JSON array. Otherwise returns the
@@ -164,6 +235,58 @@
     (if (:json? opts)
       (output/ls-json visible)
       (output/ls-table visible (select-keys opts [:tty? :color? :width])))))
+
+(defn dep-tree-cmd
+  "Render the deps subtree rooted at `(:id opts)`. Default mode dedupes
+   already-seen branches with `↑` markers; with `:full? true`, every
+   occurrence is expanded fully (only true cycles are broken with `↑`
+   to prevent infinite recursion). With `:json? true`, returns a bare
+   nested JSON object. A missing root id yields a single `[missing]`
+   line — `dep-tree-cmd` always returns a string."
+  [ctx {:keys [id full? json?]}]
+  (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
+        all  (store/load-all project-root tickets-dir)
+        tree (query/dep-tree all id {:full? (boolean full?)})]
+    (if json?
+      (output/dep-tree-json tree)
+      (output/dep-tree-text tree))))
+
+(defn dep-cycle-cmd
+  "Project-wide DFS scan for cycles in the deps graph, restricted to
+   non-terminal tickets (so cycles that exist only among archived
+   tickets don't generate noise). Returns a vector of cycle paths;
+   each path is a vector of ids that begins and ends at the same id.
+   Empty when no cycles. Caller decides exit code and stderr output."
+  [ctx _opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+        all  (store/load-all project-root tickets-dir)
+        live (query/non-terminal all terminal-statuses)]
+    (vec (query/project-cycles live))))
+
+(defn ready-cmd
+  "List tickets that are non-terminal AND whose `:deps` are all in
+   terminal status. With `:json? true`, returns a bare JSON array.
+   Otherwise returns the rendered text table. Pass `:tty?`/`:color?`
+   to control table formatting (same conventions as `ls-cmd`)."
+  [ctx opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+        all     (store/load-all project-root tickets-dir)
+        result  (query/ready all terminal-statuses)]
+    (if (:json? opts)
+      (output/ls-json result)
+      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
+
+(defn blocked-cmd
+  "List non-terminal tickets that have at least one non-terminal `:deps`
+   entry (or a missing referent). With `:json? true`, returns a bare
+   JSON array. Otherwise returns the rendered text table."
+  [ctx opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+        all     (store/load-all project-root tickets-dir)
+        result  (query/blocked all terminal-statuses)]
+    (if (:json? opts)
+      (output/ls-json result)
+      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
 
 (defn- stub-config
   "Render a self-documenting `.knot.edn` stub with every known key present

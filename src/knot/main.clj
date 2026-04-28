@@ -142,6 +142,82 @@
         (println-out (str path))
         (die (str "knot " cmd-name ": no ticket matching " id))))))
 
+(defn- edge-handler
+  "Run `dep` or `undep`: `knot <cmd> <from> <to>`. On cycle rejection
+   (only possible for `dep`), prints the offending path to stderr and
+   exits 1."
+  [cmd-name edge-fn argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+    (when (< (count args) 2)
+      (die (str "knot " cmd-name ": <from> and <to> ids are required")))
+    (let [[from to] args]
+      (try
+        (let [path (edge-fn (discover-ctx) {:from from :to to})]
+          (if path
+            (println-out (str path))
+            (die (str "knot " cmd-name ": no ticket matching " from))))
+        (catch Exception e
+          (if (:cycle (ex-data e))
+            (die (str "knot " cmd-name ": " (.getMessage e)))
+            (throw e)))))))
+
+(def ^:private dep-tree-spec
+  {:spec
+   {:json {:coerce :boolean}
+    :full {:coerce :boolean}}})
+
+(defn- dep-tree-handler [argv]
+  (let [{:keys [opts args]} (bcli/parse-args argv dep-tree-spec)
+        id (first args)]
+    (when (or (nil? id) (str/blank? id))
+      (die "knot dep tree: an id is required"))
+    (let [out (cli/dep-tree-cmd (discover-ctx)
+                                {:id    id
+                                 :json? (boolean (:json opts))
+                                 :full? (boolean (:full opts))})]
+      (println-out out))))
+
+(defn- dep-cycle-handler [_argv]
+  (let [cycles (cli/dep-cycle-cmd (discover-ctx) {})]
+    (if (empty? cycles)
+      (System/exit 0)
+      (do (binding [*out* *err*]
+            (doseq [c cycles]
+              (println (str "knot dep cycle: " (str/join " → " c)))))
+          (System/exit 1)))))
+
+(defn- dep-handler
+  "Route `knot dep ...`. `dep tree <id>` and `dep cycle` are nested;
+   otherwise it's the edge form `dep <from> <to>`."
+  [argv]
+  (case (first argv)
+    "tree"  (dep-tree-handler (rest argv))
+    "cycle" (dep-cycle-handler (rest argv))
+    (edge-handler "dep" cli/dep-cmd argv)))
+
+(def ^:private list-spec
+  {:spec
+   {:json     {:coerce :boolean}
+    :no-color {:coerce :boolean}}})
+
+(defn- list-handler
+  "Run a non-mutating list command (`ready`/`blocked`) that has the same
+   shape as `ls`: optional `--json` and `--no-color`, otherwise text
+   table output."
+  [list-fn argv]
+  (let [{:keys [opts]} (bcli/parse-args argv list-spec)
+        json?    (boolean (:json opts))
+        tty?     (output/tty?)
+        color?   (output/color-enabled?
+                  {:tty?         tty?
+                   :no-color?    (boolean (:no-color opts))
+                   :no-color-env (System/getenv "NO_COLOR")})
+        out      (list-fn (discover-ctx)
+                          {:json?  json?
+                           :tty?   tty?
+                           :color? color?})]
+    (println-out out)))
+
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
@@ -154,7 +230,13 @@
     (println "  status <id> <new-status>  Transition a ticket to a new status")
     (println "  start  <id>               Transition a ticket to in_progress")
     (println "  close  <id>               Transition a ticket to the first terminal status")
-    (println "  reopen <id>               Transition a ticket back to open")))
+    (println "  reopen <id>               Transition a ticket back to open")
+    (println "  dep    <from> <to>        Add <to> to <from>'s :deps (cycle-checked)")
+    (println "  undep  <from> <to>        Remove <to> from <from>'s :deps")
+    (println "  dep tree <id> [--json]    Render the deps subtree (--full to expand dups)")
+    (println "  dep cycle                 Scan open tickets for cycles (exit 1 if any)")
+    (println "  ready          [--json]   List tickets whose deps are all closed")
+    (println "  blocked        [--json]   List tickets with at least one open dep")))
 
 (defn -main [& argv]
   (try
@@ -164,10 +246,14 @@
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         "ls"     (ls-handler rest-argv)
-        "status" (transition-handler "status" 2 cli/status-cmd rest-argv)
-        "start"  (transition-handler "start"  1 cli/start-cmd  rest-argv)
-        "close"  (transition-handler "close"  1 cli/close-cmd  rest-argv)
-        "reopen" (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
+        "status"  (transition-handler "status" 2 cli/status-cmd rest-argv)
+        "start"   (transition-handler "start"  1 cli/start-cmd  rest-argv)
+        "close"   (transition-handler "close"  1 cli/close-cmd  rest-argv)
+        "reopen"  (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
+        "dep"     (dep-handler rest-argv)
+        "undep"   (edge-handler "undep" cli/undep-cmd rest-argv)
+        "ready"   (list-handler cli/ready-cmd   rest-argv)
+        "blocked" (list-handler cli/blocked-cmd rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

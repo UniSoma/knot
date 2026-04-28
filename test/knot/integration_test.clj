@@ -373,3 +373,100 @@
       (let [{:keys [exit err]} (run-knot tmp "create" "X")]
         (is (= 1 exit))
         (is (str/includes? err "default-priority"))))))
+
+(defn- id-from-create-out
+  "Extract the ticket id from a create-cmd's stdout path string of the
+   form `<root>/.tickets/<id>--<slug>.md`."
+  [out slug]
+  (->> (str/trim out)
+       fs/file-name
+       str
+       (re-matches (re-pattern (str "(.+)--" slug "\\.md")))
+       second))
+
+(deftest dep-undep-end-to-end-test
+  (testing "dep adds to :deps, undep removes; cycle add is rejected with stderr"
+    (with-tmp tmp
+      (let [a-out (run-knot tmp "create" "Alpha")
+            b-out (run-knot tmp "create" "Beta")
+            a-id  (id-from-create-out (:out a-out) "alpha")
+            b-id  (id-from-create-out (:out b-out) "beta")
+            ;; happy path: a depends on b
+            dep1  (run-knot tmp "dep" a-id b-id)
+            shown (run-knot tmp "show" a-id)]
+        (is (zero? (:exit dep1)) (str "dep err=" (:err dep1)))
+        (is (str/includes? (:out shown) (str "- " b-id))
+            "show output should list b under :deps")
+
+        ;; cycle: b depends on a → reject
+        (let [{:keys [exit err]} (run-knot tmp "dep" b-id a-id)]
+          (is (= 1 exit))
+          (is (str/includes? err "cycle"))
+          (is (str/includes? err a-id))
+          (is (str/includes? err b-id)))
+
+        ;; the rejected edge must not have been written
+        (let [shown-b (run-knot tmp "show" b-id)]
+          (is (not (str/includes? (:out shown-b) (str "- " a-id)))
+              "rejected dep must not be persisted"))
+
+        ;; undep removes the edge
+        (let [{:keys [exit]} (run-knot tmp "undep" a-id b-id)
+              shown-a (run-knot tmp "show" a-id)]
+          (is (zero? exit))
+          (is (not (str/includes? (:out shown-a) (str "- " b-id)))
+              "undep should drop the entry"))))))
+
+(deftest dep-tree-end-to-end-test
+  (testing "dep tree renders ASCII; --json emits a nested object"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            _    (run-knot tmp "dep" a-id b-id)
+            text (run-knot tmp "dep" "tree" a-id)
+            json (run-knot tmp "dep" "tree" a-id "--json")]
+        (is (zero? (:exit text)))
+        (is (str/includes? (:out text) "└──"))
+        (is (str/includes? (:out text) "Alpha"))
+        (is (str/includes? (:out text) "Beta"))
+        (is (zero? (:exit json)))
+        (is (str/starts-with? (str/trim (:out json)) "{"))
+        (is (str/includes? (:out json) (str "\"id\":\"" a-id "\"")))
+        (is (str/includes? (:out json) (str "\"id\":\"" b-id "\"")))))))
+
+(deftest dep-cycle-end-to-end-test
+  (testing "dep cycle exits 0 with no cycles"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
+            _    (run-knot tmp "dep" a-id b-id)
+            {:keys [exit]} (run-knot tmp "dep" "cycle")]
+        (is (zero? exit) "no cycles → exit 0")))))
+
+(deftest ready-blocked-end-to-end-test
+  (testing "ready surfaces unblocked tickets; blocked surfaces tickets with open deps"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha task")) "alpha-task")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta task")) "beta-task")
+            _    (run-knot tmp "dep" a-id b-id)
+            ready   (run-knot tmp "ready")
+            blocked (run-knot tmp "blocked")]
+        (is (zero? (:exit ready)))
+        (is (str/includes? (:out ready) "Beta task")
+            "Beta has no deps → ready")
+        (is (not (str/includes? (:out ready) "Alpha task"))
+            "Alpha is blocked by Beta → not ready")
+        (is (zero? (:exit blocked)))
+        (is (str/includes? (:out blocked) "Alpha task"))
+        (is (not (str/includes? (:out blocked) "Beta task")))))))
+
+(deftest broken-ref-warning-end-to-end-test
+  (testing "show on a ticket with a broken :deps ref emits a stderr warning, exits 0"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            _    (run-knot tmp "dep" a-id "kno-ghost")
+            {:keys [exit out err]} (run-knot tmp "show" a-id)]
+        (is (zero? exit))
+        (is (str/includes? out "kno-ghost") "raw :deps still rendered")
+        (is (str/includes? err "kno-ghost"))
+        (is (str/includes? err "missing"))))))
