@@ -1045,6 +1045,31 @@
         (is (not (str/includes? out "what's next"))
             "JSON output does not embed the user-says mapping prose"))))
 
+  (testing "show resolves a unique partial id (post-prefix ULID portion)"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Partial id")
+            full-id  (id-from-create-out out "partial-id")
+            ;; first 6 chars of the ULID suffix — a generated id has 12, so
+            ;; 6 is statistically unique in a single-ticket project
+            suffix   (subs full-id (inc (str/index-of full-id "-")))
+            partial  (subs suffix 0 6)
+            shown    (run-knot tmp "show" partial)]
+        (is (zero? (:exit shown)) (str "show <partial> err=" (:err shown)))
+        (is (str/includes? (:out shown) (str "id: " full-id))))))
+
+  (testing "show fails with a candidate list when the partial id is ambiguous"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc111111--a.md"))
+            "---\nid: kno-01abc111111\nstatus: open\n---\n\n# A\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--b.md"))
+            "---\nid: kno-01abc222222\nstatus: open\n---\n\n# B\n")
+      (let [{:keys [exit err]} (run-knot tmp "show" "kno-01abc")]
+        (is (= 1 exit))
+        (is (str/includes? err "ambiguous"))
+        (is (str/includes? err "kno-01abc111111"))
+        (is (str/includes? err "kno-01abc222222")))))
+
   (testing "knot init does NOT modify .claude/settings.json"
     ;; Ensure a global SessionStart hook can be wired from the README
     ;; without `knot init` clobbering it. The init command writes only

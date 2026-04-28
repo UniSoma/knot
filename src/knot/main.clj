@@ -444,11 +444,16 @@
       (if path
         (println-out (str path))
         ;; nil from add-note-cmd is either "id missing" or "empty content
-        ;; cancelled". Disambiguate by re-checking the id against the
-        ;; same ctx we just used.
-        (if (store/find-existing-path (:project-root ctx)
-                                      (:tickets-dir ctx)
-                                      id)
+        ;; cancelled". Disambiguate by running the same resolver. Partial
+        ;; ids must round-trip here too so an empty-content cancel on
+        ;; `knot add-note 01abc` doesn't get misread as a missing id.
+        (if (try
+              (store/resolve-id (:project-root ctx) (:tickets-dir ctx) id)
+              true
+              (catch clojure.lang.ExceptionInfo e
+                (if (= :not-found (:kind (ex-data e)))
+                  false
+                  (throw e))))
           (System/exit 0)
           (die (str "knot add-note: no ticket matching " id)))))))
 

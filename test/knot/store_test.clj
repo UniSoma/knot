@@ -315,3 +315,138 @@
       (let [loaded (store/load-one tmp ".tickets" "kno-01")]
         (is (some? loaded))
         (is (= "closed" (get-in loaded [:frontmatter :status])))))))
+
+(defn- save-fixture
+  "Persist a tiny set of tickets exercising every resolution layer:
+   two live tickets sharing the `01abc` prefix, one archived ticket
+   with a unique suffix, plus a ticket whose suffix shares a prefix
+   with one of the others. Returns the tmp dir."
+  [tmp]
+  (store/save! tmp ".tickets" "kno-01abc111111" "alpha"
+               (mk-ticket "kno-01abc111111" "open") save-opts)
+  (store/save! tmp ".tickets" "kno-01abc222222" "beta"
+               (mk-ticket "kno-01abc222222" "open") save-opts)
+  (store/save! tmp ".tickets" "kno-99zz000000" "gamma"
+               (mk-ticket "kno-99zz000000" "closed") save-opts)
+  tmp)
+
+(deftest resolve-id-test
+  (testing "exact full ID match returns the ticket (layer 1)"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (let [t (store/resolve-id tmp ".tickets" "kno-01abc111111")]
+        (is (= "kno-01abc111111" (get-in t [:frontmatter :id])))
+        (is (= "open" (get-in t [:frontmatter :status]))))))
+
+  (testing "prefix match against full ID resolves uniquely (layer 2)"
+    (with-tmp tmp
+      (save-fixture tmp)
+      ;; `kno-01abc111` is a prefix only of `kno-01abc111111`
+      (let [t (store/resolve-id tmp ".tickets" "kno-01abc111")]
+        (is (= "kno-01abc111111" (get-in t [:frontmatter :id]))))))
+
+  (testing "prefix match against post-prefix ULID portion (layer 3)"
+    (with-tmp tmp
+      (save-fixture tmp)
+      ;; `01abc111` lacks the project prefix and only the suffix matches
+      (let [t (store/resolve-id tmp ".tickets" "01abc111")]
+        (is (= "kno-01abc111111" (get-in t [:frontmatter :id]))))))
+
+  (testing "exact full match wins over a longer prefix-match candidate"
+    (with-tmp tmp
+      (save-fixture tmp)
+      ;; Plant a sibling whose id starts with the exact id of another ticket
+      (store/save! tmp ".tickets" "kno-01abc1111110000" "extra"
+                   (mk-ticket "kno-01abc1111110000" "open") save-opts)
+      (let [t (store/resolve-id tmp ".tickets" "kno-01abc111111")]
+        (is (= "kno-01abc111111" (get-in t [:frontmatter :id]))
+            "the exact id should win even though it is also a prefix of the sibling"))))
+
+  (testing "prefix-of-full match wins over prefix-of-suffix match"
+    (with-tmp tmp
+      ;; `kno-01abcdef` and a `mp-kno-01abcdef…` style ticket would be exotic;
+      ;; instead, ensure layer 2's positive match short-circuits without
+      ;; consulting layer 3 by adding a layer-3-only candidate that would
+      ;; otherwise also match.
+      (store/save! tmp ".tickets" "kno-01zzzzzzzzzz" "alpha"
+                   (mk-ticket "kno-01zzzzzzzzzz" "open") save-opts)
+      (store/save! tmp ".tickets" "abc-01yyyyyyyyyy" "beta"
+                   (mk-ticket "abc-01yyyyyyyyyy" "open") save-opts)
+      (let [t (store/resolve-id tmp ".tickets" "kno-01")]
+        ;; layer 2 picks the unique ticket whose full id starts with `kno-01`;
+        ;; layer 3 would match both suffixes (`01zzzz...` and `01yyyy...`).
+        (is (= "kno-01zzzzzzzzzz" (get-in t [:frontmatter :id]))))))
+
+  (testing "ambiguous layer-2 match does NOT fall through to layer 3"
+    (with-tmp tmp
+      (save-fixture tmp)
+      ;; Both `kno-01abc111111` and `kno-01abc222222` start with `kno-01abc`.
+      ;; The resolver must error rather than continue to suffix-prefix matching.
+      (let [e (try (store/resolve-id tmp ".tickets" "kno-01abc")
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e) "ambiguous layer-2 match should throw")
+        (is (= :ambiguous (:kind (ex-data e))))
+        (is (= #{"kno-01abc111111" "kno-01abc222222"}
+               (set (:candidates (ex-data e))))))))
+
+  (testing "resolution scans archive directory too"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (let [t (store/resolve-id tmp ".tickets" "99zz")]
+        (is (= "kno-99zz000000" (get-in t [:frontmatter :id])))
+        (is (= "closed" (get-in t [:frontmatter :status]))))))
+
+  (testing "frontmatter :id is canonical — resolution ignores filename"
+    (with-tmp tmp
+      ;; Hand-write a file whose filename does not start with the id.
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "completely-unrelated.md"))
+            (ticket/render (mk-ticket "kno-canonical01" "open")))
+      (let [t (store/resolve-id tmp ".tickets" "kno-canonical01")]
+        (is (= "kno-canonical01" (get-in t [:frontmatter :id]))))
+      (let [t (store/resolve-id tmp ".tickets" "canonical01")]
+        (is (= "kno-canonical01" (get-in t [:frontmatter :id]))))))
+
+  (testing "no match throws ex-info with kind :not-found and the input in the message"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (let [e (try (store/resolve-id tmp ".tickets" "no-such")
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e))
+        (is (= :not-found (:kind (ex-data e))))
+        (is (= "no-such" (:input (ex-data e))))
+        (is (str/includes? (ex-message e) "ticket not found: no-such")))))
+
+  (testing "ambiguous match throws with the candidate IDs listed in the message"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (let [e (try (store/resolve-id tmp ".tickets" "kno-01abc")
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e))
+        (is (= :ambiguous (:kind (ex-data e))))
+        (is (str/includes? (ex-message e) "kno-01abc111111"))
+        (is (str/includes? (ex-message e) "kno-01abc222222"))))))
+
+(deftest try-resolve-id-test
+  (testing "unique match returns the canonical full id string"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (is (= "kno-01abc111111"
+             (store/try-resolve-id tmp ".tickets" "01abc111")))))
+
+  (testing "no match returns the input unchanged (broken-ref-friendly)"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (is (= "future-id" (store/try-resolve-id tmp ".tickets" "future-id")))))
+
+  (testing "ambiguous match still throws"
+    (with-tmp tmp
+      (save-fixture tmp)
+      (let [e (try (store/try-resolve-id tmp ".tickets" "kno-01abc")
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e))
+        (is (= :ambiguous (:kind (ex-data e))))))))

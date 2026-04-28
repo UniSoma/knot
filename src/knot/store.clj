@@ -172,3 +172,74 @@
     (->> files
          (sort-by (comp str fs/file-name))
          (map (comp ticket/parse slurp str)))))
+
+(defn- id-suffix
+  "Return the post-prefix ULID portion of a ticket id (everything after
+   the first `-`), or nil when the id is malformed/missing."
+  [id]
+  (when (string? id)
+    (when-let [i (str/index-of id "-")]
+      (subs id (inc i)))))
+
+(defn- ambiguous!
+  "Throw an `ex-info` reporting `input` matched multiple `tickets`. The
+   message lists every candidate id so the caller can pick a longer prefix."
+  [input tickets]
+  (let [ids (mapv #(get-in % [:frontmatter :id]) tickets)]
+    (throw (ex-info (str "ambiguous id " input ": "
+                         (str/join ", " ids))
+                    {:kind :ambiguous :input input :candidates ids}))))
+
+(defn- not-found!
+  "Throw an `ex-info` reporting that no ticket matched `input`. The message
+   format is the AC-mandated `ticket not found: <input>`."
+  [input]
+  (throw (ex-info (str "ticket not found: " input)
+                  {:kind :not-found :input input})))
+
+(defn resolve-id
+  "Resolve `input` (a possibly-partial ticket id) to a unique full ticket
+   by scanning frontmatter `:id` across both live and archive directories.
+   Layered matching:
+     1. exact full-ID match wins;
+     2. else a unique prefix match against the full ID (`mp-01jq8p`);
+     3. else a unique prefix match against the post-prefix ULID portion
+        (`01jq8p` — works without retyping the project prefix).
+   Layer ordering is strict: a non-empty layer never falls through, so an
+   ambiguous layer-2 match throws rather than continuing to layer 3.
+   Returns the parsed ticket map `{:frontmatter ... :body ...}` on a
+   unique match. Throws `ex-info` with `:kind :not-found` (message:
+   `\"ticket not found: <input>\"`) when no ticket matches; with
+   `:kind :ambiguous` and `:candidates [<full-ids>]` when more than one
+   matches at the winning layer."
+  [project-root tickets-dir input]
+  (let [all   (load-all project-root tickets-dir)
+        match (fn [pred]
+                (vec (filter (fn [t] (pred (get-in t [:frontmatter :id]))) all)))
+        exact (match #(= % input))]
+    (if (= 1 (count exact))
+      (first exact)
+      (let [pre-full (match #(and % (str/starts-with? % input)))]
+        (case (count pre-full)
+          1 (first pre-full)
+          0 (let [pre-suf (match #(when-let [s (id-suffix %)]
+                                    (str/starts-with? s input)))]
+              (case (count pre-suf)
+                1 (first pre-suf)
+                0 (not-found! input)
+                (ambiguous! input pre-suf)))
+          (ambiguous! input pre-full))))))
+
+(defn try-resolve-id
+  "Like `resolve-id` but returns the canonical full id *string* on a
+   unique match, returns `input` unchanged on no match (so callers that
+   tolerate broken refs — `dep`, `undep`, `unlink` `to`, `dep tree` root
+   — can keep storing the user's literal input), and still throws on
+   ambiguous matches."
+  [project-root tickets-dir input]
+  (try
+    (get-in (resolve-id project-root tickets-dir input) [:frontmatter :id])
+    (catch clojure.lang.ExceptionInfo e
+      (if (= :not-found (:kind (ex-data e)))
+        input
+        (throw e)))))

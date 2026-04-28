@@ -1889,3 +1889,110 @@ Restart the daemon.
             section (subs out start end)]
         (is (not (re-find #"^name:" section))
             "name: line absent when :project-name not provided")))))
+
+(defn- save-direct
+  "Bypass cli/create-cmd to install a ticket with a deterministic id —
+   `cli/create-cmd` derives the id from a millisecond clock, which makes
+   short-prefix collision tests racy."
+  [tmp id slug status]
+  (store/save! tmp ".tickets" id slug
+               {:frontmatter {:id id :status status :type "task"
+                              :priority 2 :mode "hitl"}
+                :body (str "# " slug "\n")}
+               {:now "2026-04-28T10:00:00Z" :terminal-statuses #{"closed"}}))
+
+(deftest partial-id-resolution-test
+  (testing "show-cmd resolves a unique prefix-of-full ID"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (save-direct tmp "kno-99zz000000"  "beta"  "open")
+      (let [out (cli/show-cmd (ctx tmp) {:id "kno-01abc"})]
+        (is (some? out))
+        (is (str/includes? out "kno-01abc111111")))))
+
+  (testing "show-cmd resolves a unique prefix-of-suffix (no project prefix)"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (save-direct tmp "kno-99zz000000"  "beta"  "open")
+      (let [out (cli/show-cmd (ctx tmp) {:id "01abc"})]
+        (is (str/includes? out "kno-01abc111111")))))
+
+  (testing "show-cmd throws ex-info on ambiguous partial id"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (save-direct tmp "kno-01abc222222" "beta"  "open")
+      (let [e (try (cli/show-cmd (ctx tmp) {:id "kno-01abc"})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e))
+        (is (= :ambiguous (:kind (ex-data e)))))))
+
+  (testing "show-cmd still returns nil on not-found (preserves cli contract)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/show-cmd (ctx tmp) {:id "kno-nope"})))))
+
+  (testing "status-cmd accepts a partial id"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (let [path (cli/status-cmd (ctx tmp) {:id "01abc" :status "in_progress"})
+            loaded (store/load-one tmp ".tickets" "kno-01abc111111")]
+        (is (some? path))
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))))))
+
+  (testing "add-note-cmd accepts a partial id"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (let [path   (cli/add-note-cmd (ctx tmp) {:id "01abc" :text "hello"})
+            loaded (store/load-one tmp ".tickets" "kno-01abc111111")]
+        (is (some? path))
+        (is (str/includes? (:body loaded) "hello")))))
+
+  (testing "edit-cmd accepts a partial id"
+    (with-tmp tmp
+      (save-direct tmp "kno-01abc111111" "alpha" "open")
+      (let [path (cli/edit-cmd (ctx tmp) {:id "01abc" :editor-fn (fn [_] nil)})]
+        (is (some? path))
+        (is (str/includes? path "kno-01abc111111")))))
+
+  (testing "dep-cmd accepts a partial id for both <from> and <to>"
+    (with-tmp tmp
+      (save-direct tmp "kno-aaaa11111111" "from-t" "open")
+      (save-direct tmp "kno-bbbb22222222" "to-t"   "open")
+      (let [path   (cli/dep-cmd (ctx tmp) {:from "aaaa" :to "bbbb"})
+            loaded (store/load-one tmp ".tickets" "kno-aaaa11111111")]
+        (is (some? path))
+        (is (= ["kno-bbbb22222222"]
+               (vec (get-in loaded [:frontmatter :deps])))
+            "dep should resolve <to> to its canonical full id"))))
+
+  (testing "dep-cmd preserves a deliberately-broken <to> reference"
+    (with-tmp tmp
+      (save-direct tmp "kno-aaaa11111111" "from-t" "open")
+      (let [path   (cli/dep-cmd (ctx tmp) {:from "aaaa" :to "future-id"})
+            loaded (store/load-one tmp ".tickets" "kno-aaaa11111111")]
+        (is (some? path))
+        (is (= ["future-id"]
+               (vec (get-in loaded [:frontmatter :deps])))
+            "non-resolvable <to> should be stored verbatim — broken refs are tolerated"))))
+
+  (testing "link-cmd accepts partial ids"
+    (with-tmp tmp
+      (save-direct tmp "kno-aaaa11111111" "a" "open")
+      (save-direct tmp "kno-bbbb22222222" "b" "open")
+      (cli/link-cmd (ctx tmp) {:ids ["aaaa" "bbbb"]})
+      (let [a (store/load-one tmp ".tickets" "kno-aaaa11111111")
+            b (store/load-one tmp ".tickets" "kno-bbbb22222222")]
+        (is (= ["kno-bbbb22222222"]
+               (vec (get-in a [:frontmatter :links]))))
+        (is (= ["kno-aaaa11111111"]
+               (vec (get-in b [:frontmatter :links])))))))
+
+  (testing "dep-tree-cmd accepts a partial root id"
+    (with-tmp tmp
+      (save-direct tmp "kno-aaaa11111111" "root"  "open")
+      (save-direct tmp "kno-bbbb22222222" "child" "open")
+      (cli/dep-cmd (ctx tmp) {:from "kno-aaaa11111111" :to "kno-bbbb22222222"})
+      (let [out (cli/dep-tree-cmd (ctx tmp) {:id "aaaa"})]
+        (is (str/includes? out "kno-aaaa11111111"))
+        (is (str/includes? out "kno-bbbb22222222"))))))

@@ -1,11 +1,12 @@
 ---
 id: kno-01kqa6xfc777
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-04-28T14:12:00.519678776Z'
-updated: '2026-04-28T14:32:05.086250728Z'
+updated: '2026-04-28T20:53:27.842292476Z'
+closed: '2026-04-28T20:53:27.842292476Z'
 parent: kno-01kqa804gmgx
 external_refs:
 - docs/prd/knot-v0.md
@@ -42,3 +43,9 @@ Replace the exact-match-only ID resolution from earlier slices with the layered 
 ## Blocked by
 
 - issue-0003 (`issues/0003-lifecycle-transitions-and-archive.md`)
+
+## Notes
+
+**2026-04-28T20:53:27.842292476Z**
+
+Layered partial-id resolver lives in knot.store/resolve-id (returns ticket on unique match, throws ex-info :not-found / :ambiguous) with a soft sibling try-resolve-id for broken-ref-friendly args. show, status (start/close/reopen), dep, undep, link, unlink, add-note, edit, dep-tree all canonicalize ids through the resolver before save; broken refs in dep/undep/unlink to-args still go in verbatim. main.clj add-note disambiguation now uses resolve-id so partial ids round-trip cleanly. Tests cover each layer's positive case, layer-2 ambiguity not falling through to layer-3, archive coverage, and frontmatter-:id-canonical-not-filename.

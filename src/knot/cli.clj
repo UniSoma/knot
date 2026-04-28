@@ -119,6 +119,19 @@
   [msg]
   (binding [*out* *err*] (println msg)))
 
+(defn- resolve-or-nil
+  "Run `store/resolve-id` and translate a `:not-found` ex-info into nil so
+   commands that historically returned nil on missing ids preserve that
+   contract. Ambiguous-match exceptions still propagate — the caller has
+   no sensible default to substitute. Returns the parsed ticket map on a
+   unique resolution."
+  [project-root tickets-dir input]
+  (try
+    (store/resolve-id project-root tickets-dir input)
+    (catch clojure.lang.ExceptionInfo e
+      (when-not (= :not-found (:kind (ex-data e)))
+        (throw e)))))
+
 (defn- warn-broken-refs!
   "Print one stderr warning per broken `:deps` or `:parent` reference on
    the loaded ticket, framed by the source ticket's id for context. No
@@ -131,15 +144,17 @@
 
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
-   and return its rendered text. With `:json? true`, returns a bare JSON
-   object instead. Returns nil when no matching ticket exists. Output
-   includes the four computed inverse sections — Blockers, Blocking,
-   Children, Linked — for both human and JSON modes. Broken
-   `:deps`/`:parent` references emit one stderr warning each — they
-   never abort the command."
+   and return its rendered text. `:id` may be partial — `store/resolve-id`
+   handles the layered prefix-matching (full-id, then post-prefix ULID).
+   With `:json? true`, returns a bare JSON object instead. Returns nil
+   when no matching ticket exists; throws `ex-info` with `:kind :ambiguous`
+   when the partial id matches more than one ticket. Output includes the
+   four computed inverse sections — Blockers, Blocking, Children, Linked
+   — for both human and JSON modes. Broken `:deps`/`:parent` references
+   emit one stderr warning each — they never abort the command."
   [ctx opts]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
-        loaded (store/load-one project-root tickets-dir (:id opts))]
+        loaded (resolve-or-nil project-root tickets-dir (:id opts))]
     (when loaded
       (let [all       (store/load-all project-root tickets-dir)
             inverses* (query/inverses loaded all)]
@@ -155,11 +170,11 @@
   (first (filter (set terminal-statuses) statuses)))
 
 (defn status-cmd
-  "Transition the ticket whose id is `(:id opts)` to `(:status opts)`.
-   Loads the existing ticket, swaps `:status` in frontmatter, and re-saves
-   via `knot.store/save!` — which centralizes `:updated`/`:closed`
-   stamping and archive auto-move. Returns the saved path, or nil when
-   no ticket matches the id.
+  "Transition the ticket whose id is `(:id opts)` (full or partial) to
+   `(:status opts)`. The resolver canonicalizes the id before save so
+   archive auto-move and slug recovery operate on the full id. Returns
+   the saved path, or nil when no ticket matches; throws on ambiguous
+   partial ids.
 
    When `(:summary opts)` is supplied (any string, including \"\"), the
    target status must be in `:terminal-statuses` — non-terminal targets
@@ -174,15 +189,16 @@
       (throw (ex-info (str "--summary is only valid on transitions to a "
                            "terminal status; " status " is non-terminal")
                       {:status status})))
-    (when-let [loaded (store/load-one project-root tickets-dir id)]
-      (let [new-fm  (assoc (:frontmatter loaded) :status status)
+    (when-let [loaded (resolve-or-nil project-root tickets-dir id)]
+      (let [full-id (get-in loaded [:frontmatter :id])
+            new-fm  (assoc (:frontmatter loaded) :status status)
             body*   (if (and (some? summary) (not (str/blank? summary)))
                       (ticket/append-note (:body loaded)
                                           now
                                           (str/trim summary))
                       (:body loaded))
             ticket  (assoc loaded :frontmatter new-fm :body body*)]
-        (store/save! project-root tickets-dir id nil ticket
+        (store/save! project-root tickets-dir full-id nil ticket
                      {:now now :terminal-statuses terminal-statuses})))))
 
 (defn start-cmd
@@ -214,49 +230,55 @@
 
 (defn dep-cmd
   "Add `(:to opts)` to the `:deps` array of the ticket whose id is
-   `(:from opts)`. Idempotent on the deps list (no duplicates). Runs
-   cycle detection on the would-be graph before persisting; throws
-   `ex-info` with `:cycle` data and a human-readable message when the
-   edge would close a cycle. Returns the saved path, or nil when `from`
-   does not exist. A non-existent `to` is allowed — broken refs are
-   tolerated and surface as `[missing]` markers at render time."
+   `(:from opts)`. Both args may be partial ids: `from` resolves
+   strictly (returns nil on no match, throws on ambiguous); `to` resolves
+   softly via `try-resolve-id` so a deliberately-broken ref still goes
+   in verbatim — broken refs are tolerated and surface as `[missing]`
+   markers at render time. Idempotent on the deps list. Runs cycle
+   detection on the would-be graph before persisting; throws `ex-info`
+   with `:cycle` data when the edge would close a cycle."
   [ctx {:keys [from to]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
-    (when-let [loaded (store/load-one project-root tickets-dir from)]
-      (let [existing-deps (vec (or (get-in loaded [:frontmatter :deps]) []))
-            already?      (some #{to} existing-deps)]
+    (when-let [loaded (resolve-or-nil project-root tickets-dir from)]
+      (let [from-id       (get-in loaded [:frontmatter :id])
+            to-id         (store/try-resolve-id project-root tickets-dir to)
+            existing-deps (vec (or (get-in loaded [:frontmatter :deps]) []))
+            already?      (some #{to-id} existing-deps)]
         (when-not already?
           (let [tickets (store/load-all project-root tickets-dir)
-                cycle   (query/would-create-cycle? tickets from to)]
+                cycle   (query/would-create-cycle? tickets from-id to-id)]
             (when cycle
               (throw (ex-info (str "cycle detected: "
                                    (format-cycle-path cycle))
                               {:cycle cycle})))))
-        (let [new-deps (if already? existing-deps (conj existing-deps to))
+        (let [new-deps (if already? existing-deps (conj existing-deps to-id))
               new-fm   (assoc (:frontmatter loaded) :deps new-deps)
               ticket*  (assoc loaded :frontmatter new-fm)]
-          (store/save! project-root tickets-dir from nil ticket*
+          (store/save! project-root tickets-dir from-id nil ticket*
                        {:now now :terminal-statuses terminal-statuses}))))))
 
 (defn undep-cmd
   "Remove `(:to opts)` from the `:deps` array of the ticket whose id is
-   `(:from opts)`. Idempotent: removing a non-present dep is a no-op
-   (still bumps `:updated`). When the resulting deps array is empty,
-   the `:deps` key is dropped from frontmatter so the on-disk file
-   stays clean. Returns the saved path, or nil when `from` does not
-   exist."
+   `(:from opts)`. Both args may be partial ids: `from` strict, `to` soft
+   (so a stale broken ref can still be undepped by typing it verbatim).
+   Idempotent: removing a non-present dep is a no-op (still bumps
+   `:updated`). When the resulting deps array is empty, the `:deps` key
+   is dropped from frontmatter so the on-disk file stays clean. Returns
+   the saved path, or nil when `from` does not exist."
   [ctx {:keys [from to]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
-    (when-let [loaded (store/load-one project-root tickets-dir from)]
-      (let [existing (vec (or (get-in loaded [:frontmatter :deps]) []))
-            kept     (vec (remove #{to} existing))
+    (when-let [loaded (resolve-or-nil project-root tickets-dir from)]
+      (let [from-id  (get-in loaded [:frontmatter :id])
+            to-id    (store/try-resolve-id project-root tickets-dir to)
+            existing (vec (or (get-in loaded [:frontmatter :deps]) []))
+            kept     (vec (remove #{to-id} existing))
             new-fm   (if (empty? kept)
                        (dissoc (:frontmatter loaded) :deps)
                        (assoc (:frontmatter loaded) :deps kept))
             ticket*  (assoc loaded :frontmatter new-fm)]
-        (store/save! project-root tickets-dir from nil ticket*
+        (store/save! project-root tickets-dir from-id nil ticket*
                      {:now now :terminal-statuses terminal-statuses})))))
 
 (defn- add-link
@@ -270,10 +292,12 @@
 
 (defn link-cmd
   "Create symmetric `:links` between every pair of ids in `(:ids opts)`.
-   Requires two or more ids. Each id must resolve to an existing ticket;
-   a missing id raises an `ex-info` naming it. Idempotent on each side
-   — re-linking is a no-op (no duplicate entries). Returns a vector of
-   the saved paths, one per modified ticket, in the order ids appear."
+   Requires two or more ids. Each id may be partial — `store/resolve-id`
+   canonicalizes them. A missing id propagates a `:not-found` ex-info
+   with message `\"ticket not found: <input>\"`; an ambiguous partial
+   propagates `:ambiguous`. Idempotent on each side — re-linking is a
+   no-op (no duplicate entries). Returns a vector of the saved paths,
+   one per modified ticket, in the resolved-id order."
   [ctx {:keys [ids]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)
@@ -281,26 +305,21 @@
     (when (< (count ids*) 2)
       (throw (ex-info "link requires two or more ticket ids"
                       {:ids ids*})))
-    (let [loaded (reduce
-                  (fn [acc id]
-                    (if-let [t (store/load-one project-root tickets-dir id)]
-                      (assoc acc id t)
-                      (throw (ex-info (str "no ticket matching " id)
-                                      {:id id}))))
-                  {}
-                  ids*)
-          updated (reduce
-                   (fn [acc id]
-                     (let [others (remove #{id} ids*)
-                           t      (reduce add-link (get acc id) others)]
-                       (assoc acc id t)))
-                   loaded
-                   ids*)]
+    (let [resolved (mapv #(store/resolve-id project-root tickets-dir %) ids*)
+          full-ids (mapv #(get-in % [:frontmatter :id]) resolved)
+          loaded   (zipmap full-ids resolved)
+          updated  (reduce
+                    (fn [acc id]
+                      (let [others (remove #{id} full-ids)
+                            t      (reduce add-link (get acc id) others)]
+                        (assoc acc id t)))
+                    loaded
+                    full-ids)]
       (mapv (fn [id]
               (store/save! project-root tickets-dir id nil
                            (get updated id)
                            {:now now :terminal-statuses terminal-statuses}))
-            ids*))))
+            full-ids))))
 
 (defn- remove-link
   "Remove `other` from `ticket`'s `:links`. When the resulting list is
@@ -315,29 +334,28 @@
 
 (defn unlink-cmd
   "Remove the symmetric link between `(:from opts)` and `(:to opts)`.
-   `from` must resolve to an existing ticket; a missing `from` raises
-   `ex-info`. A missing `to` is tolerated — the removal from `from`'s
-   `:links` still happens, and the (non-existent) other side is a no-op.
-   Idempotent: removing a non-present link is a clean no-op (still bumps
-   `:updated`). Returns a vector of saved paths (1 when only `from`
-   exists, 2 when both exist)."
+   Both args may be partial: `from` is resolved strictly (a `:not-found`
+   propagates as ex-info); `to` is resolved softly so a previously-broken
+   link can still be undone by typing it verbatim. Idempotent: removing
+   a non-present link is a clean no-op (still bumps `:updated`). Returns
+   a vector of saved paths (1 when only `from` exists, 2 when both exist)."
   [ctx {:keys [from to]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)
-        save-opts {:now now :terminal-statuses terminal-statuses}
-        from-t (store/load-one project-root tickets-dir from)]
-    (when-not from-t
-      (throw (ex-info (str "no ticket matching " from) {:id from})))
-    (let [to-t      (store/load-one project-root tickets-dir to)
-          from-saved (store/save! project-root tickets-dir from nil
-                                  (remove-link from-t to)
-                                  save-opts)]
-      (if to-t
-        [from-saved
-         (store/save! project-root tickets-dir to nil
-                      (remove-link to-t from)
-                      save-opts)]
-        [from-saved]))))
+        save-opts  {:now now :terminal-statuses terminal-statuses}
+        from-t     (store/resolve-id project-root tickets-dir from)
+        from-id    (get-in from-t [:frontmatter :id])
+        to-id      (store/try-resolve-id project-root tickets-dir to)
+        to-t       (store/load-one project-root tickets-dir to-id)
+        from-saved (store/save! project-root tickets-dir from-id nil
+                                (remove-link from-t to-id)
+                                save-opts)]
+    (if to-t
+      [from-saved
+       (store/save! project-root tickets-dir to-id nil
+                    (remove-link to-t from-id)
+                    save-opts)]
+      [from-saved])))
 
 (defn- resolve-note-content
   "Resolve the note content string from the layered input options:
@@ -351,41 +369,44 @@
     :else                (if editor-fn (editor-fn ctx-line) "")))
 
 (defn add-note-cmd
-  "Append a timestamped note to the body of the ticket with id `(:id opts)`.
-   Layered input: explicit `:text` wins; otherwise reads stdin (when
-   `:stdin-tty?` is false) via `(:stdin-reader-fn)`; otherwise opens the
-   editor via `(:editor-fn ctx-line)`. Empty/blank content is a no-op:
-   no file change, returns nil. Missing id returns nil. On success
-   returns the saved path."
+  "Append a timestamped note to the body of the ticket with id `(:id opts)`
+   (full or partial). Layered input: explicit `:text` wins; otherwise
+   reads stdin (when `:stdin-tty?` is false) via `(:stdin-reader-fn)`;
+   otherwise opens the editor via `(:editor-fn ctx-line)`. Empty/blank
+   content is a no-op: no file change, returns nil. Missing id returns
+   nil; ambiguous id throws. On success returns the saved path."
   [ctx opts]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
-    (when-let [loaded (store/load-one project-root tickets-dir (:id opts))]
-      (let [ctx-line (str "Adding a note to " (:id opts) ".")
+    (when-let [loaded (resolve-or-nil project-root tickets-dir (:id opts))]
+      (let [full-id  (get-in loaded [:frontmatter :id])
+            ctx-line (str "Adding a note to " full-id ".")
             content  (resolve-note-content opts ctx-line)]
         (when-not (str/blank? content)
           (let [trimmed (str/trim content)
                 body*   (ticket/append-note (:body loaded) now trimmed)
                 ticket* (assoc loaded :body body*)]
-            (store/save! project-root tickets-dir (:id opts) nil ticket*
+            (store/save! project-root tickets-dir full-id nil ticket*
                          {:now now :terminal-statuses terminal-statuses})))))))
 
 (defn edit-cmd
-  "Open the ticket file for `(:id opts)` in the editor via `(:editor-fn path)`.
-   After the editor returns, the file is reloaded and re-saved through
-   `knot.store/save!` so `:updated` bumps (even on no-op edits) and any
-   status-edit triggers archive routing. The slug suffix is preserved —
-   `save!` recovers it from the existing filename. Returns the saved path,
-   or nil when no ticket matches the id."
+  "Open the ticket file for `(:id opts)` (full or partial) in the editor
+   via `(:editor-fn path)`. After the editor returns, the file is
+   reloaded and re-saved through `knot.store/save!` so `:updated` bumps
+   (even on no-op edits) and any status-edit triggers archive routing.
+   The slug suffix is preserved — `save!` recovers it from the existing
+   filename. Returns the saved path, or nil when no ticket matches the
+   id; ambiguous partial ids throw."
   [ctx {:keys [id editor-fn]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
-        (resolve-ctx ctx)
-        existing-path (store/find-existing-path project-root tickets-dir id)]
-    (when existing-path
-      (editor-fn existing-path)
-      (let [reloaded (ticket/parse (slurp existing-path))]
-        (store/save! project-root tickets-dir id nil reloaded
-                     {:now now :terminal-statuses terminal-statuses})))))
+        (resolve-ctx ctx)]
+    (when-let [resolved (resolve-or-nil project-root tickets-dir id)]
+      (let [full-id       (get-in resolved [:frontmatter :id])
+            existing-path (store/find-existing-path project-root tickets-dir full-id)]
+        (editor-fn existing-path)
+        (let [reloaded (ticket/parse (slurp existing-path))]
+          (store/save! project-root tickets-dir full-id nil reloaded
+                       {:now now :terminal-statuses terminal-statuses}))))))
 
 (defn- filter-criteria
   "Project the filter-relevant keys out of `opts` into the criteria map
@@ -433,18 +454,21 @@
        distinct))
 
 (defn dep-tree-cmd
-  "Render the deps subtree rooted at `(:id opts)`. Default mode dedupes
+  "Render the deps subtree rooted at `(:id opts)` (full or partial).
+   The root id is resolved softly: a unique partial match is canonicalized
+   to the full id; a non-resolving input is passed through verbatim so the
+   renderer can emit a `[missing]` line. Ambiguous partial ids propagate
+   as ex-info — the user must disambiguate. Default mode dedupes
    already-seen branches with `↑` markers; with `:full? true`, every
    occurrence is expanded fully (only true cycles are broken with `↑`
    to prevent infinite recursion). With `:json? true`, returns a bare
-   nested JSON object. A missing root id yields a single `[missing]`
-   line — `dep-tree-cmd` always returns a string. Broken refs encountered
-   anywhere in the rendered subtree emit one stderr warning per source
-   ticket, mirroring `show-cmd`."
+   nested JSON object. Broken refs encountered anywhere in the rendered
+   subtree emit one stderr warning per source ticket, mirroring `show-cmd`."
   [ctx {:keys [id full? json?]}]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
-        all  (store/load-all project-root tickets-dir)
-        tree (query/dep-tree all id {:full? (boolean full?)})]
+        full-id (store/try-resolve-id project-root tickets-dir id)
+        all     (store/load-all project-root tickets-dir)
+        tree    (query/dep-tree all full-id {:full? (boolean full?)})]
     (doseq [t (tree-tickets tree)]
       (warn-broken-refs! t all))
     (if json?
