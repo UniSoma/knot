@@ -236,17 +236,33 @@
       (output/ls-json visible)
       (output/ls-table visible (select-keys opts [:tty? :color? :width])))))
 
+(defn- tree-tickets
+  "Walk a dep-tree node and return the unique full tickets it contains, in
+   pre-order. Skips `:missing?` and `:seen-before?` leaves — missing nodes
+   carry no ticket, and seen-before? leaves are duplicates of earlier
+   nodes that we've already visited."
+  [tree]
+  (->> (tree-seq #(seq (:children %)) :children tree)
+       (remove :missing?)
+       (remove :seen-before?)
+       (keep :ticket)
+       distinct))
+
 (defn dep-tree-cmd
   "Render the deps subtree rooted at `(:id opts)`. Default mode dedupes
    already-seen branches with `↑` markers; with `:full? true`, every
    occurrence is expanded fully (only true cycles are broken with `↑`
    to prevent infinite recursion). With `:json? true`, returns a bare
    nested JSON object. A missing root id yields a single `[missing]`
-   line — `dep-tree-cmd` always returns a string."
+   line — `dep-tree-cmd` always returns a string. Broken refs encountered
+   anywhere in the rendered subtree emit one stderr warning per source
+   ticket, mirroring `show-cmd`."
   [ctx {:keys [id full? json?]}]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
         all  (store/load-all project-root tickets-dir)
         tree (query/dep-tree all id {:full? (boolean full?)})]
+    (doseq [t (tree-tickets tree)]
+      (warn-broken-refs! t all))
     (if json?
       (output/dep-tree-json tree)
       (output/dep-tree-text tree))))

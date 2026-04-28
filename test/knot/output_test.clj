@@ -322,4 +322,22 @@
     (let [tree (node "kno-A" "Alpha"
                      :children [(node "kno-D" "Delta" :seen-before? true)])
           out  (output/dep-tree-json tree)]
-      (is (str/includes? out "\"seen_before\":true")))))
+      (is (str/includes? out "\"seen_before\":true"))))
+
+  (testing "exact JSON snapshot — pin the public contract"
+    ;; Locks the documented shape (issue-0005 lines 127-135): bare nested
+    ;; object, snake_case `seen_before`, missing-as-leaf with no `deps`,
+    ;; seen-before-as-leaf with no `deps`, normal leaves carry `deps:[]`.
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-G" nil :missing? true)
+                                (node "kno-D" "Delta" :seen-before? true)
+                                (node "kno-B" "Beta")])]
+      (is (= (str "{\"id\":\"kno-A\",\"title\":\"Alpha\",\"status\":\"open\","
+                  "\"deps\":["
+                  "{\"id\":\"kno-G\",\"missing\":true},"
+                  "{\"id\":\"kno-D\",\"title\":\"Delta\",\"status\":\"open\","
+                  "\"seen_before\":true},"
+                  "{\"id\":\"kno-B\",\"title\":\"Beta\",\"status\":\"open\","
+                  "\"deps\":[]}"
+                  "]}")
+             (output/dep-tree-json tree))))))

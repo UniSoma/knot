@@ -100,6 +100,16 @@
      ;; placeholder for nils so they sort last
      (or c "")]))
 
+(defn- compare-ready-order
+  "Two-arg comparator: priority ascending, then `:created` descending."
+  [a b]
+  (let [[pa ca] (by-priority-then-created-desc a)
+        [pb cb] (by-priority-then-created-desc b)
+        cmp     (compare pa pb)]
+    (if (zero? cmp)
+      (compare cb ca)
+      cmp)))
+
 (defn ready
   "Return live (non-terminal) tickets whose every `:deps` entry resolves to
    a terminal-status ticket. Sorted by priority ascending (0 = highest),
@@ -109,14 +119,7 @@
         live  (filter (partial live? terminal-statuses) tickets)]
     (->> live
          (filter (partial all-deps-terminal? terminal-statuses index))
-         (sort (fn [a b]
-                 (let [[pa ca] (by-priority-then-created-desc a)
-                       [pb cb] (by-priority-then-created-desc b)
-                       cmp     (compare pa pb)]
-                   (if (zero? cmp)
-                     ;; created desc: newer first → invert compare
-                     (compare cb ca)
-                     cmp))))
+         (sort compare-ready-order)
          vec)))
 
 (defn blocked
@@ -128,13 +131,7 @@
         live  (filter (partial live? terminal-statuses) tickets)]
     (->> live
          (filter (partial any-dep-non-terminal? terminal-statuses index))
-         (sort (fn [a b]
-                 (let [[pa ca] (by-priority-then-created-desc a)
-                       [pb cb] (by-priority-then-created-desc b)
-                       cmp     (compare pa pb)]
-                   (if (zero? cmp)
-                     (compare cb ca)
-                     cmp))))
+         (sort compare-ready-order)
          vec)))
 
 (defn broken-refs

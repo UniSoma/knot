@@ -441,7 +441,28 @@
             b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
             _    (run-knot tmp "dep" a-id b-id)
             {:keys [exit]} (run-knot tmp "dep" "cycle")]
-        (is (zero? exit) "no cycles → exit 0")))))
+        (is (zero? exit) "no cycles → exit 0"))))
+
+  (testing "dep cycle on a hand-edited cycle: exit 1, stderr names both ids with arrows"
+    ;; The CLI rejects cycle-creating `dep` adds, so the only way to land
+    ;; one is to bypass it by editing the file directly.
+    (with-tmp tmp
+      (let [a-out  (run-knot tmp "create" "Alpha")
+            b-out  (run-knot tmp "create" "Beta")
+            a-id   (id-from-create-out (:out a-out) "alpha")
+            b-id   (id-from-create-out (:out b-out) "beta")
+            _      (run-knot tmp "dep" a-id b-id)
+            b-path (str/trim (:out b-out))
+            ;; inject `deps: [a-id]` immediately after Beta's opening fence
+            [before after] (str/split (slurp b-path) #"---\n" 2)
+            _ (spit b-path (str before "---\ndeps:\n  - " a-id "\n" after))
+            {:keys [exit out err]} (run-knot tmp "dep" "cycle")]
+        (is (= 1 exit) "cycle present → exit 1")
+        (is (str/blank? out) "no data on stdout for cycle scan")
+        (is (str/includes? err "knot dep cycle:") "stderr framing prefix")
+        (is (str/includes? err "→") "stderr uses arrow joiner")
+        (is (str/includes? err a-id))
+        (is (str/includes? err b-id))))))
 
 (deftest ready-blocked-end-to-end-test
   (testing "ready surfaces unblocked tickets; blocked surfaces tickets with open deps"

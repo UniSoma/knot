@@ -290,4 +290,16 @@
           refs   (set (query/broken-refs t others))]
       (is (contains? refs {:kind :deps :id "x"}))
       (is (contains? refs {:kind :deps :id "y"}))
-      (is (contains? refs {:kind :parent :id "z"})))))
+      (is (contains? refs {:kind :parent :id "z"}))))
+
+  (testing "broken-refs preserves declaration order: deps in declared order, parent last"
+    ;; warn-broken-refs! iterates with doseq, so output order = vector order.
+    ;; This is a stability contract: stderr lines must be reproducible.
+    (let [t      {:frontmatter {:id "a" :status "open"
+                                :deps ["m" "n" "o"] :parent "p"}}
+          others [t]]
+      (is (= [{:kind :deps   :id "m"}
+              {:kind :deps   :id "n"}
+              {:kind :deps   :id "o"}
+              {:kind :parent :id "p"}]
+             (query/broken-refs t others))))))

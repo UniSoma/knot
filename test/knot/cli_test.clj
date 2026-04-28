@@ -730,7 +730,27 @@
       (fs/create-dirs (fs/path tmp ".tickets"))
       (let [out (cli/dep-tree-cmd (ctx tmp) {:id "kno-ghost"})]
         (is (str/includes? out "kno-ghost"))
-        (is (str/includes? out "[missing]"))))))
+        (is (str/includes? out "[missing]")))))
+
+  (testing "dep-tree-cmd warns to stderr for broken refs in the rendered subtree"
+    (with-tmp tmp
+      (let [a       (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id    (id-of-created a "alpha")
+            _       (cli/dep-cmd (ctx tmp) {:from a-id :to "kno-ghost"})
+            err     (with-err-str (cli/dep-tree-cmd (ctx tmp) {:id a-id}))]
+        (is (str/includes? err a-id) "stderr framing names the source ticket")
+        (is (str/includes? err "kno-ghost"))
+        (is (str/includes? err "missing")))))
+
+  (testing "dep-tree-cmd does not warn when no refs are broken"
+    (with-tmp tmp
+      (let [a    (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b    (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            err  (with-err-str (cli/dep-tree-cmd (ctx tmp) {:id a-id}))]
+        (is (= "" err))))))
 
 (deftest load-config-malformed-edn-test
   (testing "malformed EDN error includes the file path for context"
