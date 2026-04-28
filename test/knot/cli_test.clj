@@ -914,7 +914,10 @@
       (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
             a-id (id-of-created a "alpha")]
         (is (thrown-with-msg? Exception #"kno-ghost"
-              (cli/link-cmd (ctx tmp) {:ids [a-id "kno-ghost"]})))))))
+              (cli/link-cmd (ctx tmp) {:ids [a-id "kno-ghost"]})))
+        (is (not (contains? (:frontmatter (store/load-one tmp ".tickets" a-id))
+                            :links))
+            "all-or-nothing: a-id's :links must not be written when any target id fails to resolve")))))
 
 (deftest unlink-cmd-test
   (testing "unlink-cmd removes the link from both files"
