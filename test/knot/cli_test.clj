@@ -506,6 +506,19 @@
         (is (= before (slurp created))
             "no file change on rejected --summary"))))
 
+  (testing "status <id> <non-terminal> --summary \"\" also errors (key-presence semantics)"
+    ;; Validation triggers on (some? summary), not on (seq summary): an
+    ;; empty-string summary on a non-terminal target is still a misuse.
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg? Exception #"summary"
+              (cli/status-cmd (ctx tmp)
+                              {:id id :status "in_progress" :summary ""})))
+        (is (= before (slurp created))
+            "no file change on rejected empty --summary"))))
+
   (testing "start --summary errors (start is always non-terminal)"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp) {:title "T"})
@@ -1182,6 +1195,23 @@
             after   (slurp created)]
         (is (= before after)))))
 
+  (testing "editor-fn that throws bubbles out and leaves the file untouched"
+    ;; Pins the contract for the real spawn-editor! path: when the editor
+    ;; exits non-zero (which knot.main turns into a thrown ex-info), the
+    ;; exception propagates and no save runs.
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg? Exception #"editor crashed"
+              (cli/add-note-cmd (ctx tmp)
+                                {:id id
+                                 :stdin-tty? true
+                                 :editor-fn (fn [_]
+                                              (throw (ex-info "editor crashed" {})))})))
+        (is (= before (slurp created))
+            "no file change when editor-fn throws"))))
+
   (testing "appending a note bumps :updated"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp) {:title "T"})
@@ -1190,6 +1220,21 @@
             _       (cli/add-note-cmd later {:id id :text "x"})
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "2026-06-01T10:00:00Z" (get-in loaded [:frontmatter :updated]))))))
+
+  (testing "leading and trailing newlines on note content are stripped"
+    ;; Editor-mode pre-fill leaves leading blank lines after #-comments are
+    ;; stripped; without trimming, the rendered note carries extra blanks
+    ;; between the timestamp marker and the body.
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-10T10:00:00Z")
+            _       (cli/add-note-cmd later
+                                      {:id id :text "\n\nhello\n\n"})
+            body    (:body (store/load-one tmp ".tickets" id))]
+        (is (str/includes? body "**2026-05-10T10:00:00Z**\n\nhello\n"))
+        (is (not (str/includes? body "**2026-05-10T10:00:00Z**\n\n\n"))
+            "no triple-newline gap between timestamp and body"))))
 
   (testing "returns nil and does nothing when id is missing"
     (with-tmp tmp
@@ -1247,7 +1292,20 @@
                        (spit created (str/replace original "# Alpha" "# Bravo")))
             new-path (cli/edit-cmd (ctx tmp) {:id id :editor-fn (fn [_] nil)})]
         (is (= created new-path))
-        (is (str/ends-with? new-path "--alpha.md"))))))
+        (is (str/ends-with? new-path "--alpha.md")))))
+
+  (testing "editor-fn that throws bubbles out and leaves the file untouched"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg? Exception #"editor crashed"
+              (cli/edit-cmd (ctx tmp)
+                            {:id id
+                             :editor-fn (fn [_]
+                                          (throw (ex-info "editor crashed" {})))})))
+        (is (= before (slurp created))
+            "no save runs when editor-fn throws")))))
 
 (deftest resolve-editor-test
   (testing "VISUAL wins when set"

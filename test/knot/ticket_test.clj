@@ -191,4 +191,31 @@
   (testing "note content with internal newlines is preserved verbatim"
     (let [body "# Title\n\n## Notes\n"
           out  (ticket/append-note body "2026-04-28T10:00:00Z" "Line one.\nLine two.")]
-      (is (str/includes? out "Line one.\nLine two.")))))
+      (is (str/includes? out "Line one.\nLine two."))))
+
+  (testing "## NotesAndStuff is not treated as a Notes heading"
+    ;; A heading whose label starts with `Notes` but continues with more
+    ;; text must not be a false-positive. The append should create a
+    ;; brand-new `## Notes` section instead of reusing the lookalike.
+    (let [body "# Title\n\n## NotesAndStuff\n\nUnrelated.\n"
+          out  (ticket/append-note body "2026-04-28T10:00:00Z" "New.")]
+      (is (str/includes? out "## NotesAndStuff"))
+      (is (str/includes? out "## Notes\n\n"))
+      (is (< (str/index-of out "## NotesAndStuff")
+             (str/index-of out "\n## Notes\n"))
+          "the lookalike heading is preserved; a fresh ## Notes section is appended after it")))
+
+  (testing "new note lands inside ## Notes even when later sections follow it"
+    ;; A user may hand-edit a ticket so that some other `## ...` section
+    ;; comes after Notes. The new note must still land inside Notes,
+    ;; not after the trailing section.
+    (let [body "# Title\n\n## Notes\n\nA.\n\n## Other\n\nLast.\n"
+          out  (ticket/append-note body "2026-04-28T10:00:00Z" "NEW.")
+          notes-pos (str/index-of out "## Notes")
+          new-pos   (str/index-of out "NEW.")
+          other-pos (str/index-of out "## Other")
+          last-pos  (str/index-of out "Last.")]
+      (is (and notes-pos new-pos other-pos last-pos)
+          "all anchors should still be present")
+      (is (< notes-pos new-pos other-pos last-pos)
+          "order: Notes heading → new note → ## Other → Last."))))

@@ -179,7 +179,7 @@
             body*   (if (and (some? summary) (not (str/blank? summary)))
                       (ticket/append-note (:body loaded)
                                           now
-                                          (str/trim-newline summary))
+                                          (str/trim summary))
                       (:body loaded))
             ticket  (assoc loaded :frontmatter new-fm :body body*)]
         (store/save! project-root tickets-dir id nil ticket
@@ -364,7 +364,7 @@
       (let [ctx-line (str "Adding a note to " (:id opts) ".")
             content  (resolve-note-content opts ctx-line)]
         (when-not (str/blank? content)
-          (let [trimmed (str/trim-newline content)
+          (let [trimmed (str/trim content)
                 body*   (ticket/append-note (:body loaded) now trimmed)
                 ticket* (assoc loaded :body body*)]
             (store/save! project-root tickets-dir (:id opts) nil ticket*

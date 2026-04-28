@@ -98,32 +98,55 @@
             (subs head 0 cut)
             head))))))
 
-(def ^:private notes-anchor "## Notes")
+(def ^:private notes-heading "## Notes")
 
 (defn- note-block
   "Format a note as a `**<iso>**\\n\\n<content>` block (no trailing newline)."
   [iso content]
   (str "**" iso "**\n\n" content))
 
+(defn- notes-region
+  "Locate the `## Notes` section in `body`. Returns
+   `{:start <heading-start> :end <section-end>}` or nil when no heading
+   matches. `:end` is the start of the next `## ` heading after Notes,
+   or `(count body)` when Notes is the last section. The heading regex
+   is line-anchored and requires only horizontal whitespace after
+   `Notes` so it never false-matches `## NotesAndStuff` or `### Notes`."
+  [body]
+  (let [m (re-matcher #"(?m)^## Notes[ \t]*$" body)]
+    (when (.find m)
+      (let [after  (.end m)
+            next-m (re-matcher #"(?m)^## " body)
+            end    (if (.find next-m after)
+                     (.start next-m)
+                     (count body))]
+        {:start (.start m) :end end}))))
+
 (defn append-note
   "Append a timestamped note (`**<iso>**\\n\\n<content>`) under the body's
    `## Notes` section. Creates the section at the end of the body when
-   missing. The returned body always ends with a single trailing newline."
+   missing. The note always lands inside the Notes section even when
+   other `## ...` sections follow it. The returned body always ends with
+   a single trailing newline."
   [body iso content]
-  (let [body*    (or body "")
-        block    (note-block iso content)
-        anchor   notes-anchor]
-    (if-let [idx (str/index-of body* anchor)]
-      (let [head     (subs body* 0 idx)
-            tail     (subs body* idx)
-            ;; trim trailing whitespace from tail so the new block has a
-            ;; predictable separator regardless of how the existing section
-            ;; ended (`## Notes\n`, `## Notes\n\n`, or with prior notes).
-            tail*    (str/replace tail #"\s+$" "")]
-        (str head tail* "\n\n" block "\n"))
+  (let [body* (or body "")
+        block (note-block iso content)]
+    (if-let [{:keys [start end]} (notes-region body*)]
+      (let [head     (subs body* 0 start)
+            section  (subs body* start end)
+            tail     (subs body* end)
+            ;; trim trailing whitespace from the section so the new block
+            ;; has a predictable separator regardless of how the existing
+            ;; section ended (`## Notes\n`, `## Notes\n\n`, or with prior
+            ;; notes).
+            section* (str/replace section #"\s+$" "")
+            ;; one trailing newline when Notes is the last section; a
+            ;; blank-line separator before the next section otherwise.
+            sep-tail (if (str/blank? tail) "\n" "\n\n")]
+        (str head section* "\n\n" block sep-tail tail))
       (let [head (str/replace body* #"\s+$" "")
             sep  (if (str/blank? head) "" "\n\n")]
-        (str head sep anchor "\n\n" block "\n")))))
+        (str head sep notes-heading "\n\n" block "\n")))))
 
 (def ^:private prefix-fallback
   "Literal default used when a directory name yields no alphanumeric content

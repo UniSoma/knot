@@ -306,9 +306,17 @@
                (str/join " " (rest args)))]
     (when (or (nil? id) (str/blank? id))
       (die "knot add-note: an id is required"))
-    (let [tty? (some? (System/console))
+    ;; (System/console) returns nil when *either* stdin or stdout is
+    ;; redirected. That handles the common shapes correctly (piped stdin
+    ;; reads stdin; pure-interactive opens the editor). The unusual shape
+    ;; `knot add-note id > out.txt` (stdout redirected, stdin still a
+    ;; TTY) is treated as non-TTY and slurps stdin — typically empty,
+    ;; which cleanly cancels. A precise stdin-isatty probe needs JNI or
+    ;; a shell-out and is parked.
+    (let [ctx  (discover-ctx)
+          tty? (some? (System/console))
           path (cli/add-note-cmd
-                 (discover-ctx)
+                 ctx
                  {:id              id
                   :text            text
                   :stdin-tty?      tty?
@@ -316,12 +324,14 @@
                   :editor-fn       (editor-fn-for-note)})]
       (if path
         (println-out (str path))
-        ;; nil from add-note-cmd is either "id missing" or
-        ;; "empty content cancelled". Differentiate by re-checking the id.
-        (let [{:keys [project-root tickets-dir]} (discover-ctx)]
-          (if (store/find-existing-path project-root tickets-dir id)
-            (System/exit 0)
-            (die (str "knot add-note: no ticket matching " id))))))))
+        ;; nil from add-note-cmd is either "id missing" or "empty content
+        ;; cancelled". Disambiguate by re-checking the id against the
+        ;; same ctx we just used.
+        (if (store/find-existing-path (:project-root ctx)
+                                      (:tickets-dir ctx)
+                                      id)
+          (System/exit 0)
+          (die (str "knot add-note: no ticket matching " id)))))))
 
 (defn- edit-handler
   "Handle `knot edit <id>`."

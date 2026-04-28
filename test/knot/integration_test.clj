@@ -31,6 +31,19 @@
                         args)
                 {:dir cwd :in "" :out :string :err :string})))
 
+(defn- run-knot-with-stdin
+  "Like `run-knot`, but pipes `stdin-str` into the subprocess's stdin
+   instead of closing it. Use to exercise commands that read piped input
+   (`add-note` with no text arg)."
+  [cwd stdin-str & args]
+  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+                       "-e"
+                       (str "(require '[knot.main]) "
+                            "(apply (resolve 'knot.main/-main) *command-line-args*)")
+                       "--"]
+                      args)
+              {:dir cwd :in stdin-str :out :string :err :string}))
+
 (deftest create-then-show-end-to-end-test
   (testing "create writes a slug-suffixed file in .tickets/, show reads it back"
     (with-tmp tmp
@@ -594,6 +607,20 @@
         (let [{:keys [out]} (run-knot tmp "show" a-id)]
           (is (not (str/includes? out "## Notes"))
               "blank stdin should leave the file unchanged")))))
+
+  (testing "add-note <id> reads piped stdin when no text arg is supplied"
+    ;; Pins the real (slurp *in*) wiring in knot.main: with content piped
+    ;; on stdin and no text arg, the body of the note is whatever was
+    ;; piped in. Companion to the unit-level :stdin-reader-fn tests.
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit out err]}
+            (run-knot-with-stdin tmp "piped note body" "add-note" a-id)]
+        (is (zero? exit) (str "add-note err=" err))
+        (is (str/includes? (str/trim out) "--alpha.md"))
+        (let [{:keys [out]} (run-knot tmp "show" a-id)]
+          (is (str/includes? out "## Notes"))
+          (is (str/includes? out "piped note body"))))))
 
   (testing "add-note on a missing id exits non-zero with a stderr message"
     (with-tmp tmp
