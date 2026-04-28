@@ -105,6 +105,27 @@
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
 
+(defn- transition-handler
+  "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
+   via `transition-fn`. `arg-count` is the number of positional args
+   consumed (1 for start/close/reopen, 2 for status). `cmd-name` is
+   used in error messages. The handler prints the new path on stdout."
+  [cmd-name arg-count transition-fn argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+    (when (< (count args) arg-count)
+      (die (str "knot " cmd-name ": "
+                (case arg-count
+                  1 "an id is required"
+                  2 "an id and new status are required"))))
+    (let [id   (first args)
+          opts (if (= arg-count 2)
+                 {:id id :status (second args)}
+                 {:id id})
+          path (transition-fn (discover-ctx) opts)]
+      (if path
+        (println-out (str path))
+        (die (str "knot " cmd-name ": no ticket matching " id))))))
+
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
@@ -112,7 +133,11 @@
     (println "Commands:")
     (println "  create <title> [flags]    Create a new ticket")
     (println "  show   <id>   [--json]    Render the ticket with the given id")
-    (println "  ls            [--json]    List live (non-terminal) tickets")))
+    (println "  ls            [--json]    List live (non-terminal) tickets")
+    (println "  status <id> <new-status>  Transition a ticket to a new status")
+    (println "  start  <id>               Transition a ticket to in_progress")
+    (println "  close  <id>               Transition a ticket to the first terminal status")
+    (println "  reopen <id>               Transition a ticket back to open")))
 
 (defn -main [& argv]
   (try
@@ -121,6 +146,10 @@
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         "ls"     (ls-handler rest-argv)
+        "status" (transition-handler "status" 2 cli/status-cmd rest-argv)
+        "start"  (transition-handler "start"  1 cli/start-cmd  rest-argv)
+        "close"  (transition-handler "close"  1 cli/close-cmd  rest-argv)
+        "reopen" (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

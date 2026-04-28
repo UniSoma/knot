@@ -221,6 +221,64 @@
         (is (str/blank? out))
         (is (str/includes? err "unknown command"))))))
 
+(deftest status-end-to-end-test
+  (testing "status <id> <new-status> updates the ticket and is visible via show"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            id (->> (str (fs/file-name (str/trim out)))
+                    (re-matches #"(.+)--hello\.md")
+                    second)
+            {:keys [exit err]} (run-knot tmp "status" id "in_progress")]
+        (is (zero? exit) (str "status err=" err))
+        (let [shown (run-knot tmp "show" id "--json")]
+          (is (zero? (:exit shown)))
+          (is (str/includes? (:out shown) "\"status\":\"in_progress\"")))))))
+
+(deftest start-close-reopen-end-to-end-test
+  (testing "start moves a ticket to in_progress; close archives; reopen restores"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            live-path (str/trim out)
+            id        (->> (str (fs/file-name live-path))
+                           (re-matches #"(.+)--hello\.md")
+                           second)
+            ;; start
+            {:keys [exit err]} (run-knot tmp "start" id)
+            _ (is (zero? exit) (str "start err=" err))
+            shown1 (run-knot tmp "show" id "--json")
+            _ (is (str/includes? (:out shown1) "\"status\":\"in_progress\""))
+            ;; close — file should move into archive/
+            {:keys [exit err]} (run-knot tmp "close" id)
+            _ (is (zero? exit) (str "close err=" err))
+            archive-path (str (fs/path tmp ".tickets" "archive"
+                                       (fs/file-name live-path)))
+            _ (is (fs/exists? archive-path)
+                  (str "expected archived file at " archive-path))
+            _ (is (not (fs/exists? live-path))
+                  "live-directory file should be gone after close")
+            shown2 (run-knot tmp "show" id "--json")
+            _ (is (str/includes? (:out shown2) "\"status\":\"closed\""))
+            _ (is (str/includes? (:out shown2) "\"closed\":")
+                  "closed timestamp should be present after close")
+            ;; reopen — file should move back to live
+            {:keys [exit err]} (run-knot tmp "reopen" id)
+            _ (is (zero? exit) (str "reopen err=" err))]
+        (is (fs/exists? live-path) "reopened file should be back in live dir")
+        (is (not (fs/exists? archive-path))
+            "archive copy should be gone after reopen")
+        (let [shown3 (run-knot tmp "show" id "--json")]
+          (is (str/includes? (:out shown3) "\"status\":\"open\""))
+          (is (not (str/includes? (:out shown3) "\"closed\":"))
+              "reopen should clear :closed from frontmatter"))))))
+
+(deftest status-missing-id-test
+  (testing "status on a missing id exits non-zero with a stderr message"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "status" "no-such-id" "open")]
+        (is (= 1 exit))
+        (is (str/includes? err "no ticket matching"))))))
+
 (deftest ls-default-hides-closed-test
   (testing "default ls excludes terminal-status tickets"
     (with-tmp tmp

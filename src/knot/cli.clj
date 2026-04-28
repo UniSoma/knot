@@ -72,9 +72,9 @@
    optional overrides for defaults (`:tickets-dir`, `:default-type`, etc.).
    `opts` is the parsed argument map, e.g. `{:title \"Fix login\" :priority 0}`."
   [ctx opts]
-  (let [{:keys [project-root prefix tickets-dir
-                default-type default-priority default-mode now assignee]
-         :as ctx*} (resolve-ctx ctx)
+  (let [{:keys [project-root prefix tickets-dir terminal-statuses
+                default-type default-priority default-mode now assignee]}
+        (resolve-ctx ctx)
         title    (:title opts)
         id       (ticket/generate-id prefix)
         slug     (ticket/derive-slug title)
@@ -92,7 +92,8 @@
                    :external-ref (:external-ref opts)})
         body     (build-body opts)
         ticket   {:frontmatter fm :body body}]
-    (store/save! project-root tickets-dir id slug ticket)))
+    (store/save! project-root tickets-dir id slug ticket
+                 {:now now :terminal-statuses terminal-statuses})))
 
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
@@ -105,6 +106,49 @@
       (if (:json? opts)
         (output/show-json loaded)
         (output/show-text loaded)))))
+
+(defn- first-terminal-status
+  "Return the first status from `statuses` that is also in `terminal-statuses`,
+   or nil when none of the configured statuses is terminal."
+  [statuses terminal-statuses]
+  (first (filter (set terminal-statuses) statuses)))
+
+(defn status-cmd
+  "Transition the ticket whose id is `(:id opts)` to `(:status opts)`.
+   Loads the existing ticket, swaps `:status` in frontmatter, and re-saves
+   via `knot.store/save!` — which centralizes `:updated`/`:closed`
+   stamping and archive auto-move. Returns the saved path, or nil when
+   no ticket matches the id."
+  [ctx {:keys [id status]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)]
+    (when-let [loaded (store/load-one project-root tickets-dir id)]
+      (let [new-fm (assoc (:frontmatter loaded) :status status)
+            ticket (assoc loaded :frontmatter new-fm)]
+        (store/save! project-root tickets-dir id nil ticket
+                     {:now now :terminal-statuses terminal-statuses})))))
+
+(defn start-cmd
+  "Sugar for `status-cmd`: transition `(:id opts)` to `in_progress`."
+  [ctx opts]
+  (status-cmd ctx (assoc opts :status "in_progress")))
+
+(defn close-cmd
+  "Sugar for `status-cmd`: transition `(:id opts)` to the first status from
+   the configured `:statuses` list that is also in `:terminal-statuses`.
+   Falls back to `closed` when neither key resolves a terminal status."
+  [ctx opts]
+  (let [{:keys [statuses terminal-statuses]} (resolve-ctx ctx)
+        target (or (first-terminal-status statuses terminal-statuses)
+                   "closed")]
+    (status-cmd ctx (assoc opts :status target))))
+
+(defn reopen-cmd
+  "Sugar for `status-cmd`: transition `(:id opts)` to `open`. The
+   `:closed` frontmatter key is cleared by `knot.store/save!` because
+   `open` is non-terminal."
+  [ctx opts]
+  (status-cmd ctx (assoc opts :status "open")))
 
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.
