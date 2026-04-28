@@ -1,9 +1,9 @@
 # knot
 
-A babashka CLI ticket tracker for solo developers. Tickets are markdown
-files with YAML frontmatter under `.tickets/`; closed tickets auto-move
-to `.tickets/archive/`. Built for one human on one machine, with
-first-class support for handing autonomous work to an AI agent.
+A CLI ticket tracker for solo developers. Tickets are
+markdown files with YAML frontmatter under `.tickets/`; closed tickets
+auto-move to `.tickets/archive/`. Built for one human on one machine,
+with first-class support for handing autonomous work to an AI agent.
 
 See [`docs/prd/knot-v0.md`](docs/prd/knot-v0.md) for the full design
 rationale and the v0 acceptance criteria.
@@ -17,9 +17,14 @@ describes.
 
 It keeps the useful properties of a plain-file tracker — readable files,
 git-native history, no server — and adds the pieces that matter for a
-Clojure and AI-agent workflow: built-in JSON output, configurable project
-schema, sortable collision-resistant IDs, dependency queries, and a
-first-class `afk`/`hitl` mode for deciding what an agent can run alone.
+local, AI-agent-friendly workflow: built-in JSON output, configurable
+project schema, sortable collision-resistant IDs, dependency queries,
+and a first-class `afk`/`hitl` mode for deciding what an agent can run
+alone.
+
+Knot is written in Clojure and distributed as a babashka script, but it
+can track work for any project: Clojure, JavaScript, Python, writing,
+infrastructure, or anything else you keep in a directory.
 
 If you need multi-user coordination, permissions, dashboards, or hosted
 notifications, use an issue tracker. If you need a fast local backlog that
