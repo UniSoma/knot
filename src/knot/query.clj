@@ -15,7 +15,9 @@
   "True when ticket `t` matches the value-set `vs` under criteria key `k`.
    Empty/nil `vs` is a no-op match. `:tag` checks set overlap with the
    ticket's `:tags`; all other keys do equality lookup on the matching
-   frontmatter key (`:type`, `:status`, `:mode`, `:assignee`)."
+   frontmatter key (`:type`, `:status`, `:mode`, `:assignee`). Throws on
+   unknown criterion keys — silent fall-through would let a typo'd key
+   match every ticket and quietly disable the user's intended filter."
   [k vs t]
   (if (empty? vs)
     true
@@ -26,7 +28,8 @@
         :mode     (contains? vs (:mode fm))
         :assignee (contains? vs (:assignee fm))
         :type     (contains? vs (:type fm))
-        true))))
+        (throw (ex-info (str "filter-tickets: unknown criterion key " k)
+                        {:key k}))))))
 
 (defn filter-tickets
   "Return tickets matching every criterion in `criteria`. Composable filter

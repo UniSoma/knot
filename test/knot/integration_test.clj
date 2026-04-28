@@ -383,6 +383,48 @@
           (is (str/includes? text "mode: hitl")
               "explicit --mode hitl should override --afk shortcut"))))))
 
+(deftest mode-missing-on-legacy-tickets-test
+  (testing "tickets without :mode load and behave leniently"
+    ;; Legacy tickets predating the :mode field must continue to work:
+    ;; show/ls/ready treat them as 'unfiltered' rather than rewriting or
+    ;; rejecting them. A future change adding `(or mode default)` somewhere
+    ;; on the load path would silently mutate these files; this test
+    ;; locks in lenient handling.
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      ;; Hand-write a ticket with no :mode key in frontmatter.
+      (spit (str (fs/path tmp ".tickets" "tmp-noModeId01--no-mode.md"))
+            (str "---\n"
+                 "id: tmp-noModeId01\n"
+                 "status: open\n"
+                 "type: task\n"
+                 "priority: 2\n"
+                 "---\n\n"
+                 "# No mode\n"))
+      (testing "show works and does not invent a :mode line"
+        (let [{:keys [exit out]} (run-knot tmp "show" "tmp-noModeId01")]
+          (is (zero? exit))
+          (is (str/includes? out "# No mode"))
+          (is (not (re-find #"(?m)^mode: " out))
+              "show output must not synthesize a mode line absent from disk")))
+      (testing "ls includes the mode-less ticket by default"
+        (let [{:keys [exit out]} (run-knot tmp "ls")]
+          (is (zero? exit))
+          (is (str/includes? out "No mode"))))
+      (testing "ls --mode afk excludes the mode-less ticket"
+        (let [{:keys [exit out]} (run-knot tmp "ls" "--mode" "afk")]
+          (is (zero? exit))
+          (is (not (str/includes? out "No mode"))
+              "explicit --mode afk filter must not match a ticket with no :mode")))
+      (testing "ready includes the mode-less ticket (no deps, non-terminal)"
+        (let [{:keys [exit out]} (run-knot tmp "ready")]
+          (is (zero? exit))
+          (is (str/includes? out "No mode"))))
+      (testing "the on-disk file is unchanged after these reads"
+        (let [path (fs/path tmp ".tickets" "tmp-noModeId01--no-mode.md")]
+          (is (not (str/includes? (slurp (str path)) "mode:"))
+              "no mode key should have been written to the file"))))))
+
 (deftest config-flows-into-create-test
   (testing ".knot.edn :default-type and :default-priority show up in created tickets"
     (with-tmp tmp
@@ -622,7 +664,20 @@
             _    (run-knot tmp "close" a-id)
             {:keys [out]} (run-knot tmp "closed" "--json")]
         (is (str/starts-with? (str/trim out) "["))
-        (is (str/includes? out "\"status\":\"closed\""))))))
+        (is (str/includes? out "\"status\":\"closed\"")))))
+
+  (testing "closed and blocked reject filter flags they do not implement"
+    ;; closed/blocked share the narrow list-spec (no filter keys). A user
+    ;; who types `--mode afk` should get a clear failure, not a silent
+    ;; no-op that returns the unfiltered list.
+    (with-tmp tmp
+      (doseq [cmd ["closed" "blocked"]
+              flag ["--mode" "--status" "--assignee" "--tag" "--type"]]
+        (let [{:keys [exit err]} (run-knot tmp cmd flag "x")]
+          (is (= 1 exit)
+              (str cmd " " flag " should exit non-zero"))
+          (is (str/includes? err "Unknown option")
+              (str cmd " " flag " should name the unknown option in stderr")))))))
 
 (deftest link-unlink-end-to-end-test
   (testing "link writes symmetric :links to both files"

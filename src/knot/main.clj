@@ -116,12 +116,12 @@
   "Project the parsed CLI `opts` map onto the keyword-set shape that
    `cli/ls-cmd` and `cli/ready-cmd` expect for `query/filter-tickets`."
   [opts]
-  (cond-> {}
-    (->set (:status   opts)) (assoc :status   (->set (:status   opts)))
-    (->set (:assignee opts)) (assoc :assignee (->set (:assignee opts)))
-    (->set (:tag      opts)) (assoc :tag      (->set (:tag      opts)))
-    (->set (:type     opts)) (assoc :type     (->set (:type     opts)))
-    (->set (:mode     opts)) (assoc :mode     (->set (:mode     opts)))))
+  (reduce (fn [acc k]
+            (if-let [s (->set (get opts k))]
+              (assoc acc k s)
+              acc))
+          {}
+          [:status :assignee :tag :type :mode]))
 
 (defn- println-out
   "Print a string to stdout. Adds a trailing newline only when `s` does
@@ -255,22 +255,37 @@
     (edge-handler "dep" cli/dep-cmd argv)))
 
 (def ^:private list-spec
+  "Spec for `closed`/`blocked` — the narrow shape: output flags and
+   `--limit` only. `:restrict true` rejects unknown flags loudly so
+   typos and filter flags don't silently no-op."
   {:spec
    {:json     {:coerce :boolean}
     :no-color {:coerce :boolean}
-    :status   {:coerce []}
-    :assignee {:coerce []}
-    :tag      {:coerce []}
-    :type     {:coerce []}
-    :mode     {:coerce []}
-    :limit    {:coerce :long}}})
+    :limit    {:coerce :long}}
+   :restrict true})
+
+(def ^:private ready-spec
+  "Spec for `ready` — `list-spec` plus the composable filter flags. The
+   filter flags share their `:coerce []` shape with `ls-spec` so a
+   value like `--mode afk` parses identically across both commands."
+  {:spec
+   (merge (:spec list-spec)
+          {:status   {:coerce []}
+           :assignee {:coerce []}
+           :tag      {:coerce []}
+           :type     {:coerce []}
+           :mode     {:coerce []}})
+   :restrict true})
 
 (defn- list-handler
-  "Run a non-mutating list command (`ready`/`blocked`/`closed`) that has
-   the same shape as `ls`: optional `--json`, `--no-color`, filter flags,
-   and `--limit`. Filters apply BEFORE `--limit` truncation."
-  [list-fn argv]
-  (let [{:keys [opts]} (bcli/parse-args argv list-spec)
+  "Run a non-mutating list command that shares the `ls`-like output
+   shape: `--json`, `--no-color`, optionally `--limit`, optionally
+   filter flags. `spec` controls which flags are accepted — `ready`
+   passes `ready-spec` (filters); `closed`/`blocked` pass `list-spec`
+   (no filters). Filters that survive parsing apply BEFORE `--limit`
+   truncation."
+  [spec list-fn argv]
+  (let [{:keys [opts]} (bcli/parse-args argv spec)
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -450,9 +465,9 @@
         "undep"    (edge-handler "undep" cli/undep-cmd rest-argv)
         "link"     (link-handler   rest-argv)
         "unlink"   (unlink-handler rest-argv)
-        "ready"    (list-handler cli/ready-cmd   rest-argv)
-        "blocked"  (list-handler cli/blocked-cmd rest-argv)
-        "closed"   (list-handler cli/closed-cmd  rest-argv)
+        "ready"    (list-handler ready-spec cli/ready-cmd   rest-argv)
+        "blocked"  (list-handler list-spec  cli/blocked-cmd rest-argv)
+        "closed"   (list-handler list-spec  cli/closed-cmd  rest-argv)
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
         nil      (do (usage) (System/exit 1))

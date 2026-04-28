@@ -464,12 +464,17 @@
     (vec (query/project-cycles live))))
 
 (defn- apply-limit
-  "Take the first `n` items of `xs` when `n` is a positive integer; return
-   `xs` unchanged otherwise."
+  "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
+   means no limit — return `xs` unchanged. Any other value (including 0
+   and negatives) throws: `--limit 0` silently meaning 'no limit' surprised
+   users coming from CLIs where 0 means 'zero results'."
   [xs n]
-  (if (and (integer? n) (pos? n))
-    (vec (take n xs))
-    xs))
+  (cond
+    (nil? n)                    xs
+    (and (integer? n) (pos? n)) (vec (take n xs))
+    :else
+    (throw (ex-info (str "--limit must be a positive integer; got " n)
+                    {:limit n}))))
 
 (defn ready-cmd
   "List tickets that are non-terminal AND whose `:deps` are all in

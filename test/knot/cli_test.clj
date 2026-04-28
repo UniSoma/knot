@@ -1018,7 +1018,97 @@ Restart the daemon.
       (cli/create-cmd (ctx tmp) {:title "Live"})
       (let [out (cli/closed-cmd (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "ID"))
-        (is (not (str/includes? out "Live")))))))
+        (is (not (str/includes? out "Live"))))))
+
+  (testing "closed-cmd sorts tickets without a :closed stamp last"
+    ;; Locks in the missing-:closed branch of by-closed-desc. Legacy
+    ;; archive files predating the :closed stamp must still load, but
+    ;; they have no timestamp to compare against — they must sort after
+    ;; every stamped ticket regardless of input order. Exercising this
+    ;; branch via close-cmd is impossible (it always stamps), so the
+    ;; legacy file is hand-written.
+    (with-tmp tmp
+      (let [c        (ctx tmp)
+            stamped  (cli/create-cmd c {:title "Stamped"})
+            stamped-id (id-of-created stamped "stamped")
+            _        (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z")
+                                    {:id stamped-id})
+            archive  (fs/path tmp ".tickets" "archive")
+            _        (fs/create-dirs archive)
+            ;; Hand-rolled archive ticket: status is terminal, so closed-cmd
+            ;; must include it, but no :closed key — exercises the comparator
+            ;; branch where ca is nil.
+            legacy   (str (fs/path archive "kno-legacy0001--legacy.md"))
+            _        (spit legacy
+                           (str "---\n"
+                                "id: kno-legacy0001\n"
+                                "status: closed\n"
+                                "type: task\n"
+                                "priority: 2\n"
+                                "created: 2025-01-01T00:00:00Z\n"
+                                "updated: 2025-01-01T00:00:00Z\n"
+                                "---\n"
+                                "# Legacy\n"))
+            out      (cli/closed-cmd c {:tty? false :color? false})
+            stamped-i (str/index-of out "Stamped")
+            legacy-i  (str/index-of out "Legacy")]
+        (is (and stamped-i legacy-i)
+            "both stamped and legacy tickets present in output")
+        (is (< stamped-i legacy-i)
+            "stamped ticket sorts before unstamped legacy ticket"))))
+
+  (testing "closed-cmd sorts unstamped tickets last regardless of input order"
+    ;; Cover the symmetric branch (cb nil) — load-all sorts by filename,
+    ;; so put the unstamped file first alphabetically. If by-closed-desc
+    ;; were `(compare cb ca)` unconditionally, nil compare would throw.
+    (with-tmp tmp
+      (let [c        (ctx tmp)
+            archive  (fs/path tmp ".tickets" "archive")
+            _        (fs/create-dirs archive)
+            _        (spit (str (fs/path archive "kno-aaa00001--aaa.md"))
+                           (str "---\n"
+                                "id: kno-aaa00001\n"
+                                "status: closed\n"
+                                "type: task\n"
+                                "priority: 2\n"
+                                "created: 2025-01-01T00:00:00Z\n"
+                                "updated: 2025-01-01T00:00:00Z\n"
+                                "---\n"
+                                "# Unstamped\n"))
+            stamped  (cli/create-cmd c {:title "Zeta"})
+            zeta-id  (id-of-created stamped "zeta")
+            _        (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z")
+                                    {:id zeta-id})
+            out      (cli/closed-cmd c {:tty? false :color? false})
+            zeta-i   (str/index-of out "Zeta")
+            unst-i   (str/index-of out "Unstamped")]
+        (is (and zeta-i unst-i))
+        (is (< zeta-i unst-i)
+            "Zeta (stamped) sorts before Unstamped regardless of filename order"))))
+
+  (testing "closed-cmd / ready-cmd reject --limit 0 and negative limits"
+    ;; nil limit (the no-flag case) is the only non-positive value that
+    ;; means 'no limit'. An explicit 0 or negative is almost always a
+    ;; mistake and should fail loudly rather than be silently ignored.
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (cli/create-cmd c {:title "Live"})
+        (doseq [n [0 -1 -42]
+                cmd-fn [cli/closed-cmd cli/ready-cmd]]
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo
+               #"--limit must be a positive integer"
+               (cmd-fn c {:tty? false :color? false :limit n}))
+              (str cmd-fn " with limit " n " should throw"))))))
+
+  (testing "closed-cmd / ready-cmd accept nil :limit (no-flag case)"
+    ;; Sanity: the explicit-non-positive rejection above must not have
+    ;; broken the common 'no --limit' code path.
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            _ (cli/create-cmd c {:title "Live"})]
+        (is (string? (cli/closed-cmd c {:tty? false :color? false})))
+        (is (string? (cli/ready-cmd  c {:tty? false :color? false})))))))
 
 (deftest blocked-cmd-test
   (testing "blocked-cmd lists tickets with non-terminal deps"

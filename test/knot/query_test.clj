@@ -438,4 +438,13 @@
               (ft "x" :mode "afk")]]
       (is (= ["z" "y" "x"]
              (mapv #(get-in % [:frontmatter :id])
-                   (query/filter-tickets ts {:mode #{"afk"}})))))))
+                   (query/filter-tickets ts {:mode #{"afk"}}))))))
+
+  (testing "unknown criterion key throws — no silent fall-through"
+    ;; A typo like {:taggs #{...}} would, under a `true` default, let
+    ;; every ticket match and quietly disable the intended filter. The
+    ;; thrown ex-info names the offending key so callers can pinpoint it.
+    (let [ts [(ft "a" :mode "afk")]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"unknown criterion key :taggs"
+                            (doall (query/filter-tickets ts {:taggs #{"x"}})))))))
