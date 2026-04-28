@@ -18,7 +18,9 @@
 
 (defn- run-knot
   "Run `knot <args...>` with `cwd` as the working directory. Returns
-   `{:exit n :out s :err s}`."
+   `{:exit n :out s :err s}`. Stdin is closed (empty) by default so that
+   commands which probe stdin (`add-note` without a text arg) do not
+   block waiting for the parent's tty."
   [cwd & args]
   (let [main-clj (str (fs/path project-root "src" "knot" "main.clj"))]
     @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
@@ -27,7 +29,7 @@
                               "(apply (resolve 'knot.main/-main) *command-line-args*)")
                          "--"]
                         args)
-                {:dir cwd :out :string :err :string})))
+                {:dir cwd :in "" :out :string :err :string})))
 
 (deftest create-then-show-end-to-end-test
   (testing "create writes a slug-suffixed file in .tickets/, show reads it back"
@@ -567,3 +569,89 @@
         (is (str/includes? out "kno-ghost") "raw :deps still rendered")
         (is (str/includes? err "kno-ghost"))
         (is (str/includes? err "missing"))))))
+
+(deftest add-note-end-to-end-test
+  (testing "add-note <id> <text> appends a timestamped note under ## Notes"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit out err]}
+            (run-knot tmp "add-note" a-id "first note")]
+        (is (zero? exit) (str "add-note err=" err))
+        (is (str/includes? (str/trim out) "--alpha.md")
+            "stdout is the saved path")
+        (let [{:keys [out]} (run-knot tmp "show" a-id)]
+          (is (str/includes? out "## Notes"))
+          (is (str/includes? out "first note"))))))
+
+  (testing "add-note <id> with no text and no piped stdin shows nothing weird"
+    ;; This test documents the non-TTY path: when stdin is closed (default
+    ;; for p/process) and no text arg, add-note tries to read stdin (gets
+    ;; EOF / empty string), treats as cancel, and exits 0.
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit]} (run-knot tmp "add-note" a-id)]
+        (is (zero? exit))
+        (let [{:keys [out]} (run-knot tmp "show" a-id)]
+          (is (not (str/includes? out "## Notes"))
+              "blank stdin should leave the file unchanged")))))
+
+  (testing "add-note on a missing id exits non-zero with a stderr message"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "add-note" "kno-nope" "x")]
+        (is (= 1 exit))
+        (is (str/includes? err "no ticket matching"))))))
+
+(deftest close-with-summary-end-to-end-test
+  (testing "close <id> --summary appends a closure note and archives"
+    (with-tmp tmp
+      (let [a-id     (id-from-create-out (:out (run-knot tmp "create" "Alpha"))
+                                         "alpha")
+            {:keys [exit out err]}
+            (run-knot tmp "close" a-id "--summary" "shipped to prod")]
+        (is (zero? exit) (str "close err=" err))
+        (is (str/includes? (str/trim out) "/archive/")
+            "closed file moved to archive")
+        (let [{:keys [out]} (run-knot tmp "show" a-id)]
+          (is (str/includes? out "status: closed"))
+          (is (str/includes? out "## Notes"))
+          (is (str/includes? out "shipped to prod"))))))
+
+  (testing "status <id> closed --summary appends a closure note"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha"))
+                                     "alpha")
+            {:keys [exit err]}
+            (run-knot tmp "status" a-id "closed" "--summary" "completed")]
+        (is (zero? exit) (str "status err=" err))
+        (let [{:keys [out]} (run-knot tmp "show" a-id)]
+          (is (str/includes? out "completed")))))))
+
+(deftest summary-rejected-on-non-terminal-end-to-end-test
+  (testing "status <id> <non-terminal> --summary exits non-zero with stderr message"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha"))
+                                     "alpha")
+            {:keys [exit err]}
+            (run-knot tmp "status" a-id "in_progress" "--summary" "nope")]
+        (is (= 1 exit))
+        (is (str/includes? err "summary")))))
+
+  (testing "start <id> --summary errors"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha"))
+                                     "alpha")
+            {:keys [exit err]} (run-knot tmp "start" a-id
+                                         "--summary" "nope")]
+        (is (= 1 exit))
+        (is (str/includes? err "summary")))))
+
+  (testing "reopen <id> --summary errors"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha"))
+                                     "alpha")
+            _    (run-knot tmp "close" a-id)
+            {:keys [exit err]} (run-knot tmp "reopen" a-id
+                                         "--summary" "nope")]
+        (is (= 1 exit))
+        (is (str/includes? err "summary"))))))

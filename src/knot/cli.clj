@@ -12,6 +12,23 @@
             [knot.ticket :as ticket])
   (:import (java.time Instant)))
 
+(defn on-path?
+  "True when `cmd` resolves on the current PATH."
+  [cmd]
+  (some? (fs/which cmd)))
+
+(defn resolve-editor
+  "Pick an editor command from `env`: `$VISUAL → $EDITOR → nano → vi`.
+   `env` is a map of env-var name → value (typically `(System/getenv)`)."
+  [env]
+  (let [visual (get env "VISUAL")
+        editor (get env "EDITOR")]
+    (cond
+      (and visual (not (str/blank? visual))) visual
+      (and editor (not (str/blank? editor))) editor
+      (on-path? "nano")                      "nano"
+      :else                                  "vi")))
+
 (defn- now-iso []
   (str (Instant/now)))
 
@@ -142,13 +159,29 @@
    Loads the existing ticket, swaps `:status` in frontmatter, and re-saves
    via `knot.store/save!` — which centralizes `:updated`/`:closed`
    stamping and archive auto-move. Returns the saved path, or nil when
-   no ticket matches the id."
-  [ctx {:keys [id status]}]
+   no ticket matches the id.
+
+   When `(:summary opts)` is supplied (any string, including \"\"), the
+   target status must be in `:terminal-statuses` — non-terminal targets
+   throw before any file is written. A non-blank summary is appended as
+   a timestamped note under `## Notes` via `ticket/append-note`, sharing
+   the same writer path as `add-note-cmd`."
+  [ctx {:keys [id status summary]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
+    (when (and (some? summary)
+               (not (contains? (or terminal-statuses #{}) status)))
+      (throw (ex-info (str "--summary is only valid on transitions to a "
+                           "terminal status; " status " is non-terminal")
+                      {:status status})))
     (when-let [loaded (store/load-one project-root tickets-dir id)]
-      (let [new-fm (assoc (:frontmatter loaded) :status status)
-            ticket (assoc loaded :frontmatter new-fm)]
+      (let [new-fm  (assoc (:frontmatter loaded) :status status)
+            body*   (if (and (some? summary) (not (str/blank? summary)))
+                      (ticket/append-note (:body loaded)
+                                          now
+                                          (str/trim-newline summary))
+                      (:body loaded))
+            ticket  (assoc loaded :frontmatter new-fm :body body*)]
         (store/save! project-root tickets-dir id nil ticket
                      {:now now :terminal-statuses terminal-statuses})))))
 
@@ -305,6 +338,54 @@
                       (remove-link to-t from)
                       save-opts)]
         [from-saved]))))
+
+(defn- resolve-note-content
+  "Resolve the note content string from the layered input options:
+   explicit `:text` arg wins; if absent and `:stdin-tty?` is false, call
+   `:stdin-reader-fn`; otherwise call `:editor-fn` with a context line.
+   Missing fns at the chosen branch return an empty string."
+  [{:keys [text stdin-tty? stdin-reader-fn editor-fn] :as _opts} ctx-line]
+  (cond
+    (some? text)         text
+    (false? stdin-tty?)  (if stdin-reader-fn (stdin-reader-fn) "")
+    :else                (if editor-fn (editor-fn ctx-line) "")))
+
+(defn add-note-cmd
+  "Append a timestamped note to the body of the ticket with id `(:id opts)`.
+   Layered input: explicit `:text` wins; otherwise reads stdin (when
+   `:stdin-tty?` is false) via `(:stdin-reader-fn)`; otherwise opens the
+   editor via `(:editor-fn ctx-line)`. Empty/blank content is a no-op:
+   no file change, returns nil. Missing id returns nil. On success
+   returns the saved path."
+  [ctx opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)]
+    (when-let [loaded (store/load-one project-root tickets-dir (:id opts))]
+      (let [ctx-line (str "Adding a note to " (:id opts) ".")
+            content  (resolve-note-content opts ctx-line)]
+        (when-not (str/blank? content)
+          (let [trimmed (str/trim-newline content)
+                body*   (ticket/append-note (:body loaded) now trimmed)
+                ticket* (assoc loaded :body body*)]
+            (store/save! project-root tickets-dir (:id opts) nil ticket*
+                         {:now now :terminal-statuses terminal-statuses})))))))
+
+(defn edit-cmd
+  "Open the ticket file for `(:id opts)` in the editor via `(:editor-fn path)`.
+   After the editor returns, the file is reloaded and re-saved through
+   `knot.store/save!` so `:updated` bumps (even on no-op edits) and any
+   status-edit triggers archive routing. The slug suffix is preserved —
+   `save!` recovers it from the existing filename. Returns the saved path,
+   or nil when no ticket matches the id."
+  [ctx {:keys [id editor-fn]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)
+        existing-path (store/find-existing-path project-root tickets-dir id)]
+    (when existing-path
+      (editor-fn existing-path)
+      (let [reloaded (ticket/parse (slurp existing-path))]
+        (store/save! project-root tickets-dir id nil reloaded
+                     {:now now :terminal-statuses terminal-statuses})))))
 
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.

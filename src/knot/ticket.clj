@@ -98,6 +98,33 @@
             (subs head 0 cut)
             head))))))
 
+(def ^:private notes-anchor "## Notes")
+
+(defn- note-block
+  "Format a note as a `**<iso>**\\n\\n<content>` block (no trailing newline)."
+  [iso content]
+  (str "**" iso "**\n\n" content))
+
+(defn append-note
+  "Append a timestamped note (`**<iso>**\\n\\n<content>`) under the body's
+   `## Notes` section. Creates the section at the end of the body when
+   missing. The returned body always ends with a single trailing newline."
+  [body iso content]
+  (let [body*    (or body "")
+        block    (note-block iso content)
+        anchor   notes-anchor]
+    (if-let [idx (str/index-of body* anchor)]
+      (let [head     (subs body* 0 idx)
+            tail     (subs body* idx)
+            ;; trim trailing whitespace from tail so the new block has a
+            ;; predictable separator regardless of how the existing section
+            ;; ended (`## Notes\n`, `## Notes\n\n`, or with prior notes).
+            tail*    (str/replace tail #"\s+$" "")]
+        (str head tail* "\n\n" block "\n"))
+      (let [head (str/replace body* #"\s+$" "")
+            sep  (if (str/blank? head) "" "\n\n")]
+        (str head sep anchor "\n\n" block "\n")))))
+
 (def ^:private prefix-fallback
   "Literal default used when a directory name yields no alphanumeric content
    (empty, whitespace-only, or pure punctuation)."

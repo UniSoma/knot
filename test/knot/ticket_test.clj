@@ -148,3 +148,47 @@
       (let [out (ticket/derive-prefix in)]
         (is (re-matches #"[a-z0-9]+" out)
             (str "expected [a-z0-9]+ for input " (pr-str in) ", got " (pr-str out)))))))
+
+(deftest append-note-test
+  (testing "appends a timestamped note block under an existing ## Notes section"
+    (let [body  "# Title\n\n## Notes\n"
+          out   (ticket/append-note body "2026-04-28T10:00:00Z" "First note.")]
+      (is (str/includes? out "## Notes"))
+      (is (str/includes? out "**2026-04-28T10:00:00Z**"))
+      (is (str/includes? out "First note."))
+      (is (str/ends-with? out "\n"))))
+
+  (testing "creates ## Notes section at end of body when missing"
+    (let [body "# Title\n\n## Description\n\nSome text.\n"
+          out  (ticket/append-note body "2026-04-28T10:00:00Z" "First note.")]
+      (is (str/includes? out "## Notes"))
+      (is (str/includes? out "**2026-04-28T10:00:00Z**"))
+      (is (str/includes? out "First note."))
+      (is (str/includes? out "## Description"))
+      (is (str/includes? out "Some text."))
+      ;; original section preserved before Notes
+      (is (< (str/index-of out "## Description") (str/index-of out "## Notes")))))
+
+  (testing "appends multiple notes chronologically, preserving prior notes"
+    (let [body "# Title\n\n## Notes\n"
+          one  (ticket/append-note body "2026-04-28T10:00:00Z" "First.")
+          two  (ticket/append-note one  "2026-04-28T11:00:00Z" "Second.")]
+      (is (str/includes? two "**2026-04-28T10:00:00Z**"))
+      (is (str/includes? two "**2026-04-28T11:00:00Z**"))
+      (is (str/includes? two "First."))
+      (is (str/includes? two "Second."))
+      (is (< (str/index-of two "10:00:00") (str/index-of two "11:00:00"))
+          "older note comes before the newer one")))
+
+  (testing "leaves prior body content above Notes intact"
+    (let [body "# Title\n\n## Description\n\nDesc.\n\n## Notes\n\n**2026-01-01T00:00:00Z**\n\nOlder.\n"
+          out  (ticket/append-note body "2026-04-28T10:00:00Z" "Newer.")]
+      (is (str/includes? out "Desc."))
+      (is (str/includes? out "Older."))
+      (is (str/includes? out "Newer."))
+      (is (< (str/index-of out "Older.") (str/index-of out "Newer.")))))
+
+  (testing "note content with internal newlines is preserved verbatim"
+    (let [body "# Title\n\n## Notes\n"
+          out  (ticket/append-note body "2026-04-28T10:00:00Z" "Line one.\nLine two.")]
+      (is (str/includes? out "Line one.\nLine two.")))))

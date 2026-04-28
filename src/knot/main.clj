@@ -3,10 +3,12 @@
    stdout = data; stderr = warnings/errors."
   (:require [babashka.cli :as bcli]
             [babashka.fs :as fs]
+            [babashka.process :as process]
             [clojure.string :as str]
             [knot.cli :as cli]
             [knot.config :as config]
             [knot.output :as output]
+            [knot.store :as store]
             [knot.ticket :as ticket]))
 
 (defn- discover-ctx
@@ -121,23 +123,30 @@
         path (cli/init-cmd ctx opts)]
     (println-out (str path))))
 
+(def ^:private transition-spec
+  {:spec {:summary {}}})
+
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
    consumed (1 for start/close/reopen, 2 for status). `cmd-name` is
-   used in error messages. The handler prints the new path on stdout."
+   used in error messages. The handler prints the new path on stdout.
+   `--summary <text>` is threaded through; the cli layer rejects it on
+   transitions to non-terminal statuses."
   [cmd-name arg-count transition-fn argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+  (let [{:keys [args opts]} (bcli/parse-args argv transition-spec)]
     (when (< (count args) arg-count)
       (die (str "knot " cmd-name ": "
                 (case arg-count
                   1 "an id is required"
                   2 "an id and new status are required"))))
-    (let [id   (first args)
-          opts (if (= arg-count 2)
-                 {:id id :status (second args)}
-                 {:id id})
-          path (transition-fn (discover-ctx) opts)]
+    (let [id    (first args)
+          base  (if (= arg-count 2)
+                  {:id id :status (second args)}
+                  {:id id})
+          opts* (cond-> base
+                  (contains? opts :summary) (assoc :summary (:summary opts)))
+          path  (transition-fn (discover-ctx) opts*)]
       (if path
         (println-out (str path))
         (die (str "knot " cmd-name ": no ticket matching " id))))))
@@ -246,27 +255,112 @@
       (catch Exception e
         (die (str "knot unlink: " (or (.getMessage e) (.toString e))))))))
 
+(def ^:private editor-header
+  "# Lines starting with '#' will be ignored.\n")
+
+(defn- strip-editor-comments
+  "Remove lines beginning with `#` (per the editor header convention)."
+  [s]
+  (->> (str/split-lines (or s ""))
+       (remove (fn [line] (str/starts-with? line "#")))
+       (str/join "\n")))
+
+(defn- spawn-editor!
+  "Run `editor` on `path` with inherited stdio, blocking until the editor
+   exits. Throws when the editor process exits non-zero."
+  [editor path]
+  (let [{:keys [exit]} @(process/process [editor (str path)] {:inherit true})]
+    (when-not (zero? exit)
+      (throw (ex-info (str "editor exited with status " exit)
+                      {:editor editor :exit exit})))))
+
+(defn- editor-fn-for-note
+  "Return an editor-fn that opens a temp file pre-filled with the editor
+   header and a context line, lets the user edit, then returns the file
+   contents with comment lines stripped. The temp file is cleaned up
+   regardless of editor exit status."
+  []
+  (fn [ctx-line]
+    (let [editor (cli/resolve-editor (System/getenv))
+          tmp    (fs/create-temp-file {:prefix "knot-note-" :suffix ".md"})]
+      (try
+        (spit (str tmp) (str editor-header "# " ctx-line "\n\n"))
+        (spawn-editor! editor (str tmp))
+        (strip-editor-comments (slurp (str tmp)))
+        (finally (fs/delete-if-exists tmp))))))
+
+(defn- editor-fn-for-edit
+  "Return an editor-fn that opens an existing file in the resolved editor."
+  []
+  (fn [path]
+    (let [editor (cli/resolve-editor (System/getenv))]
+      (spawn-editor! editor path))))
+
+(defn- add-note-handler
+  "Handle `knot add-note <id> [text]`. Layered input: text arg wins;
+   else stdin if not a TTY; else editor."
+  [argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})
+        id   (first args)
+        text (when (>= (count args) 2)
+               (str/join " " (rest args)))]
+    (when (or (nil? id) (str/blank? id))
+      (die "knot add-note: an id is required"))
+    (let [tty? (some? (System/console))
+          path (cli/add-note-cmd
+                 (discover-ctx)
+                 {:id              id
+                  :text            text
+                  :stdin-tty?      tty?
+                  :stdin-reader-fn (fn [] (slurp *in*))
+                  :editor-fn       (editor-fn-for-note)})]
+      (if path
+        (println-out (str path))
+        ;; nil from add-note-cmd is either "id missing" or
+        ;; "empty content cancelled". Differentiate by re-checking the id.
+        (let [{:keys [project-root tickets-dir]} (discover-ctx)]
+          (if (store/find-existing-path project-root tickets-dir id)
+            (System/exit 0)
+            (die (str "knot add-note: no ticket matching " id))))))))
+
+(defn- edit-handler
+  "Handle `knot edit <id>`."
+  [argv]
+  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})
+        id (first args)]
+    (when (or (nil? id) (str/blank? id))
+      (die "knot edit: an id is required"))
+    (let [path (cli/edit-cmd (discover-ctx)
+                             {:id id :editor-fn (editor-fn-for-edit)})]
+      (if path
+        (println-out (str path))
+        (die (str "knot edit: no ticket matching " id))))))
+
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
     (println)
     (println "Commands:")
-    (println "  init                      Write .knot.edn stub and create the tickets dir")
-    (println "  create <title> [flags]    Create a new ticket")
-    (println "  show   <id>   [--json]    Render the ticket with the given id")
-    (println "  ls            [--json]    List live (non-terminal) tickets")
-    (println "  status <id> <new-status>  Transition a ticket to a new status")
-    (println "  start  <id>               Transition a ticket to in_progress")
-    (println "  close  <id>               Transition a ticket to the first terminal status")
-    (println "  reopen <id>               Transition a ticket back to open")
-    (println "  dep    <from> <to>        Add <to> to <from>'s :deps (cycle-checked)")
-    (println "  undep  <from> <to>        Remove <to> from <from>'s :deps")
-    (println "  dep tree <id> [--json]    Render the deps subtree (--full to expand dups)")
-    (println "  dep cycle                 Scan open tickets for cycles (exit 1 if any)")
-    (println "  link   <a> <b> [<c>...]   Create symmetric :links across every pair")
-    (println "  unlink <a> <b>            Remove the symmetric link between two ids")
-    (println "  ready          [--json]   List tickets whose deps are all closed")
-    (println "  blocked        [--json]   List tickets with at least one open dep")))
+    (println "  init                       Write .knot.edn stub and create the tickets dir")
+    (println "  create <title> [flags]     Create a new ticket")
+    (println "  show   <id>    [--json]    Render the ticket with the given id")
+    (println "  ls             [--json]    List live (non-terminal) tickets")
+    (println "  status <id> <new-status> [--summary <text>]")
+    (println "                             Transition a ticket to a new status")
+    (println "  start  <id>                Transition a ticket to in_progress")
+    (println "  close  <id> [--summary <text>]")
+    (println "                             Transition a ticket to the first terminal status")
+    (println "  reopen <id>                Transition a ticket back to open")
+    (println "  add-note <id> [text]       Append a timestamped note (text arg, stdin, or editor)")
+    (println "  edit <id>                  Open the ticket file in $VISUAL/$EDITOR")
+    (println "  dep    <from> <to>         Add <to> to <from>'s :deps (cycle-checked)")
+    (println "  undep  <from> <to>         Remove <to> from <from>'s :deps")
+    (println "  dep tree <id> [--json]     Render the deps subtree (--full to expand dups)")
+    (println "  dep cycle                  Scan open tickets for cycles (exit 1 if any)")
+    (println "  link   <a> <b> [<c>...]    Create symmetric :links across every pair")
+    (println "  unlink <a> <b>             Remove the symmetric link between two ids")
+    (println "  ready           [--json]   List tickets whose deps are all closed")
+    (println "  blocked         [--json]   List tickets with at least one open dep")))
 
 (defn -main [& argv]
   (try
@@ -280,12 +374,14 @@
         "start"   (transition-handler "start"  1 cli/start-cmd  rest-argv)
         "close"   (transition-handler "close"  1 cli/close-cmd  rest-argv)
         "reopen"  (transition-handler "reopen" 1 cli/reopen-cmd rest-argv)
-        "dep"     (dep-handler rest-argv)
-        "undep"   (edge-handler "undep" cli/undep-cmd rest-argv)
-        "link"    (link-handler   rest-argv)
-        "unlink"  (unlink-handler rest-argv)
-        "ready"   (list-handler cli/ready-cmd   rest-argv)
-        "blocked" (list-handler cli/blocked-cmd rest-argv)
+        "dep"      (dep-handler rest-argv)
+        "undep"    (edge-handler "undep" cli/undep-cmd rest-argv)
+        "link"     (link-handler   rest-argv)
+        "unlink"   (unlink-handler rest-argv)
+        "ready"    (list-handler cli/ready-cmd   rest-argv)
+        "blocked"  (list-handler cli/blocked-cmd rest-argv)
+        "add-note" (add-note-handler rest-argv)
+        "edit"     (edit-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

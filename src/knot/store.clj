@@ -48,7 +48,7 @@
    (find-by-id-glob-all (fs/path project-root tickets-dir) id)
    (find-by-id-glob-all (fs/path project-root tickets-dir archive-subdir) id)))
 
-(defn- find-existing-path
+(defn find-existing-path
   "Locate the on-disk file for `id` across both live and archive directories.
    Returns the path string of the first match (live wins), or nil when no
    matching file exists."

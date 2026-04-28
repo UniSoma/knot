@@ -455,6 +455,98 @@
         (is (not (str/includes? new-path "/archive/"))
             "reopened file should live in the live directory again")))))
 
+(deftest summary-on-close-test
+  (testing "close --summary appends a closure note under ## Notes and closes"
+    (with-tmp tmp
+      (let [created  (cli/create-cmd (ctx tmp) {:title "T"})
+            id       (id-of-created created "t")
+            later    (assoc (ctx tmp) :now "2026-05-01T10:00:00Z")
+            new-path (cli/close-cmd later
+                                    {:id id :summary "fixed in deploy 42"})
+            loaded   (store/load-one tmp ".tickets" id)
+            body     (:body loaded)]
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? new-path "/archive/"))
+        (is (str/includes? body "## Notes"))
+        (is (str/includes? body "**2026-05-01T10:00:00Z**"))
+        (is (str/includes? body "fixed in deploy 42")))))
+
+  (testing "close with empty --summary still closes but adds no note"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp) {:id id :summary ""})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (not (str/includes? (:body loaded) "## Notes"))
+            "empty --summary should not create a Notes section"))))
+
+  (testing "status <id> <terminal> --summary appends a note"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-02T10:00:00Z")
+            _       (cli/status-cmd later
+                                    {:id id :status "closed"
+                                     :summary "shipped"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? (:body loaded) "shipped"))
+        (is (str/includes? (:body loaded) "**2026-05-02T10:00:00Z**")))))
+
+  (testing "status <id> <non-terminal> --summary errors at command start"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg? Exception #"summary"
+              (cli/status-cmd (ctx tmp)
+                              {:id id :status "in_progress"
+                               :summary "should fail"})))
+        (is (= before (slurp created))
+            "no file change on rejected --summary"))))
+
+  (testing "start --summary errors (start is always non-terminal)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? Exception #"summary"
+              (cli/start-cmd (ctx tmp)
+                             {:id id :summary "should fail"}))))))
+
+  (testing "reopen --summary errors (reopen is always non-terminal)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp) {:id id})]
+        (is (thrown-with-msg? Exception #"summary"
+              (cli/reopen-cmd (ctx tmp)
+                              {:id id :summary "should fail"}))))))
+
+  (testing "summary persists across reopen — historical journal"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id :summary "closure note"})
+            _       (cli/reopen-cmd (ctx tmp) {:id id})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "open" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? (:body loaded) "closure note")
+            "closure note remains in body after reopen"))))
+
+  (testing "close --summary on a custom :statuses + :terminal-statuses still works"
+    (with-tmp tmp
+      (let [ctx*    (assoc (ctx tmp)
+                           :statuses ["open" "review" "done" "wontfix"]
+                           :terminal-statuses #{"done" "wontfix"})
+            created (cli/create-cmd ctx* {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd ctx* {:id id :summary "delivered"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "done" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? (:body loaded) "delivered"))))))
+
 (deftest init-cmd-test
   (testing "writes .knot.edn with all default keys present, each commented"
     (with-tmp tmp
@@ -992,3 +1084,181 @@
       (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"task\"")  ;; missing }
       (is (thrown-with-msg? Exception #"\.knot\.edn at .* is not valid EDN"
             (config/load-config tmp))))))
+
+(deftest add-note-cmd-test
+  (testing "explicit :text appends a timestamped note under ## Notes"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-01T10:00:00Z")
+            path    (cli/add-note-cmd later {:id id :text "first note"})
+            body    (:body (store/load-one tmp ".tickets" id))]
+        (is (string? path))
+        (is (str/includes? body "## Notes"))
+        (is (str/includes? body "**2026-05-01T10:00:00Z**"))
+        (is (str/includes? body "first note")))))
+
+  (testing "explicit :text wins over stdin and editor"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/add-note-cmd (ctx tmp)
+                                      {:id id :text "from-arg"
+                                       :stdin-tty? false
+                                       :stdin-reader-fn (fn [] "from-stdin")
+                                       :editor-fn (fn [_] "from-editor")})
+            body    (:body (store/load-one tmp ".tickets" id))]
+        (is (str/includes? body "from-arg"))
+        (is (not (str/includes? body "from-stdin")))
+        (is (not (str/includes? body "from-editor"))))))
+
+  (testing "stdin is read when :text is absent and stdin is not a TTY"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/add-note-cmd (ctx tmp)
+                                      {:id id
+                                       :stdin-tty? false
+                                       :stdin-reader-fn (fn [] "piped note")
+                                       :editor-fn (fn [_] "editor unused")})
+            body    (:body (store/load-one tmp ".tickets" id))]
+        (is (str/includes? body "piped note"))
+        (is (not (str/includes? body "editor unused"))))))
+
+  (testing "editor is opened when :text is absent and stdin is a TTY"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/add-note-cmd (ctx tmp)
+                                      {:id id
+                                       :stdin-tty? true
+                                       :stdin-reader-fn (fn [] "stdin unused")
+                                       :editor-fn (fn [_ctx-line] "edited content")})
+            body    (:body (store/load-one tmp ".tickets" id))]
+        (is (str/includes? body "edited content"))
+        (is (not (str/includes? body "stdin unused"))))))
+
+  (testing "empty :text cancels — file is not modified"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            result  (cli/add-note-cmd (ctx tmp) {:id id :text ""})
+            after   (slurp created)]
+        (is (nil? result))
+        (is (= before after) "no file change on empty content")
+        (is (not (str/includes? after "## Notes"))))))
+
+  (testing "blank :text (whitespace only) cancels"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            _       (cli/add-note-cmd (ctx tmp) {:id id :text "   \n  "})
+            after   (slurp created)]
+        (is (= before after)))))
+
+  (testing "blank stdin cancels"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            _       (cli/add-note-cmd (ctx tmp)
+                                      {:id id
+                                       :stdin-tty? false
+                                       :stdin-reader-fn (fn [] "")})
+            after   (slurp created)]
+        (is (= before after)))))
+
+  (testing "blank editor result cancels"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            _       (cli/add-note-cmd (ctx tmp)
+                                      {:id id
+                                       :stdin-tty? true
+                                       :editor-fn (fn [_] "")})
+            after   (slurp created)]
+        (is (= before after)))))
+
+  (testing "appending a note bumps :updated"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-06-01T10:00:00Z")
+            _       (cli/add-note-cmd later {:id id :text "x"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "2026-06-01T10:00:00Z" (get-in loaded [:frontmatter :updated]))))))
+
+  (testing "returns nil and does nothing when id is missing"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/add-note-cmd (ctx tmp) {:id "kno-nope" :text "x"}))))))
+
+(deftest edit-cmd-test
+  (testing "invokes the editor-fn with the ticket file path"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            seen    (atom nil)
+            _       (cli/edit-cmd (ctx tmp)
+                                  {:id id
+                                   :editor-fn (fn [p] (reset! seen (str p)))})]
+        (is (= created @seen)))))
+
+  (testing "after the editor returns, the file is reloaded and saved (bumps :updated)"
+    (with-tmp tmp
+      (let [created  (cli/create-cmd (ctx tmp) {:title "T"})
+            id       (id-of-created created "t")
+            ;; mutate the file to add a body line, simulating an editor session
+            _        (let [original (slurp created)]
+                       (spit created (str original "\nNew line.\n")))
+            later    (assoc (ctx tmp) :now "2026-06-15T10:00:00Z")
+            new-path (cli/edit-cmd later {:id id :editor-fn (fn [_] nil)})
+            loaded   (store/load-one tmp ".tickets" id)]
+        (is (= "2026-06-15T10:00:00Z"
+               (get-in loaded [:frontmatter :updated])))
+        (is (str/includes? (:body loaded) "New line."))
+        (is (= created new-path) "slug-stable: filename unchanged"))))
+
+  (testing "no-op edit still bumps :updated (acceptable per PRD)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-07-01T10:00:00Z")
+            _       (cli/edit-cmd later {:id id :editor-fn (fn [_] nil)})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "2026-07-01T10:00:00Z"
+               (get-in loaded [:frontmatter :updated]))))))
+
+  (testing "returns nil when id is missing"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/edit-cmd (ctx tmp)
+                              {:id "kno-nope" :editor-fn (fn [_] nil)})))))
+
+  (testing "filename is preserved even when the title (and would-be slug) changes"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            id      (id-of-created created "alpha")
+            ;; edit body to change title — slug must remain "alpha"
+            _       (let [original (slurp created)]
+                       (spit created (str/replace original "# Alpha" "# Bravo")))
+            new-path (cli/edit-cmd (ctx tmp) {:id id :editor-fn (fn [_] nil)})]
+        (is (= created new-path))
+        (is (str/ends-with? new-path "--alpha.md"))))))
+
+(deftest resolve-editor-test
+  (testing "VISUAL wins when set"
+    (is (= "code -w" (cli/resolve-editor {"VISUAL" "code -w" "EDITOR" "vim"}))))
+  (testing "EDITOR is used when VISUAL is unset"
+    (is (= "vim" (cli/resolve-editor {"EDITOR" "vim"}))))
+  (testing "blank VISUAL falls through to EDITOR"
+    (is (= "vim" (cli/resolve-editor {"VISUAL" "" "EDITOR" "vim"}))))
+  (testing "falls back to nano when both env vars are unset and nano is on PATH"
+    (with-redefs [cli/on-path? #(= "nano" %)]
+      (is (= "nano" (cli/resolve-editor {})))))
+  (testing "falls back to vi when nano is not on PATH"
+    (with-redefs [cli/on-path? (constantly false)]
+      (is (= "vi" (cli/resolve-editor {}))))))
