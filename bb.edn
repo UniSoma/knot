@@ -1,0 +1,35 @@
+{:paths ["src"]
+ ;; clj-yaml is the only non-bb dependency. It ships bundled with babashka,
+ ;; so no :deps declaration is needed at runtime.
+ :tasks
+ {:requires ([babashka.classpath :as cp]
+             [babashka.fs :as fs]
+             [clojure.string :as str]
+             [clojure.test :as t])
+
+  test
+  {:doc "Run all tests under test/"
+   :task
+   (do
+     (cp/add-classpath "test")
+     (let [nses (->> (fs/glob "test" "**/*_test.clj")
+                     (map (fn [p] (str (fs/relativize "test" p))))
+                     (map (fn [p] (-> p
+                                      (str/replace ".clj" "")
+                                      (str/replace "/" ".")
+                                      (str/replace "_" "-"))))
+                     (map symbol)
+                     vec)]
+       (if (empty? nses)
+         (println "No tests found.")
+         (do
+           (apply require nses)
+           (let [{:keys [fail error]} (apply t/run-tests nses)]
+             (when (pos? (+ fail error))
+               (System/exit 1)))))))}
+
+  knot
+  {:doc "Run the knot CLI"
+   :task (do
+           (require '[knot.main])
+           (apply (resolve 'knot.main/-main) *command-line-args*))}}}
