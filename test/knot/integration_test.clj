@@ -141,6 +141,36 @@
           (is (str/includes? trimmed "\"external_refs\""))
           (is (str/includes? trimmed "\"body\"")))))))
 
+(deftest show-json-preserves-key-order-test
+  (testing "show --json keeps frontmatter keys in on-disk order even with > 8 keys"
+    ;; Regression: `(into {} ordered-map)` silently rebuilds as a hash-map
+    ;; once Clojure's array-map threshold (8 entries) is crossed, scrambling
+    ;; the JSON key order. Drive a fully-populated ticket through `--json`
+    ;; and assert the canonical key positions are strictly increasing.
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello"
+                                    "-d" "Desc"
+                                    "-p" "1"
+                                    "-t" "bug"
+                                    "-a" "alice"
+                                    "--parent" "kno-other"
+                                    "--tags" "auth,p0"
+                                    "--external-ref" "JIRA-1")
+            id (->> (str (fs/file-name (str/trim out)))
+                    (re-matches #"(.+)--hello\.md")
+                    second)
+            {:keys [exit out err]} (run-knot tmp "show" id "--json")
+            positions (mapv #(str/index-of out (str "\"" % "\""))
+                            ["id" "status" "type" "priority" "mode"
+                             "created" "updated" "assignee" "parent"
+                             "tags" "external_refs"])]
+        (is (zero? exit) (str "show --json err=" err))
+        (is (every? some? positions)
+            (str "expected all canonical keys present, got positions=" positions))
+        (is (apply < positions)
+            (str "JSON keys should appear in canonical on-disk order, got positions="
+                 positions))))))
+
 (deftest stderr-discipline-test
   (testing "create — data on stdout, stderr is empty on success"
     (with-tmp tmp

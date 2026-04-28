@@ -1,6 +1,11 @@
 {:paths ["src"]
- ;; clj-yaml is the only non-bb dependency. It ships bundled with babashka,
- ;; so no :deps declaration is needed at runtime.
+ ;; All non-bb dependencies (clj-yaml, cheshire, flatland.ordered.map) ship
+ ;; bundled with babashka, so no :deps declaration is required at runtime.
+ ;; The minimum version below is a conservative floor — it covers the bb
+ ;; releases where babashka.cli is present and the bundled dep surface used
+ ;; here (ordered-map iteration, clj-yaml ordered preservation) is stable.
+ :min-bb-version "1.3.0"
+
  :tasks
  {:requires ([babashka.classpath :as cp]
              [babashka.fs :as fs]

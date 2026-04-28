@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing]]
             [knot.cli :as cli]
             [knot.config :as config]
+            [knot.git :as git]
             [knot.store :as store]))
 
 (defmacro with-tmp [bind & body]
@@ -115,6 +116,45 @@
         (is (= "id" (first first-keys)))
         (is (= ["id" "status" "type" "priority" "mode" "created" "updated"]
                (vec (take 7 first-keys))))))))
+
+(deftest create-cmd-default-assignee-from-git-test
+  ;; Wiring test for issue 0001 AC: `git config user.name` is the default
+  ;; assignee. The other create-cmd tests pass a ctx with `:assignee nil`
+  ;; (explicit override), which bypasses the git-defaulting branch in
+  ;; resolve-ctx — these tests dissoc :assignee so the branch fires.
+  (testing "with :assignee absent from ctx and no opt override, defaults to git/user-name"
+    (with-redefs [git/user-name (fn [] "git-configured-user")]
+      (with-tmp tmp
+        (let [ctx-no-assignee (dissoc (ctx tmp) :assignee)
+              path   (cli/create-cmd ctx-no-assignee {:title "Hello"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (= "git-configured-user" (:assignee (:frontmatter loaded))))))))
+
+  (testing "an explicit --assignee opt takes precedence over git/user-name"
+    (with-redefs [git/user-name (fn [] "git-configured-user")]
+      (with-tmp tmp
+        (let [ctx-no-assignee (dissoc (ctx tmp) :assignee)
+              path   (cli/create-cmd ctx-no-assignee
+                                     {:title "Hello" :assignee "explicit"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (= "explicit" (:assignee (:frontmatter loaded))))))))
+
+  (testing "when git/user-name returns nil, no :assignee key is written"
+    (with-redefs [git/user-name (fn [] nil)]
+      (with-tmp tmp
+        (let [ctx-no-assignee (dissoc (ctx tmp) :assignee)
+              path   (cli/create-cmd ctx-no-assignee {:title "Hello"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (not (contains? (:frontmatter loaded) :assignee))))))))
 
 (deftest show-cmd-test
   (testing "show returns the rendered ticket content for a known id"

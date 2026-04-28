@@ -98,17 +98,26 @@
             (subs head 0 cut)
             head))))))
 
+(def ^:private prefix-fallback
+  "Literal default used when a directory name yields no alphanumeric content
+   (empty, whitespace-only, or pure punctuation)."
+  "knot")
+
 (defn derive-prefix
   "Derive a project shortcode from a directory name.
-   First letter of each `[-_]`-separated segment, lowercased.
-   Falls back to the first 3 chars (lowercased) when the result is shorter
-   than 2 chars."
+   Splits on any run of non-alphanumerics and takes the first letter of
+   each segment, lowercased. With a single segment, falls back to the
+   first 3 chars. With no alphanumeric content (empty, whitespace, or
+   pure punctuation), falls back to the literal `prefix-fallback`.
+   Always returns a non-empty `[a-z0-9]+` string — guarantees IDs and
+   filenames never start with `-` or contain a space."
   [dir-name]
-  (let [lower (str/lower-case dir-name)
-        initials (->> (str/split lower #"[-_]")
-                      (remove empty?)
-                      (map first)
-                      (apply str))]
-    (if (< (count initials) 2)
-      (subs lower 0 (min 3 (count lower)))
-      initials)))
+  (let [lower    (some-> dir-name str/lower-case)
+        segments (when lower
+                   (->> (str/split lower #"[^a-z0-9]+")
+                        (remove empty?)))]
+    (cond
+      (empty? segments)      prefix-fallback
+      (= 1 (count segments)) (let [s (first segments)]
+                               (subs s 0 (min 3 (count s))))
+      :else                  (apply str (map first segments)))))

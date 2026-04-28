@@ -130,4 +130,21 @@
     (is (= "hw" (ticket/derive-prefix "Hello-World"))))
   (testing "names shorter than 3 chars stay as-is"
     (is (= "ab" (ticket/derive-prefix "ab")))
-    (is (= "x" (ticket/derive-prefix "x")))))
+    (is (= "x" (ticket/derive-prefix "x"))))
+  (testing "spaces are treated as segment separators"
+    (is (= "mp" (ticket/derive-prefix "My Project"))))
+  (testing "leading/trailing whitespace yields a clean single-segment prefix"
+    (is (= "foo" (ticket/derive-prefix " foo "))))
+  (testing "empty string falls back to the literal default"
+    (is (= "knot" (ticket/derive-prefix ""))))
+  (testing "whitespace-only input falls back to the literal default"
+    (is (= "knot" (ticket/derive-prefix "   "))))
+  (testing "pure punctuation falls back to the literal default"
+    (is (= "knot" (ticket/derive-prefix "!!!"))))
+  (testing "non-ASCII chars act as separators (no transliteration)"
+    (is (= "ca" (ticket/derive-prefix "café-app"))))
+  (testing "result never contains hyphens or whitespace"
+    (doseq [in ["My Project" " foo " "Hello-World" "a-b-c-d"]]
+      (let [out (ticket/derive-prefix in)]
+        (is (re-matches #"[a-z0-9]+" out)
+            (str "expected [a-z0-9]+ for input " (pr-str in) ", got " (pr-str out)))))))

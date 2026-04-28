@@ -51,10 +51,14 @@
   "Project a `{:frontmatter ... :body ...}` map into the JSON shape used by
    `show --json` and `ls --json`. Keeps frontmatter keys at the top level
    and adds the body as a `body` field. Frontmatter keys are already
-   snake_case in the on-disk YAML and pass straight through."
+   snake_case in the on-disk YAML and pass straight through.
+   The frontmatter map is passed through unchanged so the ordered-map type
+   produced by `clj-yaml` survives into Cheshire — keys serialize in the
+   on-disk order. `(into {} ordered-map)` would silently rebuild as a
+   hash-map past 8 entries and scramble the order."
   [{:keys [frontmatter body] :as _ticket} {:keys [include-body?]
                                            :or {include-body? true}}]
-  (cond-> (into {} frontmatter)
+  (cond-> frontmatter
     include-body? (assoc :body body)))
 
 (defn show-json
