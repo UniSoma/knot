@@ -1653,3 +1653,239 @@ Restart the daemon.
   (testing "falls back to vi when nano is not on PATH"
     (with-redefs [cli/on-path? (constantly false)]
       (is (= "vi" (cli/resolve-editor {}))))))
+
+(defn- prime-ctx
+  "Build a `ctx` for prime-cmd that mirrors `discover-ctx` with a
+   project-found flag. `project-name` is forwarded to the renderer when set."
+  ([tmp] (prime-ctx tmp nil))
+  ([tmp project-name]
+   (cond-> (assoc (ctx tmp) :project-found? true)
+     project-name (assoc :project-name project-name))))
+
+(defn- create-spaced!
+  "Like `cli/create-cmd`, but sleeps 2ms after the call so consecutive
+   ids land in distinct milliseconds. The ULID timestamp prefix changes
+   per millisecond, so spacing eliminates the ~1/1024 same-ms id
+   collision rate that flakes high-volume tests."
+  [c opts]
+  (let [path (cli/create-cmd c opts)]
+    (Thread/sleep 2)
+    path))
+
+(deftest prime-cmd-text-shape-test
+  (testing "prime-cmd returns a string with the five sections when a project is found"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Live ticket"})
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (string? out))
+        (is (str/includes? out "## Project"))
+        (is (str/includes? out "## In Progress"))
+        (is (str/includes? out "## Ready"))
+        (is (str/includes? out "## Schema")))))
+
+  (testing "the rendered project metadata reflects live and archive counts"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Alpha"})
+            _ (cli/create-cmd c {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            _ (cli/close-cmd c {:id a-id})
+            out (cli/prime-cmd (prime-ctx tmp) {})
+            start (str/index-of out "## Project")
+            end   (str/index-of out "## In Progress")
+            section (subs out start end)]
+        (is (re-find #"live: 1" section))
+        (is (re-find #"archive: 1" section))))))
+
+(deftest prime-cmd-in-progress-sort-test
+  (testing "in-progress section is sorted by :updated descending"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd (assoc c :now "2026-04-28T08:00:00Z")
+                              {:title "Older started"})
+            b (cli/create-cmd (assoc c :now "2026-04-28T09:00:00Z")
+                              {:title "Newer started"})
+            a-id (id-of-created a "older-started")
+            b-id (id-of-created b "newer-started")
+            _    (cli/start-cmd (assoc c :now "2026-04-28T10:00:00Z") {:id a-id})
+            _    (cli/start-cmd (assoc c :now "2026-04-28T11:00:00Z") {:id b-id})
+            out  (cli/prime-cmd (prime-ctx tmp) {})
+            start (str/index-of out "## In Progress")
+            end   (str/index-of out "## Ready")
+            section (subs out start end)
+            newer-i (str/index-of section "Newer started")
+            older-i (str/index-of section "Older started")]
+        (is (and newer-i older-i) "both in-progress titles present")
+        (is (< newer-i older-i)
+            "newer-updated ticket renders first (sorted by :updated desc)")))))
+
+(deftest prime-cmd-ready-sort-test
+  (testing "ready section is sorted by priority asc then :created desc"
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (cli/create-cmd (assoc c :now "2026-04-28T08:00:00Z")
+                        {:title "P2 older" :priority 2})
+        (cli/create-cmd (assoc c :now "2026-04-28T09:00:00Z")
+                        {:title "P2 newer" :priority 2})
+        (cli/create-cmd (assoc c :now "2026-04-28T10:00:00Z")
+                        {:title "P0 ticket" :priority 0})
+        (let [out (cli/prime-cmd (prime-ctx tmp) {})
+              start (str/index-of out "## Ready")
+              end   (str/index-of out "## Schema")
+              section (subs out start end)
+              p0-i  (str/index-of section "P0 ticket")
+              newer-i (str/index-of section "P2 newer")
+              older-i (str/index-of section "P2 older")]
+          (is (and p0-i newer-i older-i))
+          (is (< p0-i newer-i older-i)
+              "P0 first (lower priority wins), then P2 newer-created before P2 older"))))))
+
+(deftest prime-cmd-mode-filter-test
+  (testing "--mode afk filters the ready section to afk-only tickets"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Afk job"  :mode "afk"})
+      (cli/create-cmd (ctx tmp) {:title "Hitl job" :mode "hitl"})
+      (let [out (cli/prime-cmd (prime-ctx tmp) {:mode "afk"})
+            start (str/index-of out "## Ready")
+            end   (str/index-of out "## Schema")
+            section (subs out start end)]
+        (is (str/includes? section "Afk job"))
+        (is (not (str/includes? section "Hitl job"))
+            "hitl ticket excluded from ready section under --mode afk")))))
+
+(deftest prime-cmd-default-cap-and-truncation-test
+  (testing "ready section is capped at 20 by default with a truncation footer"
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (dotimes [n 22]
+          (create-spaced! c {:title (str "Ticket-" n)}))
+        (let [out (cli/prime-cmd (prime-ctx tmp) {})
+              start (str/index-of out "## Ready")
+              end   (str/index-of out "## Schema")
+              section (subs out start end)
+              ticket-lines (->> (str/split-lines section)
+                                (filter #(str/starts-with? % "kno-")))]
+          (is (= 20 (count ticket-lines))
+              "exactly 20 ticket rows when 22 tickets exist and limit is default")
+          (is (str/includes? section "+2 more"))
+          (is (str/includes? section "knot ready"))))))
+
+  (testing "no truncation footer when ready count fits within the cap"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Just one"})
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (not (str/includes? out "more (run"))
+            "no truncation footer when ready section fits"))))
+
+  (testing ":limit overrides the default cap"
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (dotimes [n 5]
+          (create-spaced! c {:title (str "Ticket-" n)}))
+        (let [out (cli/prime-cmd (prime-ctx tmp) {:limit 2})
+              start (str/index-of out "## Ready")
+              end   (str/index-of out "## Schema")
+              section (subs out start end)
+              ticket-lines (->> (str/split-lines section)
+                                (filter #(str/starts-with? % "kno-")))]
+          (is (= 2 (count ticket-lines))
+              "explicit --limit 2 overrides the default cap")
+          (is (str/includes? section "+3 more")))))))
+
+(deftest prime-cmd-mode-applies-before-limit-test
+  (testing "--mode afk filters BEFORE --limit truncation"
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (dotimes [n 3] (create-spaced! c {:title (str "Hitl-" n) :mode "hitl"}))
+        (dotimes [n 4] (create-spaced! c {:title (str "Afk-" n)  :mode "afk"}))
+        (let [out (cli/prime-cmd (prime-ctx tmp) {:mode "afk" :limit 2})
+              start (str/index-of out "## Ready")
+              end   (str/index-of out "## Schema")
+              section (subs out start end)
+              afk-hits  (count (re-seq #"Afk-" section))
+              hitl-hits (count (re-seq #"Hitl-" section))]
+          (is (= 2 afk-hits) "exactly 2 afk rows after filter+limit")
+          (is (zero? hitl-hits) "no hitl rows leak through")
+          ;; 4 afk total minus 2 shown = 2 remaining.
+          (is (str/includes? section "+2 more")))))))
+
+(deftest prime-cmd-archive-only-test
+  (testing "an archive-only project renders empty in-progress and ready sections"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Will close"})
+            a-id (id-of-created a "will-close")
+            _    (cli/close-cmd c {:id a-id})
+            out  (cli/prime-cmd (prime-ctx tmp) {})
+            ip-start (str/index-of out "## In Progress")
+            rd-start (str/index-of out "## Ready")
+            sc-start (str/index-of out "## Schema")
+            ip-section (subs out ip-start rd-start)
+            rd-section (subs out rd-start sc-start)]
+        (is (not (str/includes? ip-section "Will close"))
+            "closed ticket does not appear in in-progress")
+        (is (not (str/includes? rd-section "Will close"))
+            "closed ticket does not appear in ready")
+        (is (re-find #"archive: 1" out)
+            "archive count reflects the closed ticket")))))
+
+(deftest prime-cmd-empty-project-test
+  (testing "an empty project (no tickets) still emits the five sections"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (str/includes? out "## Project"))
+        (is (str/includes? out "## In Progress"))
+        (is (str/includes? out "## Ready"))
+        (is (str/includes? out "## Schema"))))))
+
+(deftest prime-cmd-no-project-test
+  (testing "with :project-found? false, prime-cmd still returns a string and points at `knot init`"
+    (with-tmp tmp
+      (let [no-proj-ctx (-> (ctx tmp) (dissoc :project-found?))
+            out (cli/prime-cmd no-proj-ctx {})]
+        (is (string? out))
+        (is (str/includes? out "knot init")
+            "preamble references `knot init` so the agent can bootstrap")))))
+
+(deftest prime-cmd-json-test
+  (testing "with :json? true, prime-cmd emits a bare JSON object"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Ready ticket"})
+      (let [out (cli/prime-cmd (prime-ctx tmp) {:json? true})]
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"in_progress\""))
+        (is (str/includes? out "\"ready\""))
+        (is (str/includes? out "\"ready_truncated\""))
+        (is (str/includes? out "\"ready_remaining\""))
+        (is (str/includes? out "Ready ticket"))
+        (is (not (str/includes? out "## Schema"))
+            "JSON output omits the schema cheatsheet"))))
+
+  (testing ":json? truncation flag and remaining count match the pre-limit ready set"
+    (with-tmp tmp
+      (let [c (ctx tmp)]
+        (dotimes [n 5] (cli/create-cmd c {:title (str "T-" n)}))
+        (let [out (cli/prime-cmd (prime-ctx tmp) {:json? true :limit 2})]
+          (is (str/includes? out "\"ready_truncated\":true"))
+          (is (str/includes? out "\"ready_remaining\":3")))))))
+
+(deftest prime-cmd-project-name-from-config-test
+  (testing "project name is rendered when ctx supplies :project-name"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Live"})
+      (let [out (cli/prime-cmd (prime-ctx tmp "my-project") {})
+            start (str/index-of out "## Project")
+            end   (str/index-of out "## In Progress")
+            section (subs out start end)]
+        (is (str/includes? section "my-project")))))
+
+  (testing "no project name line when :project-name is absent"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Live"})
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})
+            start (str/index-of out "## Project")
+            end   (str/index-of out "## In Progress")
+            section (subs out start end)]
+        (is (not (re-find #"^name:" section))
+            "name: line absent when :project-name not provided")))))

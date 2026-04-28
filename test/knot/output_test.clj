@@ -487,3 +487,251 @@
                   "\"deps\":[]}"
                   "]}")
              (output/dep-tree-json tree))))))
+
+(defn- mk-prime-ticket
+  "Build a ticket map suitable for the prime renderers. `opts` overrides
+   any frontmatter field; `:title` populates the body H1."
+  [{:keys [id status priority mode title updated created]}]
+  {:frontmatter (cond-> {:id id}
+                  status   (assoc :status status)
+                  priority (assoc :priority priority)
+                  mode     (assoc :mode mode)
+                  updated  (assoc :updated updated)
+                  created  (assoc :created created))
+   :body (str "# " (or title "Untitled") "\n")})
+
+(def ^:private sample-prime-data
+  {:project       {:found? true
+                   :prefix "kno"
+                   :name "knot"
+                   :live-count 4
+                   :archive-count 2}
+   :in-progress   [(mk-prime-ticket {:id "kno-ip01" :status "in_progress"
+                                     :mode "afk" :priority 1
+                                     :title "Working on alpha"
+                                     :updated "2026-04-28T10:00:00Z"})
+                   (mk-prime-ticket {:id "kno-ip02" :status "in_progress"
+                                     :mode "hitl" :priority 2
+                                     :title "Working on beta"
+                                     :updated "2026-04-27T10:00:00Z"})]
+   :ready         [(mk-prime-ticket {:id "kno-rd01" :status "open"
+                                     :mode "afk" :priority 0
+                                     :title "Ready highest"
+                                     :created "2026-04-28T09:00:00Z"})
+                   (mk-prime-ticket {:id "kno-rd02" :status "open"
+                                     :mode "hitl" :priority 2
+                                     :title "Ready lower"
+                                     :created "2026-04-27T09:00:00Z"})]
+   :ready-truncated? false
+   :ready-remaining 0
+   :limit 20})
+
+(deftest prime-text-five-sections-test
+  (testing "preamble paragraph appears at the top before all section headings"
+    (let [out (output/prime-text sample-prime-data)
+          first-section (or (str/index-of out "## ") (count out))
+          preamble (subs out 0 first-section)]
+      (is (pos? (count (str/trim preamble)))
+          "preamble is a non-empty paragraph above the first heading")))
+
+  (testing "project, in-progress, ready, and schema sections appear in canonical order"
+    (let [out (output/prime-text sample-prime-data)
+          p-i  (str/index-of out "## Project")
+          ip-i (str/index-of out "## In Progress")
+          rd-i (str/index-of out "## Ready")
+          sc-i (str/index-of out "## Schema")]
+      (is (every? some? [p-i ip-i rd-i sc-i])
+          "all four section headings present (preamble has no heading)")
+      (is (< p-i ip-i rd-i sc-i)
+          "section headings appear in the canonical order"))))
+
+(deftest prime-text-project-metadata-test
+  (testing "project section renders prefix"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (str/includes? out "kno"))))
+
+  (testing "project section renders project name when config provides one"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (str/includes? out "knot"))))
+
+  (testing "project section omits the project name when not provided"
+    (let [data (assoc-in sample-prime-data [:project :name] nil)
+          out  (output/prime-text data)
+          ;; Capture only the Project section so a stray "knot" elsewhere
+          ;; (preamble, schema cheatsheet) does not produce a false positive.
+          start (str/index-of out "## Project")
+          end   (or (str/index-of out "## In Progress") (count out))
+          section (subs out start end)]
+      (is (not (re-find #"\bname[^a-z]" section))
+          "no name field rendered when :name is absent")))
+
+  (testing "project section renders live and archive counts"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## Project")
+          end   (str/index-of out "## In Progress")
+          section (subs out start end)]
+      (is (re-find #"\b4\b" section) "live count appears")
+      (is (re-find #"\b2\b" section) "archive count appears"))))
+
+(deftest prime-text-ticket-line-format-test
+  (testing "in-progress ticket lines contain id, mode, priority, and title"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## In Progress")
+          end   (str/index-of out "## Ready")
+          section (subs out start end)]
+      (is (str/includes? section "kno-ip01"))
+      (is (str/includes? section "afk"))
+      (is (str/includes? section "1"))
+      (is (str/includes? section "Working on alpha"))))
+
+  (testing "ready ticket lines contain id, mode, priority, and title"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## Ready")
+          end   (or (str/index-of out "## Schema") (count out))
+          section (subs out start end)]
+      (is (str/includes? section "kno-rd01"))
+      (is (str/includes? section "afk"))
+      (is (str/includes? section "0"))
+      (is (str/includes? section "Ready highest"))))
+
+  (testing "the four fields appear in canonical order on each ticket line"
+    (let [data (assoc sample-prime-data
+                      :ready
+                      [(mk-prime-ticket {:id "kno-letters"
+                                         :status "open"
+                                         :mode "hitl"
+                                         :priority 2
+                                         :title "Order check title"
+                                         :created "2026-04-27T09:00:00Z"})])
+          out (output/prime-text data)
+          start (str/index-of out "## Ready")
+          end   (or (str/index-of out "## Schema") (count out))
+          section (subs out start end)
+          ;; The id contains no digits and the title contains no digits,
+          ;; so the digit `2` unambiguously locates the priority column.
+          line (some (fn [l] (when (str/includes? l "kno-letters") l))
+                     (str/split-lines section))]
+      (is (some? line) "the kno-letters line is present")
+      (let [id-i  (str/index-of line "kno-letters")
+            mode-i (str/index-of line "hitl")
+            pri-i (str/index-of line "2")
+            title-i (str/index-of line "Order check title")]
+        (is (every? some? [id-i mode-i pri-i title-i]))
+        (is (< id-i mode-i pri-i title-i)
+            "id, mode, priority, title appear left-to-right on the line")))))
+
+(deftest prime-text-ready-order-preserved-test
+  (testing "the ready section emits tickets in the order supplied (caller controls the sort)"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## Ready")
+          end   (or (str/index-of out "## Schema") (count out))
+          section (subs out start end)
+          rd01-i (str/index-of section "kno-rd01")
+          rd02-i (str/index-of section "kno-rd02")]
+      (is (and rd01-i rd02-i))
+      (is (< rd01-i rd02-i)
+          "renderer emits tickets in input order — caller does the sorting"))))
+
+(deftest prime-text-truncation-footer-test
+  (testing "truncation footer appears when :ready-truncated? is true"
+    (let [data (assoc sample-prime-data
+                      :ready-truncated? true
+                      :ready-remaining 5)
+          out (output/prime-text data)]
+      (is (str/includes? out "+5 more"))
+      (is (str/includes? out "knot ready"))))
+
+  (testing "no truncation footer when :ready-truncated? is false"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (not (str/includes? out "more (run"))
+          "no truncation footer when ready section is not truncated"))))
+
+(deftest prime-text-empty-sections-test
+  (testing "empty in-progress and ready sections still emit their headings (zero-ticket project)"
+    (let [data {:project {:found? true
+                          :prefix "kno"
+                          :name nil
+                          :live-count 0
+                          :archive-count 0}
+                :in-progress []
+                :ready []
+                :ready-truncated? false
+                :ready-remaining 0
+                :limit 20}
+          out (output/prime-text data)]
+      (is (str/includes? out "## Project"))
+      (is (str/includes? out "## In Progress"))
+      (is (str/includes? out "## Ready"))
+      (is (str/includes? out "## Schema")))))
+
+(deftest prime-text-no-project-test
+  (testing "preamble directs the user to `knot init` when no project is found"
+    (let [data {:project {:found? false}
+                :in-progress []
+                :ready []
+                :ready-truncated? false
+                :ready-remaining 0
+                :limit 20}
+          out (output/prime-text data)]
+      (is (str/includes? out "knot init")
+          "preamble references `knot init` so the agent knows how to bootstrap"))))
+
+(deftest prime-json-shape-test
+  (testing "renders a bare JSON object (no envelope)"
+    (let [out (output/prime-json sample-prime-data)]
+      (is (str/starts-with? out "{"))
+      (is (str/ends-with? (str/trimr out) "}"))))
+
+  (testing "uses snake_case top-level keys: project, in_progress, ready, ready_truncated, ready_remaining"
+    (let [out (output/prime-json sample-prime-data)]
+      (is (str/includes? out "\"project\""))
+      (is (str/includes? out "\"in_progress\""))
+      (is (str/includes? out "\"ready\""))
+      (is (str/includes? out "\"ready_truncated\""))
+      (is (str/includes? out "\"ready_remaining\""))))
+
+  (testing "drops the preamble, schema, and cheatsheet (not present in JSON)"
+    (let [out (output/prime-json sample-prime-data)]
+      (is (not (str/includes? out "## Schema")))
+      (is (not (str/includes? out "## In Progress")))))
+
+  (testing "in_progress and ready arrays carry the ticket ids"
+    (let [out (output/prime-json sample-prime-data)]
+      (is (str/includes? out "\"kno-ip01\""))
+      (is (str/includes? out "\"kno-rd01\""))
+      (is (str/includes? out "\"kno-rd02\""))))
+
+  (testing "ready_truncated reflects the input flag"
+    (let [out  (output/prime-json sample-prime-data)
+          out2 (output/prime-json (assoc sample-prime-data
+                                          :ready-truncated? true
+                                          :ready-remaining 5))]
+      (is (str/includes? out  "\"ready_truncated\":false"))
+      (is (str/includes? out2 "\"ready_truncated\":true"))
+      (is (str/includes? out2 "\"ready_remaining\":5"))))
+
+  (testing "project carries prefix and counts; name omitted when absent"
+    (let [out (output/prime-json sample-prime-data)
+          data (assoc-in sample-prime-data [:project :name] nil)
+          out-no-name (output/prime-json data)]
+      (is (str/includes? out "\"prefix\":\"kno\""))
+      (is (str/includes? out "\"name\":\"knot\""))
+      (is (str/includes? out "\"live_count\":4"))
+      (is (str/includes? out "\"archive_count\":2"))
+      (is (not (str/includes? out-no-name "\"name\""))
+          "name field is omitted when no name is provided"))))
+
+(deftest prime-json-no-project-test
+  (testing "no-project case still emits a bare object with empty arrays and counts of 0"
+    (let [data {:project {:found? false}
+                :in-progress []
+                :ready []
+                :ready-truncated? false
+                :ready-remaining 0
+                :limit 20}
+          out (output/prime-json data)]
+      (is (str/starts-with? out "{"))
+      (is (str/includes? out "\"in_progress\":[]"))
+      (is (str/includes? out "\"ready\":[]"))
+      (is (str/includes? out "\"ready_truncated\":false"))
+      (is (str/includes? out "\"ready_remaining\":0")))))

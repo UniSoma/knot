@@ -54,8 +54,9 @@
           (recur parent))))))
 
 (def ^:private known-keys
-  #{:tickets-dir :prefix :default-assignee :default-type :default-priority
-    :statuses :terminal-statuses :types :modes :default-mode})
+  #{:tickets-dir :prefix :project-name :default-assignee :default-type
+    :default-priority :statuses :terminal-statuses :types :modes
+    :default-mode})
 
 (defn- warn! [msg]
   (binding [*out* *err*] (println msg)))

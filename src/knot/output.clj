@@ -347,3 +347,128 @@
                                       (mapv #(value-of t (:key %)) ls-columns)))
                         tickets)]
     (str/join "\n" (cons header-row data-rows))))
+
+(def ^:private prime-preamble-found
+  "You are working in a Knot project. Tickets are markdown files with YAML
+frontmatter under `.tickets/`. The sections below summarize active and
+ready work and end with a schema and command cheatsheet so a fresh
+agent has enough context to act without chained discovery commands.")
+
+(def ^:private prime-preamble-no-project
+  "No Knot project was discovered from the current directory. Run `knot init`
+in the project root to create a `.knot.edn` config and `.tickets/` directory
+before issuing other Knot commands.")
+
+(def ^:private prime-schema-cheatsheet
+  "Frontmatter keys: id, status (open|in_progress|closed), type, priority
+(0=highest..4), mode (afk=agent-runnable, hitl=human-in-the-loop),
+created, updated, closed, assignee, parent, tags, deps, links,
+external_refs.
+
+Common commands:
+  knot ls                    list live tickets
+  knot ready [--mode afk]    list non-blocked tickets (filter by mode)
+  knot show <id>             show one ticket (frontmatter + body)
+  knot create \"<title>\"      create a new ticket
+  knot start|close <id>      transition status (close auto-archives)
+  knot add-note <id> [text]  append a timestamped note
+  knot dep <from> <to>       add a dependency edge (cycle-checked)")
+
+(defn- prime-ticket-line
+  "Format a ticket as `id  mode  pri  title` for the prime in-progress and
+   ready sections. Missing fields render as `-` so columns stay aligned.
+   The renderer is whitespace-only — no ANSI codes — because prime output
+   is consumed by AI agents and downstream tools, not human terminals."
+  [ticket]
+  (let [fm    (:frontmatter ticket)
+        id    (or (:id fm) "")
+        mode  (or (:mode fm) "-")
+        pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
+        title (or (extract-title (:body ticket)) "")]
+    (str id "  " mode "  " pri "  " title)))
+
+(defn- prime-section
+  "Render a `## <header>` section followed by a blank line, the ticket
+   lines (one per ticket), and an optional trailing footer block. Empty
+   ticket sequences emit just the heading + blank line."
+  [header tickets footer]
+  (let [lines (mapv prime-ticket-line tickets)
+        body  (if (seq lines) (str (str/join "\n" lines) "\n") "")
+        foot  (if (str/blank? footer) "" (str footer "\n"))]
+    (str "## " header "\n\n" body foot)))
+
+(defn- prime-project-section
+  "Render the `## Project` metadata section. Always shows prefix and
+   live/archive counts; the `name` line appears only when supplied."
+  [{:keys [prefix name live-count archive-count]}]
+  (let [name-line (when (and name (not (str/blank? name)))
+                    (str "name: " name "\n"))]
+    (str "## Project\n\n"
+         "prefix: " (or prefix "") "\n"
+         (or name-line "")
+         "live: " (or live-count 0) "\n"
+         "archive: " (or archive-count 0) "\n")))
+
+(defn prime-text
+  "Render the five-section markdown primer for the `prime` command:
+     1. Preamble paragraph (or `knot init` directive when no project found)
+     2. `## Project` metadata
+     3. `## In Progress` ticket lines
+     4. `## Ready` ticket lines (with optional truncation footer)
+     5. `## Schema` cheatsheet
+   Each ticket line is `id  mode  pri  title`. Caller controls sort and
+   limit — this function does not reorder or truncate."
+  [{:keys [project in-progress ready ready-truncated? ready-remaining]}]
+  (let [preamble (if (:found? project)
+                   prime-preamble-found
+                   prime-preamble-no-project)
+        ready-footer (when ready-truncated?
+                       (str "... +" (or ready-remaining 0)
+                            " more (run `knot ready`)"))]
+    (str preamble "\n\n"
+         (prime-project-section project) "\n"
+         (prime-section "In Progress" in-progress nil) "\n"
+         (prime-section "Ready" ready ready-footer) "\n"
+         "## Schema\n\n" prime-schema-cheatsheet "\n")))
+
+(defn- jsonify-prime-ticket
+  "Project a ticket into the compact shape used in prime JSON arrays:
+   `{id, status, type, priority, mode, assignee, title}`. Body is omitted
+   to keep payloads tight; consumers needing the body call `knot show
+   <id> --json`."
+  [ticket]
+  (let [fm (:frontmatter ticket)]
+    (cond-> {:id (:id fm)
+             :title (or (extract-title (:body ticket)) "")}
+      (:status fm)   (assoc :status (:status fm))
+      (:type fm)     (assoc :type (:type fm))
+      (some? (:priority fm)) (assoc :priority (:priority fm))
+      (:mode fm)     (assoc :mode (:mode fm))
+      (:assignee fm) (assoc :assignee (:assignee fm))
+      (:updated fm)  (assoc :updated (:updated fm))
+      (:created fm)  (assoc :created (:created fm)))))
+
+(defn- jsonify-prime-project
+  "Project the project metadata into a JSON-friendly map with snake_case
+   keys. `:name` is omitted entirely when not provided so consumers
+   distinguish 'no name' from 'empty name'."
+  [{:keys [found? prefix name live-count archive-count]}]
+  (cond-> {:found       (boolean found?)
+           :prefix      (or prefix "")
+           :live_count  (or live-count 0)
+           :archive_count (or archive-count 0)}
+    (and name (not (str/blank? name))) (assoc :name name)))
+
+(defn prime-json
+  "Render the actionable subset of prime data as a bare JSON object.
+   Keys are snake_case: `project`, `in_progress`, `ready`,
+   `ready_truncated`, `ready_remaining`. The preamble, schema, and
+   command cheatsheet are omitted — JSON consumers are tools that know
+   the schema by definition."
+  [{:keys [project in-progress ready ready-truncated? ready-remaining]}]
+  (json/generate-string
+   {:project          (jsonify-prime-project project)
+    :in_progress      (mapv jsonify-prime-ticket in-progress)
+    :ready            (mapv jsonify-prime-ticket ready)
+    :ready_truncated  (boolean ready-truncated?)
+    :ready_remaining  (or ready-remaining 0)}))

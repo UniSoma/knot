@@ -541,6 +541,80 @@
       (output/ls-json result)
       (output/ls-table result (select-keys opts [:tty? :color? :width])))))
 
+(def ^:private prime-default-limit 20)
+
+(defn- in-progress-tickets
+  "Pick non-terminal tickets with status `in_progress` and sort by
+   `:updated` descending so the most-recently-touched work surfaces
+   first. Tickets without `:updated` sort last in stable input order."
+  [tickets]
+  (->> tickets
+       (filter (fn [t] (= "in_progress" (get-in t [:frontmatter :status]))))
+       (sort-by (fn [t] (or (get-in t [:frontmatter :updated]) ""))
+                #(compare %2 %1))
+       vec))
+
+(defn- count-archive
+  "Count tickets whose status is in `terminal-statuses`."
+  [tickets terminal-statuses]
+  (count (filter (fn [t] (contains? (or terminal-statuses #{})
+                                    (get-in t [:frontmatter :status])))
+                 tickets)))
+
+(defn prime-cmd
+  "Render the agent context primer for the project. Always returns a
+   string — never throws and never returns nil — so the caller can wire
+   it into a global Claude Code `SessionStart` hook with confidence.
+
+   `ctx` carries the usual project context plus `:project-found?` (set
+   when the walk-up discovery hit a `.knot.edn`/`.tickets/` marker) and
+   an optional `:project-name`.
+   `opts` supports `:mode` (filter ready section to that mode), `:limit`
+   (override the default ready cap of 20), and `:json?` (emit the
+   actionable bare-object payload instead of markdown).
+
+   The ready section is filtered by `:mode` BEFORE the cap is applied,
+   so `--mode afk --limit 5` yields up to 5 afk-mode ready tickets, not
+   5 from the unfiltered set."
+  [ctx {:keys [json? mode limit]}]
+  (if-not (:project-found? ctx)
+    (let [data {:project          {:found? false}
+                :in-progress      []
+                :ready            []
+                :ready-truncated? false
+                :ready-remaining  0
+                :limit            (or limit prime-default-limit)}]
+      (if json?
+        (output/prime-json data)
+        (output/prime-text data)))
+    (let [{:keys [project-root tickets-dir terminal-statuses
+                  prefix project-name]} (resolve-ctx ctx)
+          all          (store/load-all project-root tickets-dir)
+          archive-cnt  (count-archive all terminal-statuses)
+          live-cnt     (- (count all) archive-cnt)
+          in-progress* (in-progress-tickets all)
+          ready*       (query/ready all terminal-statuses)
+          mode-filter  (when mode {:mode #{mode}})
+          ready-filtered (query/filter-tickets ready* (or mode-filter {}))
+          cap          (or limit prime-default-limit)
+          ready-shown  (vec (take cap ready-filtered))
+          ready-total  (count ready-filtered)
+          truncated?   (> ready-total cap)
+          remaining    (if truncated? (- ready-total cap) 0)
+          data         {:project          {:found?        true
+                                           :prefix        prefix
+                                           :name          project-name
+                                           :live-count    live-cnt
+                                           :archive-count archive-cnt}
+                        :in-progress      in-progress*
+                        :ready            ready-shown
+                        :ready-truncated? truncated?
+                        :ready-remaining  remaining
+                        :limit            cap}]
+      (if json?
+        (output/prime-json data)
+        (output/prime-text data)))))
+
 (defn- stub-config
   "Render a self-documenting `.knot.edn` stub with every known key present
    and inline-commented. `tickets-dir` and `prefix` default to PRD values

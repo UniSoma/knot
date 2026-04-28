@@ -863,3 +863,104 @@
                                          "--summary" "nope")]
         (is (= 1 exit))
         (is (str/includes? err "summary"))))))
+
+(deftest prime-end-to-end-test
+  (testing "prime in a populated project exits 0 and emits the five sections"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "prime")]
+        (is (zero? exit) (str "prime err=" err))
+        (is (str/includes? out "## Project"))
+        (is (str/includes? out "## In Progress"))
+        (is (str/includes? out "## Ready"))
+        (is (str/includes? out "## Schema"))
+        (is (str/includes? out "Live ticket")))))
+
+  (testing "prime --json emits a bare object with the documented snake_case keys"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "prime" "--json")]
+        (is (zero? exit) (str "prime --json err=" err))
+        (is (str/starts-with? (str/trim out) "{"))
+        (is (str/includes? out "\"project\""))
+        (is (str/includes? out "\"in_progress\""))
+        (is (str/includes? out "\"ready\""))
+        (is (str/includes? out "\"ready_truncated\""))
+        (is (str/includes? out "\"ready_remaining\""))
+        (is (not (str/includes? out "## Schema"))
+            "JSON output drops the schema cheatsheet"))))
+
+  (testing "prime in a directory with no Knot project still exits 0 and points at `knot init`"
+    ;; Bound the walk-up by creating a temp dir under a parent we can mark
+    ;; with a marker — but actually the simplest safe variant is to use
+    ;; the temp dir itself: babashka.fs/create-temp-dir returns a path
+    ;; under /tmp which has no `.knot.edn` or `.tickets/` ancestor.
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "prime")]
+        (is (zero? exit) (str "prime in non-project dir err=" err))
+        (is (str/includes? out "knot init")
+            "preamble points the user at `knot init`"))))
+
+  (testing "prime in an empty Knot project exits 0 with all section headings present"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "prime")]
+        (is (zero? exit) (str "prime in empty project err=" err))
+        (is (str/includes? out "## Project"))
+        (is (str/includes? out "## In Progress"))
+        (is (str/includes? out "## Ready")))))
+
+  (testing "prime in an archive-only project exits 0 with empty in-progress/ready sections"
+    (with-tmp tmp
+      (let [a-out (run-knot tmp "create" "Will close")
+            a-id  (id-from-create-out (:out a-out) "will-close")
+            _     (run-knot tmp "close" a-id)
+            {:keys [exit out err]} (run-knot tmp "prime")]
+        (is (zero? exit) (str "prime in archive-only project err=" err))
+        (is (re-find #"archive: 1" out))
+        (let [ip-start (str/index-of out "## In Progress")
+              rd-start (str/index-of out "## Ready")
+              sc-start (str/index-of out "## Schema")
+              ip-section (subs out ip-start rd-start)
+              rd-section (subs out rd-start sc-start)]
+          (is (not (str/includes? ip-section "Will close"))
+              "closed ticket does not appear in in-progress")
+          (is (not (str/includes? rd-section "Will close"))
+              "closed ticket does not appear in ready")))))
+
+  (testing "prime --mode afk filters the ready section to afk-only tickets"
+    (with-tmp tmp
+      (run-knot tmp "create" "Afk job"  "--afk")
+      (run-knot tmp "create" "Hitl job" "--hitl")
+      (let [{:keys [exit out err]} (run-knot tmp "prime" "--mode" "afk")]
+        (is (zero? exit) (str "prime --mode afk err=" err))
+        (let [rd-start (str/index-of out "## Ready")
+              sc-start (str/index-of out "## Schema")
+              section  (subs out rd-start sc-start)]
+          (is (str/includes? section "Afk job"))
+          (is (not (str/includes? section "Hitl job")))))))
+
+  (testing "prime --limit overrides the default cap and emits a truncation footer"
+    (with-tmp tmp
+      (run-knot tmp "create" "T1")
+      (run-knot tmp "create" "T2")
+      (run-knot tmp "create" "T3")
+      (let [{:keys [exit out err]} (run-knot tmp "prime" "--limit" "1")]
+        (is (zero? exit) (str "prime --limit err=" err))
+        (is (str/includes? out "+2 more"))
+        (is (str/includes? out "knot ready")))))
+
+  (testing "knot init does NOT modify .claude/settings.json"
+    ;; Ensure a global SessionStart hook can be wired from the README
+    ;; without `knot init` clobbering it. The init command writes only
+    ;; .knot.edn and the tickets directory.
+    (with-tmp tmp
+      (let [claude-dir (fs/path tmp ".claude")
+            settings   (fs/path claude-dir "settings.json")
+            _ (fs/create-dirs claude-dir)
+            _ (spit (str settings) "{\"hooks\":{\"SessionStart\":\"existing\"}}")
+            before (slurp (str settings))
+            {:keys [exit err]} (run-knot tmp "init")]
+        (is (zero? exit) (str "init err=" err))
+        (is (= before (slurp (str settings)))
+            "init must not touch .claude/settings.json")))))

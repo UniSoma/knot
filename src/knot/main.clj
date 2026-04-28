@@ -15,7 +15,9 @@
   "Build a command context: walk up from cwd to find the project root, load
    `.knot.edn` (when present), and derive the prefix from config (when set)
    or from the project directory name. Falls back to cwd + defaults when no
-   project marker is found anywhere up the tree."
+   project marker is found anywhere up the tree. `:project-found?` records
+   whether the walk-up actually hit a marker so commands like `prime` can
+   render a fallback preamble without conditional fall-throughs."
   []
   (let [cwd       (str (fs/cwd))
         discovered (config/discover cwd)
@@ -24,8 +26,9 @@
         prefix    (or (:prefix cfg)
                       (ticket/derive-prefix (str (fs/file-name root))))]
     (merge cfg
-           {:project-root root
-            :prefix       prefix})))
+           {:project-root   root
+            :prefix         prefix
+            :project-found? (some? discovered)})))
 
 (defn- die
   "Print `msg` to stderr and exit 1."
@@ -420,12 +423,40 @@
         (println-out (str path))
         (die (str "knot edit: no ticket matching " id))))))
 
+(def ^:private prime-spec
+  {:spec
+   {:json  {:coerce :boolean}
+    :mode  {}
+    :limit {:coerce :long}}
+   :restrict true})
+
+(defn- prime-handler
+  "Run `knot prime`. Always exits 0, including in directories with no
+   Knot project — the renderer emits a fallback preamble pointing at
+   `knot init`. Argument-parsing errors fall back to a minimal primer
+   so the command stays safe to wire into a global SessionStart hook."
+  [argv]
+  (let [out (try
+              (let [{:keys [opts]} (bcli/parse-args argv prime-spec)]
+                (cli/prime-cmd (discover-ctx)
+                               {:json? (boolean (:json opts))
+                                :mode  (:mode opts)
+                                :limit (:limit opts)}))
+              (catch Exception _
+                ;; Argument-parsing or unexpected failure: degrade to a
+                ;; no-project primer rather than exit non-zero. SessionStart
+                ;; safety is the contract — never break the agent's session.
+                (cli/prime-cmd {:project-found? false} {})))]
+    (println-out out)))
+
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
     (println)
     (println "Commands:")
     (println "  init                       Write .knot.edn stub and create the tickets dir")
+    (println "  prime          [--json] [--mode <m>] [--limit N]")
+    (println "                             Emit a five-section primer for AI agent context-injection")
     (println "  create <title> [flags]     Create a new ticket")
     (println "  show   <id>    [--json]    Render the ticket with the given id")
     (println "  ls             [--json]    List live (non-terminal) tickets")
@@ -454,6 +485,7 @@
     (let [[cmd & rest-argv] argv]
       (case cmd
         "init"   (init-handler rest-argv)
+        "prime"  (prime-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         "ls"     (ls-handler rest-argv)
