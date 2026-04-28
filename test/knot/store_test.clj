@@ -45,3 +45,26 @@
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (store/load-one tmp ".tickets" "missing-id"))))))
+
+(deftest load-all-test
+  (testing "load-all returns every ticket file in the live tickets dir"
+    (with-tmp tmp
+      (let [t1 {:frontmatter {:id "kno-01" :status "open"}        :body ""}
+            t2 {:frontmatter {:id "kno-02" :status "in_progress"} :body ""}
+            t3 {:frontmatter {:id "kno-03" :status "closed"}      :body ""}]
+        (store/save! tmp ".tickets" "kno-01" "first"  t1)
+        (store/save! tmp ".tickets" "kno-02" "second" t2)
+        (store/save! tmp ".tickets" "kno-03" ""       t3)
+        (let [loaded (store/load-all tmp ".tickets")
+              ids    (set (map #(get-in % [:frontmatter :id]) loaded))]
+          (is (= 3 (count loaded)))
+          (is (= #{"kno-01" "kno-02" "kno-03"} ids))))))
+
+  (testing "load-all returns an empty seq when the tickets dir is missing"
+    (with-tmp tmp
+      (is (empty? (store/load-all tmp ".tickets")))))
+
+  (testing "load-all returns an empty seq when the tickets dir is empty"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (empty? (store/load-all tmp ".tickets"))))))

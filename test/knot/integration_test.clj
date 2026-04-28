@@ -98,3 +98,117 @@
       (let [{:keys [exit err]} (run-knot tmp "show" "no-such-id")]
         (is (= 1 exit))
         (is (str/includes? err "no ticket matching"))))))
+
+(deftest ls-end-to-end-test
+  (testing "ls renders a table with both ticket titles when piped"
+    (with-tmp tmp
+      (run-knot tmp "create" "First ticket")
+      (run-knot tmp "create" "Second ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "ls")]
+        (is (zero? exit) (str "ls err=" err))
+        (is (str/includes? out "ID"))
+        (is (str/includes? out "STATUS"))
+        (is (str/includes? out "TITLE"))
+        (is (str/includes? out "First ticket"))
+        (is (str/includes? out "Second ticket"))
+        (is (not (re-find #"\[" out))
+            "no ANSI escape sequences should appear when stdout is piped"))))
+
+  (testing "ls --json emits a bare JSON array of objects"
+    (with-tmp tmp
+      (run-knot tmp "create" "Hello")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--json")]
+        (is (zero? exit) (str "ls --json err=" err))
+        (let [trimmed (str/trim out)]
+          (is (str/starts-with? trimmed "["))
+          (is (str/ends-with? trimmed "]"))
+          (is (str/includes? trimmed "\"status\":\"open\"")))))))
+
+(deftest show-json-end-to-end-test
+  (testing "show --json emits a bare JSON object with snake_case keys"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello"
+                                    "--external-ref" "JIRA-1")
+            id   (->> (str (fs/file-name (str/trim out)))
+                      (re-matches #"(.+)--hello\.md")
+                      second)
+            {:keys [exit out err]} (run-knot tmp "show" id "--json")]
+        (is (zero? exit) (str "show --json err=" err))
+        (let [trimmed (str/trim out)]
+          (is (str/starts-with? trimmed "{"))
+          (is (str/ends-with? trimmed "}"))
+          (is (str/includes? trimmed (str "\"id\":\"" id "\"")))
+          (is (str/includes? trimmed "\"external_refs\""))
+          (is (str/includes? trimmed "\"body\"")))))))
+
+(deftest stderr-discipline-test
+  (testing "create — data on stdout, stderr is empty on success"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Title")]
+        (is (zero? exit))
+        (is (not (str/blank? out)) "expected the created path on stdout")
+        (is (str/blank? err) (str "expected stderr empty on success, got: " (pr-str err))))))
+
+  (testing "show — data on stdout, stderr is empty on success"
+    (with-tmp tmp
+      (let [created (run-knot tmp "create" "T")
+            id (->> (str (fs/file-name (str/trim (:out created))))
+                    (re-matches #"(.+)--t\.md")
+                    second)
+            {:keys [exit out err]} (run-knot tmp "show" id)]
+        (is (zero? exit))
+        (is (not (str/blank? out)))
+        (is (str/blank? err)))))
+
+  (testing "ls — data on stdout, stderr is empty on success"
+    (with-tmp tmp
+      (run-knot tmp "create" "T1")
+      (let [{:keys [exit out err]} (run-knot tmp "ls")]
+        (is (zero? exit))
+        (is (not (str/blank? out)))
+        (is (str/blank? err)))))
+
+  (testing "ls --json — data on stdout, stderr is empty on success"
+    (with-tmp tmp
+      (run-knot tmp "create" "T1")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--json")]
+        (is (zero? exit))
+        (is (not (str/blank? out)))
+        (is (str/blank? err)))))
+
+  (testing "show on a missing id — error on stderr, stdout is empty"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "show" "no-such-id")]
+        (is (= 1 exit))
+        (is (str/blank? out) (str "expected stdout empty on error, got: " (pr-str out)))
+        (is (not (str/blank? err))))))
+
+  (testing "unknown command — usage on stderr, stdout is empty"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "frobnicate")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "unknown command"))))))
+
+(deftest ls-default-hides-closed-test
+  (testing "default ls excludes terminal-status tickets"
+    (with-tmp tmp
+      (run-knot tmp "create" "Live ticket")
+      ;; Hand-write a closed ticket directly to disk to avoid depending on
+      ;; a 'close' command (not yet implemented).
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "tmp-closedid001--closed-ticket.md"))
+            (str "---\n"
+                 "id: tmp-closedid001\n"
+                 "status: closed\n"
+                 "type: task\n"
+                 "priority: 2\n"
+                 "mode: hitl\n"
+                 "---\n\n"
+                 "# Closed ticket\n"))
+      (let [{:keys [exit out err]} (run-knot tmp "ls")]
+        (is (zero? exit) (str "ls err=" err))
+        (is (str/includes? out "Live ticket"))
+        (is (not (str/includes? out "Closed ticket"))
+            "default ls should hide terminal-status tickets")))))

@@ -16,3 +16,197 @@
       (is (str/includes? s "type: task"))
       (is (str/includes? s "# Fix login"))
       (is (str/includes? s "Description text.")))))
+
+(deftest color-enabled-test
+  (testing "TTY with no overrides — color enabled"
+    (is (true? (output/color-enabled? {:tty? true
+                                       :no-color? false
+                                       :no-color-env nil}))))
+  (testing "non-TTY (piped) — color disabled even when no overrides set"
+    (is (false? (output/color-enabled? {:tty? false
+                                        :no-color? false
+                                        :no-color-env nil}))))
+  (testing "--no-color flag overrides TTY — color disabled"
+    (is (false? (output/color-enabled? {:tty? true
+                                        :no-color? true
+                                        :no-color-env nil}))))
+  (testing "NO_COLOR=1 disables color (any non-empty value)"
+    (is (false? (output/color-enabled? {:tty? true
+                                        :no-color? false
+                                        :no-color-env "1"})))
+    (is (false? (output/color-enabled? {:tty? true
+                                        :no-color? false
+                                        :no-color-env "anything"}))))
+  (testing "NO_COLOR=\"\" (empty string) does NOT disable color (no-color.org spec)"
+    (is (true? (output/color-enabled? {:tty? true
+                                       :no-color? false
+                                       :no-color-env ""})))))
+
+(defn- strip-ansi [s]
+  (str/replace s #"\[[0-9;]*m" ""))
+
+(def sample-ls-tickets
+  [{:frontmatter {:id "kno-01abcd0001"
+                  :status "open"
+                  :priority 2
+                  :mode "afk"
+                  :type "task"
+                  :assignee "alice"}
+    :body "# Fix login bug\n"}
+   {:frontmatter {:id "kno-01abcd0002"
+                  :status "in_progress"
+                  :priority 0
+                  :mode "hitl"
+                  :type "bug"
+                  :assignee "bob"}
+    :body "# Critical pager outage during peak hours please address\n"}])
+
+(deftest ls-table-headers-test
+  (testing "header row contains the expected column names in order"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"ID" first-line))
+      (is (re-find #"STATUS" first-line))
+      (is (re-find #"PRI" first-line))
+      (is (re-find #"MODE" first-line))
+      (is (re-find #"TYPE" first-line))
+      (is (re-find #"ASSIGNEE" first-line))
+      (is (re-find #"TITLE" first-line))
+      (let [order (re-seq #"ID|STATUS|PRI|MODE|TYPE|ASSIGNEE|TITLE" first-line)]
+        (is (= ["ID" "STATUS" "PRI" "MODE" "TYPE" "ASSIGNEE" "TITLE"] order))))))
+
+(deftest ls-table-renders-data-test
+  (testing "data rows include the ticket id, status, priority, mode, type, assignee, title"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})]
+      (is (str/includes? out "kno-01abcd0001"))
+      (is (str/includes? out "open"))
+      (is (str/includes? out "afk"))
+      (is (str/includes? out "task"))
+      (is (str/includes? out "alice"))
+      (is (str/includes? out "Fix login bug"))
+      (is (str/includes? out "in_progress"))
+      (is (str/includes? out "bob")))))
+
+(deftest ls-table-title-piped-test
+  (testing "when piped (tty? false), TITLE is full-width — long titles are not truncated"
+    (let [long-title "Critical pager outage during peak hours please address"
+          out (output/ls-table sample-ls-tickets {:color? false :tty? false})]
+      (is (str/includes? out long-title)))))
+
+(deftest ls-table-title-tty-truncated-test
+  (testing "when tty? true with a constrained width, long titles are truncated"
+    (let [out (output/ls-table sample-ls-tickets
+                               {:color? false :tty? true :width 60})
+          plain (strip-ansi out)
+          long-title "Critical pager outage during peak hours please address"]
+      (is (not (str/includes? plain long-title))
+          "with width=60 the long title should not appear in full")
+      (doseq [line (str/split-lines plain)]
+        (is (<= (count line) 60)
+            (str "row exceeds the requested width: " (pr-str line)))))))
+
+(deftest ls-table-pri-right-aligned-test
+  (testing "PRI column is right-aligned (whitespace-padded on the left within the column slot)"
+    (let [tickets [{:frontmatter {:id "x" :status "open" :priority 0
+                                  :mode "hitl" :type "task" :assignee "a"}
+                    :body "# T\n"}
+                   {:frontmatter {:id "y" :status "open" :priority 4
+                                  :mode "hitl" :type "task" :assignee "a"}
+                    :body "# T\n"}]
+          out (output/ls-table tickets {:color? false :tty? false})
+          lines (str/split-lines out)
+          header (first lines)
+          pri-idx (str/index-of header "PRI")
+          pri-right (+ pri-idx (count "PRI"))]
+      ;; both data rows must place the digit at the rightmost column of the
+      ;; PRI slot (i.e. immediately before the next column gap)
+      (is (some? pri-idx))
+      (doseq [line (rest lines)
+              :when (not (str/blank? line))]
+        (let [ch (.charAt line (dec pri-right))]
+          (is (or (= \0 ch) (= \4 ch))
+              (str "expected priority digit at column " (dec pri-right)
+                   " but got " (pr-str ch) " in line " (pr-str line))))))))
+
+(deftest ls-table-color-suppressed-test
+  (testing "with color? false, output contains no ANSI escape codes"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? true})]
+      (is (not (re-find #"\[" out))
+          "expected no ANSI escape sequences when color is disabled"))))
+
+(deftest ls-table-color-applied-test
+  (testing "with color? true, ANSI escape codes appear in the output"
+    (let [out (output/ls-table sample-ls-tickets {:color? true :tty? true :width 200})]
+      (is (re-find #"\[" out)))))
+
+(deftest show-json-test
+  (testing "renders a bare JSON object (not wrapped in an envelope)"
+    (let [ticket {:frontmatter {:id "kno-01abc"
+                                :status "open"
+                                :type "task"
+                                :priority 2
+                                :external_refs ["JIRA-1"]}
+                  :body "# Title\n\nBody.\n"}
+          out (output/show-json ticket)]
+      (is (str/starts-with? out "{"))
+      (is (str/ends-with? (str/trimr out) "}"))))
+  (testing "uses snake_case keys (e.g. external_refs preserved)"
+    (let [ticket {:frontmatter {:id "kno-01abc"
+                                :external_refs ["JIRA-1" "JIRA-2"]}
+                  :body ""}
+          out (output/show-json ticket)]
+      (is (str/includes? out "\"external_refs\""))
+      (is (not (str/includes? out "external-refs")))))
+  (testing "frontmatter fields appear at the top level of the object"
+    (let [ticket {:frontmatter {:id "kno-01abc" :status "open" :priority 2}
+                  :body "B"}
+          out (output/show-json ticket)]
+      (is (str/includes? out "\"id\":\"kno-01abc\""))
+      (is (str/includes? out "\"status\":\"open\""))
+      (is (str/includes? out "\"priority\":2"))))
+  (testing "body is included as a top-level field"
+    (let [ticket {:frontmatter {:id "kno-01abc"} :body "# Title\n"}
+          out (output/show-json ticket)]
+      (is (str/includes? out "\"body\""))
+      (is (str/includes? out "Title")))))
+
+(deftest ls-json-test
+  (testing "renders a bare JSON array (not an envelope)"
+    (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}
+                   {:frontmatter {:id "b" :status "in_progress"} :body ""}]
+          out (output/ls-json tickets)]
+      (is (str/starts-with? out "["))
+      (is (str/ends-with? (str/trimr out) "]"))))
+  (testing "each entry is an object with the ticket's frontmatter fields"
+    (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}
+                   {:frontmatter {:id "b" :status "in_progress"} :body ""}]
+          out (output/ls-json tickets)]
+      (is (str/includes? out "\"id\":\"a\""))
+      (is (str/includes? out "\"id\":\"b\""))
+      (is (str/includes? out "\"status\":\"open\""))
+      (is (str/includes? out "\"status\":\"in_progress\""))))
+  (testing "snake_case keys preserved (external_refs)"
+    (let [tickets [{:frontmatter {:id "a" :external_refs ["JIRA-1"]} :body ""}]
+          out (output/ls-json tickets)]
+      (is (str/includes? out "\"external_refs\""))))
+  (testing "an empty list renders as []"
+    (is (= "[]" (str/trim (output/ls-json []))))))
+
+(deftest colorize-test
+  (testing "with color? false, returns the text unchanged"
+    (is (= "hello" (output/colorize false [:cyan] "hello")))
+    (is (= "hello" (output/colorize false [:red :bold] "hello"))))
+  (testing "with color? true, wraps in ANSI escape codes"
+    (let [s (output/colorize true [:cyan] "hello")]
+      (is (str/starts-with? s "["))
+      (is (str/ends-with? s "[0m"))
+      (is (str/includes? s "hello"))
+      (is (str/includes? s "36"))))
+  (testing "with color? true and multiple codes, all codes appear in the SGR sequence"
+    (let [s (output/colorize true [:red :bold] "x")]
+      (is (str/includes? s "31"))
+      (is (str/includes? s "1"))
+      (is (str/ends-with? s "[0m"))))
+  (testing "empty code list returns text unchanged regardless of color?"
+    (is (= "x" (output/colorize true [] "x")))
+    (is (= "x" (output/colorize false [] "x")))))

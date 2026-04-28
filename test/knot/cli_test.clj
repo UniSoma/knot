@@ -131,4 +131,66 @@
   (testing "show returns nil when no ticket matches the id"
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
-      (is (nil? (cli/show-cmd (ctx tmp) {:id "nope-x"}))))))
+      (is (nil? (cli/show-cmd (ctx tmp) {:id "nope-x"})))))
+
+  (testing "show with :json? true returns a bare JSON object string"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "Hello"})
+            id   (->> (fs/file-name path)
+                      (re-matches #"(.+)--hello\.md")
+                      second)
+            out  (cli/show-cmd (ctx tmp) {:id id :json? true})]
+        (is (string? out))
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out (str "\"id\":\"" id "\"")))
+        (is (str/includes? out "\"status\":\"open\""))
+        (is (str/includes? out "\"body\""))
+        (is (not (str/includes? out "---\n")))))))
+
+(deftest ls-cmd-test
+  (testing "ls returns a table string with column headers"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "First ticket"})
+      (cli/create-cmd (ctx tmp) {:title "Second ticket"})
+      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (string? out))
+        (is (str/includes? out "ID"))
+        (is (str/includes? out "STATUS"))
+        (is (str/includes? out "TITLE"))
+        (is (str/includes? out "First ticket"))
+        (is (str/includes? out "Second ticket")))))
+
+  (testing "ls with :json? true returns a bare JSON array"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "First"})
+      (cli/create-cmd (ctx tmp) {:title "Second"})
+      (let [out (cli/ls-cmd (ctx tmp) {:json? true})]
+        (is (string? out))
+        (is (str/starts-with? out "["))
+        (is (str/includes? out "\"status\":\"open\"")))))
+
+  (testing "ls excludes terminal-status tickets by default"
+    ;; create three tickets, then bypass cli/create to drop one as 'closed'
+    ;; via store directly
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Live one"})
+      (cli/create-cmd (ctx tmp) {:title "Live two"})
+      ;; manually save a closed ticket
+      (require 'knot.store)
+      (let [save! (resolve 'knot.store/save!)]
+        (save! tmp ".tickets" "kno-closedid001" "closed-ticket"
+               {:frontmatter {:id "kno-closedid001" :status "closed"
+                              :type "task" :priority 2 :mode "hitl"}
+                :body        "# Closed ticket\n"}))
+      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "Live one"))
+        (is (str/includes? out "Live two"))
+        (is (not (str/includes? out "Closed ticket"))
+            "default ls should hide terminal-status tickets"))))
+
+  (testing "ls returns an empty-table (header only) when there are no live tickets"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "ID"))
+        (is (str/includes? out "TITLE"))))))

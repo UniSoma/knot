@@ -1,7 +1,9 @@
 (ns knot.output
   "Renderers: human (markdown/text + ANSI), JSON, dep-tree.
    stdout = data; stderr = warnings/errors."
-  (:require [knot.ticket :as ticket]))
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
+            [knot.ticket :as ticket]))
 
 (defn show-text
   "Render a ticket map for the `show` command. Returns a string containing the
@@ -9,3 +11,172 @@
    deferred to a later slice."
   [ticket]
   (ticket/render ticket))
+
+(def ^:private ansi-codes
+  "Map of friendly names to ANSI SGR parameters (numbers as strings)."
+  {:reset  "0"
+   :bold   "1"
+   :faint  "2"
+   :dim    "2"
+   :red    "31"
+   :yellow "33"
+   :cyan   "36"})
+
+(def ^:private ansi-reset "[0m")
+
+(defn tty?
+  "True when stdout is connected to a terminal. Uses System/console which
+   returns nil when stdout is piped or redirected."
+  []
+  (some? (System/console)))
+
+(defn color-enabled?
+  "Return true when ANSI color output is appropriate.
+   `opts` may include :tty?, :no-color?, :no-color-env. Missing keys fall
+   back to the actual environment (System/console, NO_COLOR env var). Per
+   no-color.org, NO_COLOR disables color when set to any non-empty value."
+  ([] (color-enabled? {}))
+  ([opts]
+   (let [tty?* (if (contains? opts :tty?)
+                 (boolean (:tty? opts))
+                 (tty?))
+         no-color? (boolean (:no-color? opts))
+         env (if (contains? opts :no-color-env)
+               (:no-color-env opts)
+               (System/getenv "NO_COLOR"))
+         env-disables? (and (string? env) (not= env ""))]
+     (and tty?* (not no-color?) (not env-disables?)))))
+
+(defn- jsonify-ticket
+  "Project a `{:frontmatter ... :body ...}` map into the JSON shape used by
+   `show --json` and `ls --json`. Keeps frontmatter keys at the top level
+   and adds the body as a `body` field. Frontmatter keys are already
+   snake_case in the on-disk YAML and pass straight through."
+  [{:keys [frontmatter body] :as _ticket} {:keys [include-body?]
+                                           :or {include-body? true}}]
+  (cond-> (into {} frontmatter)
+    include-body? (assoc :body body)))
+
+(defn show-json
+  "Render a ticket map as a bare JSON object. Keys are snake_case; no
+   envelope is added around the object."
+  [ticket]
+  (json/generate-string (jsonify-ticket ticket {:include-body? true})))
+
+(defn ls-json
+  "Render a sequence of ticket maps as a bare JSON array of objects.
+   Keys are snake_case; the body is omitted from each entry to keep
+   list output compact."
+  [tickets]
+  (json/generate-string
+   (mapv #(jsonify-ticket % {:include-body? false}) tickets)))
+
+(defn colorize
+  "Wrap `s` in an ANSI SGR sequence built from `codes` when `color?` is true.
+   Returns `s` unchanged when `color?` is false or `codes` is empty.
+   `codes` is a sequence of keys from `ansi-codes`."
+  [color? codes s]
+  (if (or (not color?) (empty? codes))
+    s
+    (let [params (->> codes (keep ansi-codes) (str/join ";"))]
+      (if (str/blank? params)
+        s
+        (str "[" params "m" s ansi-reset)))))
+
+(def ^:private ls-columns
+  [{:key :id        :header "ID"       :align :left}
+   {:key :status    :header "STATUS"   :align :left}
+   {:key :priority  :header "PRI"      :align :right}
+   {:key :mode      :header "MODE"     :align :left}
+   {:key :type      :header "TYPE"     :align :left}
+   {:key :assignee  :header "ASSIGNEE" :align :left}
+   {:key :title     :header "TITLE"    :align :left}])
+
+(def ^:private col-sep "  ")
+(def ^:private col-sep-len (count col-sep))
+
+(defn- extract-title
+  "Return the H1 title from a markdown body (the first `# ...` line),
+   trimmed. Returns nil when no H1 is present."
+  [body]
+  (when body
+    (some (fn [line]
+            (let [m (re-matches #"#\s+(.*)" line)]
+              (when m (str/trim (second m)))))
+          (str/split-lines body))))
+
+(defn- value-of
+  "Plain string for a single ls cell — no padding, no color."
+  [ticket k]
+  (case k
+    :title (or (extract-title (:body ticket)) "")
+    (let [v (get (:frontmatter ticket) k)]
+      (if (some? v) (str v) ""))))
+
+(defn- pad
+  [s width align]
+  (let [padding (max 0 (- width (count s)))
+        spaces  (apply str (repeat padding \space))]
+    (case align
+      :right (str spaces s)
+      :left  (str s spaces))))
+
+(defn- truncate
+  [s width]
+  (if (<= (count s) width) s (subs s 0 width)))
+
+(defn- color-codes-for
+  [k value]
+  (case k
+    :status   (case value
+                "open"        [:cyan]
+                "in_progress" [:yellow]
+                "closed"      [:dim]
+                [])
+    :priority (if (= "0" value) [:red :bold] [])
+    :mode     [:faint]
+    :type     [:faint]
+    []))
+
+(defn ls-table
+  "Render `tickets` as a fixed-width text table with the columns
+     ID  STATUS  PRI  MODE  TYPE  ASSIGNEE  TITLE
+   PRI is right-aligned. TITLE is full-width when piped (`:tty? false`)
+   and truncated to fit `:width` (default 80) when `:tty? true`.
+   Pass `:color? true` to apply ANSI color to data rows; the header row
+   is always plain text."
+  [tickets {:keys [color? tty? width]
+            :or {color? false tty? false width 80}}]
+  (let [non-title        (vec (butlast ls-columns))
+        title-col        (last ls-columns)
+        non-title-widths (mapv (fn [{:keys [key header]}]
+                                 (apply max (count header)
+                                        (map #(count (value-of % key)) tickets)))
+                               non-title)
+        prefix-width     (+ (apply + non-title-widths)
+                            (* col-sep-len (count non-title)))
+        natural-title    (apply max (count (:header title-col))
+                                (map #(count (value-of % :title)) tickets))
+        title-budget     (if tty?
+                           (max 0 (- width prefix-width))
+                           natural-title)
+        widths           (conj non-title-widths title-budget)
+        format-cell      (fn [col w v color-on?]
+                           (let [t (truncate v w)
+                                 p (pad t w (:align col))]
+                             (if color-on?
+                               (colorize color?
+                                         (color-codes-for (:key col) t)
+                                         p)
+                               p)))
+        format-row       (fn [color-on? raw-row]
+                           (str/join col-sep
+                                     (map (fn [col w v]
+                                            (format-cell col w v color-on?))
+                                          ls-columns widths raw-row)))
+        header-row (format-row false (mapv :header ls-columns))
+        data-rows  (map (fn [t]
+                          (format-row true
+                                      (mapv #(value-of t (:key %)) ls-columns)))
+                        tickets)]
+    (str/join "\n" (cons header-row data-rows))))

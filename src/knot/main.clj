@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [knot.cli :as cli]
             [knot.config :as config]
+            [knot.output :as output]
             [knot.ticket :as ticket]))
 
 (defn- discover-ctx
@@ -59,22 +60,59 @@
           path (cli/create-cmd (discover-ctx) opts)]
       (println (str path)))))
 
+(def ^:private show-spec
+  {:spec
+   {:json     {:coerce :boolean}
+    :no-color {:coerce :boolean}}})
+
+(def ^:private ls-spec
+  {:spec
+   {:json     {:coerce :boolean}
+    :no-color {:coerce :boolean}}})
+
+(defn- println-out
+  "Print a string to stdout. Adds a trailing newline only when `s` does
+   not already end in one — keeps `>/dev/null` clean and ensures the
+   terminal moves to a fresh line for interactive use."
+  [s]
+  (if (str/ends-with? s "\n")
+    (print s)
+    (println s))
+  (flush))
+
 (defn- show-handler [argv]
-  (let [id (first argv)]
+  (let [{:keys [opts args]} (bcli/parse-args argv show-spec)
+        id (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot show: an id is required"))
-    (let [out (cli/show-cmd (discover-ctx) {:id id})]
+    (let [out (cli/show-cmd (discover-ctx)
+                            {:id id :json? (boolean (:json opts))})]
       (if out
-        (do (print out) (flush))
+        (println-out out)
         (die (str "knot show: no ticket matching " id))))))
+
+(defn- ls-handler [argv]
+  (let [{:keys [opts]} (bcli/parse-args argv ls-spec)
+        json?    (boolean (:json opts))
+        tty?     (output/tty?)
+        color?   (output/color-enabled?
+                  {:tty?         tty?
+                   :no-color?    (boolean (:no-color opts))
+                   :no-color-env (System/getenv "NO_COLOR")})
+        ls-opts  {:json?  json?
+                  :tty?   tty?
+                  :color? color?}
+        out      (cli/ls-cmd (discover-ctx) ls-opts)]
+    (println-out out)))
 
 (defn- usage []
   (binding [*out* *err*]
     (println "Usage: knot <command> [args...]")
     (println)
     (println "Commands:")
-    (println "  create <title> [flags]   Create a new ticket")
-    (println "  show   <id>              Render the ticket with the given id")))
+    (println "  create <title> [flags]    Create a new ticket")
+    (println "  show   <id>   [--json]    Render the ticket with the given id")
+    (println "  ls            [--json]    List live (non-terminal) tickets")))
 
 (defn -main [& argv]
   (try
@@ -82,6 +120,7 @@
       (case cmd
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
+        "ls"     (ls-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

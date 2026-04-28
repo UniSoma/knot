@@ -6,6 +6,7 @@
             [knot.config :as config]
             [knot.git :as git]
             [knot.output :as output]
+            [knot.query :as query]
             [knot.store :as store]
             [knot.ticket :as ticket])
   (:import (java.time Instant)))
@@ -95,9 +96,25 @@
 
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
-   and return its rendered text. Returns nil when no matching ticket exists."
+   and return its rendered text. With `:json? true`, returns a bare JSON
+   object instead. Returns nil when no matching ticket exists."
   [ctx opts]
   (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
         loaded (store/load-one project-root tickets-dir (:id opts))]
     (when loaded
-      (output/show-text loaded))))
+      (if (:json? opts)
+        (output/show-json loaded)
+        (output/show-text loaded)))))
+
+(defn ls-cmd
+  "List live tickets — those whose status is not in `:terminal-statuses`.
+   With `:json? true`, returns a bare JSON array. Otherwise returns the
+   rendered text table. Pass `:tty?` and `:color?` to control the table
+   format; pass `:width` to constrain TITLE truncation when on a TTY."
+  [ctx opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+        all     (store/load-all project-root tickets-dir)
+        visible (query/non-terminal all terminal-statuses)]
+    (if (:json? opts)
+      (output/ls-json visible)
+      (output/ls-table visible (select-keys opts [:tty? :color? :width])))))

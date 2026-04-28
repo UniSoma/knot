@@ -44,3 +44,16 @@
     (when (fs/directory? dir)
       (when-let [path (find-by-id-glob dir id)]
         (ticket/parse (slurp path))))))
+
+(defn load-all
+  "Load and parse every ticket file in the live tickets directory. Returns a
+   sequence of `{:frontmatter ... :body ...}` maps, sorted by filename for
+   stable order. Returns an empty seq when the tickets directory is missing
+   or empty."
+  [project-root tickets-dir]
+  (let [dir (fs/path project-root tickets-dir)]
+    (if (fs/directory? dir)
+      (->> (fs/glob dir "*.md")
+           (sort-by str)
+           (map (comp ticket/parse slurp str)))
+      ())))
