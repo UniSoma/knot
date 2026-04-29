@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-29
+
 ### Changed (breaking)
 
 - Ticket title now lives in frontmatter (`title:` as the second key, right
@@ -24,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   directly from frontmatter and degrade to an empty title rather than crash
   when the field is missing. Existing ticket files in `.tickets/` were
   migrated in-place.
+
+### Changed
+
+- `knot create` now prefers `:default-assignee` from `.knot.edn` over
+  `git config user.name` when no `--assignee` is supplied.
 
 ### Added
 
