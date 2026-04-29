@@ -70,6 +70,7 @@
 (deftest round-trip-preserves-known-keys-test
   (testing "round-tripping a fully populated ticket preserves all keys"
     (let [original {:frontmatter {:id "kno-01abcdef0123"
+                                  :title "Fully populated ticket"
                                   :status "open"
                                   :type "task"
                                   :priority 2
@@ -80,11 +81,11 @@
                                   :created "2026-04-28T10:00:00Z"
                                   :updated "2026-04-28T10:00:00Z"
                                   :mode "hitl"}
-                    :body "# Title\n\nDescription.\n"}
+                    :body "Description.\n"}
           rendered (ticket/render original)
           re-parsed (ticket/parse rendered)]
       (is (= (:body original) (:body re-parsed)))
-      (doseq [k [:id :status :type :priority :assignee :tags :deps :links :created :updated :mode]]
+      (doseq [k [:id :title :status :type :priority :assignee :tags :deps :links :created :updated :mode]]
         (is (= (get-in original [:frontmatter k])
                (get-in re-parsed [:frontmatter k]))
             (str "key " k " round-tripped"))))))

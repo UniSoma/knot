@@ -318,9 +318,10 @@
       (require 'knot.store)
       (let [save! (resolve 'knot.store/save!)]
         (save! tmp ".tickets" "kno-closedid001" "closed-ticket"
-               {:frontmatter {:id "kno-closedid001" :status "closed"
-                              :type "task" :priority 2 :mode "hitl"}
-                :body        "# Closed ticket\n"}
+               {:frontmatter {:id "kno-closedid001" :title "Closed ticket"
+                              :status "closed" :type "task" :priority 2
+                              :mode "hitl"}
+                :body        ""}
                {:now "2026-04-28T10:00:00Z" :terminal-statuses #{"closed"}}))
       (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "Live one"))
@@ -1986,9 +1987,9 @@ Restart the daemon.
    short-prefix collision tests racy."
   [tmp id slug status]
   (store/save! tmp ".tickets" id slug
-               {:frontmatter {:id id :status status :type "task"
+               {:frontmatter {:id id :title slug :status status :type "task"
                               :priority 2 :mode "hitl"}
-                :body (str "# " slug "\n")}
+                :body ""}
                {:now "2026-04-28T10:00:00Z" :terminal-statuses #{"closed"}}))
 
 (deftest partial-id-resolution-test

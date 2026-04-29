@@ -6,15 +6,16 @@
 (deftest show-text-test
   (testing "renders frontmatter and body for the show command"
     (let [ticket {:frontmatter {:id "kno-01abc"
+                                :title "Fix login"
                                 :status "open"
                                 :type "task"
                                 :priority 2}
-                  :body "# Fix login\n\nDescription text.\n"}
+                  :body "Description text.\n"}
           s (output/show-text ticket)]
       (is (str/includes? s "id: kno-01abc"))
+      (is (str/includes? s "title: Fix login"))
       (is (str/includes? s "status: open"))
       (is (str/includes? s "type: task"))
-      (is (str/includes? s "# Fix login"))
       (is (str/includes? s "Description text.")))))
 
 (defn- mk-resolved
@@ -30,8 +31,8 @@
 
 (deftest show-text-inverses-test
   (testing "all four sections appear in order when populated"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"}
-                  :body "# Alpha\n\nBody text.\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body text.\n"}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")]
                     :blocking [(mk-resolved "kno-C" "Gamma")]
                     :children [(mk-resolved "kno-D" "Delta")]
@@ -46,8 +47,8 @@
           "sections should appear in the canonical order")))
 
   (testing "inverse sections appear AFTER the body"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"}
-                  :body "# Alpha\n\nBody text.\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body text.\n"}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")]
                     :blocking [] :children [] :linked []}
           s (output/show-text ticket inverses)
@@ -57,7 +58,7 @@
           "computed sections come after the rendered body")))
 
   (testing "empty sections are omitted entirely (no header line)"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")]
                     :blocking [] :children [] :linked []}
           s (output/show-text ticket inverses)]
@@ -67,7 +68,7 @@
       (is (not (str/includes? s "## Linked")))))
 
   (testing "all four sections empty: output has no computed-section headers"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [] :blocking [] :children [] :linked []}
           s (output/show-text ticket inverses)]
       (is (not (str/includes? s "## Blockers")))
@@ -76,7 +77,7 @@
       (is (not (str/includes? s "## Linked")))))
 
   (testing "each entry renders as `- <id>  <title>` (resolved)"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")
                                (mk-resolved "kno-C" "Gamma")]
                     :blocking [] :children [] :linked []}
@@ -85,16 +86,16 @@
       (is (str/includes? s "- kno-C  Gamma"))))
 
   (testing "missing refs render with `[missing]` marker"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-missing "kno-ghost")]
                     :blocking [] :children [] :linked []}
           s (output/show-text ticket inverses)]
       (is (str/includes? s "- kno-ghost  [missing]"))))
 
   (testing "single-arity show-text (no inverses) still works"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           s (output/show-text ticket)]
-      (is (str/includes? s "# Alpha"))
+      (is (str/includes? s "title: Alpha"))
       (is (not (str/includes? s "## Blockers"))))))
 
 (deftest color-enabled-test
@@ -208,12 +209,12 @@
 
 (deftest ls-table-pri-right-aligned-test
   (testing "PRI column is right-aligned (whitespace-padded on the left within the column slot)"
-    (let [tickets [{:frontmatter {:id "x" :status "open" :priority 0
+    (let [tickets [{:frontmatter {:id "x" :title "T" :status "open" :priority 0
                                   :mode "hitl" :type "task" :assignee "a"}
-                    :body "# T\n"}
-                   {:frontmatter {:id "y" :status "open" :priority 4
+                    :body ""}
+                   {:frontmatter {:id "y" :title "T" :status "open" :priority 4
                                   :mode "hitl" :type "task" :assignee "a"}
-                    :body "# T\n"}]
+                    :body ""}]
           out (output/ls-table tickets {:color? false :tty? false})
           lines (str/split-lines out)
           header (first lines)
@@ -243,11 +244,12 @@
 (deftest show-json-test
   (testing "renders a bare JSON object (not wrapped in an envelope)"
     (let [ticket {:frontmatter {:id "kno-01abc"
+                                :title "Title"
                                 :status "open"
                                 :type "task"
                                 :priority 2
                                 :external_refs ["JIRA-1"]}
-                  :body "# Title\n\nBody.\n"}
+                  :body "Body.\n"}
           out (output/show-json ticket)]
       (is (str/starts-with? out "{"))
       (is (str/ends-with? (str/trimr out) "}"))))
@@ -266,14 +268,14 @@
       (is (str/includes? out "\"status\":\"open\""))
       (is (str/includes? out "\"priority\":2"))))
   (testing "body is included as a top-level field"
-    (let [ticket {:frontmatter {:id "kno-01abc"} :body "# Title\n"}
+    (let [ticket {:frontmatter {:id "kno-01abc"} :body "Body content"}
           out (output/show-json ticket)]
       (is (str/includes? out "\"body\""))
-      (is (str/includes? out "Title")))))
+      (is (str/includes? out "Body content")))))
 
 (deftest show-json-inverses-test
   (testing "show-json with inverses adds blockers/blocking/children/linked arrays"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")]
                     :blocking [(mk-resolved "kno-C" "Gamma")]
                     :children [(mk-resolved "kno-D" "Delta")]
@@ -285,7 +287,7 @@
       (is (str/includes? out "\"linked\""))))
 
   (testing "each inverse entry has id/title/status keys (resolved)"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")]
                     :blocking [] :children [] :linked []}
           out (output/show-json ticket inverses)]
@@ -294,7 +296,7 @@
       (is (str/includes? out "\"status\":\"open\""))))
 
   (testing "missing entries serialize with `missing:true` and no title/status"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-missing "kno-ghost")]
                     :blocking [] :children [] :linked []}
           out (output/show-json ticket inverses)]
@@ -302,7 +304,7 @@
       (is (str/includes? out "\"missing\":true"))))
 
   (testing "empty sections serialize as []"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [] :blocking [] :children [] :linked []}
           out (output/show-json ticket inverses)]
       (is (str/includes? out "\"blockers\":[]"))
@@ -311,7 +313,7 @@
       (is (str/includes? out "\"linked\":[]"))))
 
   (testing "single-arity show-json (no inverses) does not add inverse fields"
-    (let [ticket {:frontmatter {:id "kno-A" :status "open"} :body "# Alpha\n"}
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           out (output/show-json ticket)]
       (is (not (str/includes? out "\"blockers\"")))
       (is (not (str/includes? out "\"blocking\"")))

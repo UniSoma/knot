@@ -37,8 +37,8 @@
 (deftest save-and-load-test
   (testing "save! writes a slug-suffixed file and load-one reads it back"
     (with-tmp tmp
-      (let [ticket {:frontmatter {:id "kno-01abc" :status "open"}
-                    :body        "# Fix login\n\nDescription.\n"}
+      (let [ticket {:frontmatter {:id "kno-01abc" :title "Fix login" :status "open"}
+                    :body        "Description.\n"}
             path   (store/save! tmp ".tickets" "kno-01abc" "fix-login"
                                 ticket save-opts)]
         (is (fs/exists? path))
@@ -47,8 +47,9 @@
         (let [loaded (store/load-one tmp ".tickets" "kno-01abc")]
           (is (some? loaded))
           (is (= "kno-01abc" (get-in loaded [:frontmatter :id])))
+          (is (= "Fix login" (get-in loaded [:frontmatter :title])))
           (is (= "open" (get-in loaded [:frontmatter :status])))
-          (is (= "# Fix login\n\nDescription.\n" (:body loaded)))))))
+          (is (= "Description.\n" (:body loaded)))))))
 
   (testing "save! creates the tickets directory if missing"
     (with-tmp tmp
@@ -67,7 +68,7 @@
     (with-tmp tmp
       (let [ticket {:frontmatter {:id "kno-01" :status "open"
                                   :updated "2020-01-01T00:00:00Z"}
-                    :body "# t\n"}
+                    :body ""}
             path (store/save! tmp ".tickets" "kno-01" "" ticket save-opts)]
         (is (= "2026-04-28T12:00:00Z" (:updated (read-fm path))))))))
 
