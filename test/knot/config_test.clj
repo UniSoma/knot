@@ -92,6 +92,17 @@
         (is (= ["open" "in_progress" "closed"] (:statuses c)) "absent key kept default")
         (is (= ["afk" "hitl"] (:modes c)) "absent key kept default"))))
 
+  (testing ":default-assignee nil round-trips through load-config"
+    ;; Nil is explicit opt-out: user is saying "no default assignee, even
+    ;; if git config user.name is set." load-config must preserve the key
+    ;; (with nil value) so callers can distinguish "absent" from "set to nil".
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:default-assignee nil}))
+      (let [c (config/load-config tmp)]
+        (is (contains? c :default-assignee))
+        (is (nil? (:default-assignee c))))))
+
   (testing "unknown keys are dropped with a stderr warning, known keys still applied"
     (with-tmp tmp
       (spit (str (fs/path tmp ".knot.edn"))

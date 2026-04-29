@@ -157,6 +157,51 @@
               loaded (store/load-one tmp ".tickets" id)]
           (is (not (contains? (:frontmatter loaded) :assignee))))))))
 
+(deftest create-cmd-default-assignee-config-authoritative-test
+  ;; `:default-assignee` is authoritative: when the key is present in ctx
+  ;; (loaded from `.knot.edn`), it wins over `git config user.name`. This
+  ;; lets users set a project-wide default OR opt out of auto-assignment
+  ;; entirely (by setting `:default-assignee nil`).
+  (testing ":default-assignee string in ctx wins over git/user-name"
+    (with-redefs [git/user-name (fn [] "git-configured-user")]
+      (with-tmp tmp
+        (let [ctx*   (-> (ctx tmp)
+                         (dissoc :assignee)
+                         (assoc :default-assignee "alice"))
+              path   (cli/create-cmd ctx* {:title "Hello"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (= "alice" (:assignee (:frontmatter loaded))))))))
+
+  (testing ":default-assignee nil in ctx suppresses git/user-name fallback"
+    (with-redefs [git/user-name (fn [] "git-configured-user")]
+      (with-tmp tmp
+        (let [ctx*   (-> (ctx tmp)
+                         (dissoc :assignee)
+                         (assoc :default-assignee nil))
+              path   (cli/create-cmd ctx* {:title "Hello"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (not (contains? (:frontmatter loaded) :assignee))
+              "no :assignee key should be written when :default-assignee is nil")))))
+
+  (testing "explicit --assignee opt still wins over :default-assignee"
+    (with-redefs [git/user-name (fn [] "git-configured-user")]
+      (with-tmp tmp
+        (let [ctx*   (-> (ctx tmp)
+                         (dissoc :assignee)
+                         (assoc :default-assignee "alice"))
+              path   (cli/create-cmd ctx* {:title "Hello" :assignee "bob"})
+              id     (->> (fs/file-name path)
+                          (re-matches #"(.+)--hello\.md")
+                          second)
+              loaded (store/load-one tmp ".tickets" id)]
+          (is (= "bob" (:assignee (:frontmatter loaded)))))))))
+
 (defmacro ^:private with-err-str
   "Capture writes to *err* during `body`, returning the captured string."
   [& body]

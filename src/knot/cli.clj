@@ -74,13 +74,17 @@
 
 (defn- resolve-ctx
   "Fill in defaults and lazy lookups (git user.name, current time) when the
-   caller did not provide them. Assignee precedence: explicit ctx value
-   wins; else git user.name; else `:default-assignee` from config."
+   caller did not provide them. Assignee precedence: explicit ctx
+   `:assignee` wins; else `:default-assignee` from config when that key is
+   present (even with a nil value, which means \"no default — do not
+   consult git\"); else git `user.name`."
   [ctx]
   (let [defaults (config/defaults)]
     (merge defaults
            {:assignee (when-not (contains? ctx :assignee)
-                        (or (git/user-name) (:default-assignee ctx)))}
+                        (if (contains? ctx :default-assignee)
+                          (:default-assignee ctx)
+                          (git/user-name)))}
            ctx
            ;; deterministic 'now' for tests; fall back to wall clock
            (when-not (:now ctx) {:now (now-iso)}))))
@@ -671,7 +675,9 @@
      " ;; Optional human-readable project name shown in `knot prime`.\n"
      " ;; :project-name \"my project\"\n"
      "\n"
-     " ;; Default assignee on `knot create` when git user.name is unavailable.\n"
+     " ;; Default assignee on `knot create`. When this key is set here,\n"
+     " ;; it wins over git config user.name. Set to nil to opt out of\n"
+     " ;; auto-assignment entirely (no assignee unless --assignee is passed).\n"
      " ;; :default-assignee \"alice\"\n"
      "\n"
      " ;; Default ticket type on `knot create` (must be in :types below).\n"

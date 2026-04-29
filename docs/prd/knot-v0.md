@@ -56,7 +56,7 @@ Distribution is via `bbin install io.github.<user>/knot --as knot`. Implementati
 18. As a solo developer, I want `knot add-note <id>` to read from stdin if piped or open `$EDITOR` if interactive, so that the input mode adapts to my context.
 19. As a solo developer, I want partial ID matching like `git`'s short hashes — typing `knot show 01jq8p4ab` resolves to the unique full ID — so that I don't type 14 characters every time.
 20. As a solo developer, I want partial IDs to also work without the project prefix (`knot show abc...`), so that I don't retype the prefix I already know I'm in.
-21. As a solo developer, I want my git `user.name` used as the default assignee, so that I don't repeat myself on every `create`.
+21. As a solo developer, I want my git `user.name` used as the default assignee when `.knot.edn` doesn't pin one, and I want `:default-assignee` in `.knot.edn` (including `:default-assignee nil` to opt out of auto-assignment) to override that fallback, so that the project config — not my git identity — owns the policy on shared repos.
 22. As a solo developer, I want a configurable status workflow, so that my project's conventions (e.g. adding `review`, `wontfix`) fit Knot rather than the reverse.
 23. As a solo developer, I want a configurable type list, so that I can add domain-specific types without forking the tool.
 24. As a solo developer, I want broken references (a `:parent` or `:deps` entry pointing to a missing ticket) to render with a `[missing]` marker and a stderr warning, so that mid-refactor states still work without aborting.
@@ -122,7 +122,7 @@ Distribution is via `bbin install io.github.<user>/knot --as knot`. Implementati
 
 **Graph consistency.** Symmetric links: `link` and `unlink` write to both ticket files; idempotent on each side. Referential integrity is lazy: broken `:deps`, `:links`, or `:parent` references render with a `[missing]` marker and a stderr warning, never abort. Cycle detection runs on every `dep` add (DFS from the new dep target looking for the source); rejects with the offending path. The explicit `knot dep cycle` command is a project-wide DFS scan over open tickets.
 
-**Git integration.** Read-only: `git config user.name` is consulted once per command run for the default assignee. Knot never runs `git add`, `git commit`, or `git push`. Works in non-git directories (assignee falls back to `nil` or literal config value).
+**Git integration.** Read-only: `git config user.name` is consulted once per command run as a fallback for the default assignee — only when `:default-assignee` is absent from `.knot.edn`. When that key is present (including set to `nil` to opt out of auto-assignment), config wins and git is not consulted. Knot never runs `git add`, `git commit`, or `git push`. Works in non-git directories (assignee resolves to `nil` when both config and git are unset).
 
 **Concurrency.** No locking. Reads are slurp-then-parse; writes are full-file replacements; last writer wins. Personal-use scope makes locking's complexity unjustified.
 

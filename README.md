@@ -103,19 +103,19 @@ carries data only; warnings and errors go to stderr.
 `.knot.edn` at the project root is optional — defaults work zero-config.
 `knot init` writes a self-documenting stub with every key inline-commented.
 
-| Key                  | Default                              | Notes                                                   |
-| -------------------- | ------------------------------------ | ------------------------------------------------------- |
-| `:tickets-dir`       | `".tickets"`                         | Where ticket files live, relative to `.knot.edn`.       |
-| `:prefix`            | auto-derived from project dir name   | Project shortcode prefixed onto every generated id.     |
-| `:project-name`      | nil                                  | Human-readable name shown in `knot prime`.              |
-| `:default-assignee`  | git `user.name`                      | Fallback when `--assignee` is omitted.                  |
-| `:default-type`      | `"task"`                             | Must be a member of `:types`.                           |
-| `:default-priority`  | `2`                                  | Integer 0..4 (0 = highest).                             |
-| `:statuses`          | `["open" "in_progress" "closed"]`    | Workflow, ordered. Add e.g. `"review"` to extend.       |
-| `:terminal-statuses` | `#{"closed"}`                        | Tickets in these states auto-move to archive.           |
-| `:types`             | `["bug" "feature" "task" "epic" "chore"]` | Allowed values for ticket `:type`.                 |
-| `:modes`             | `["afk" "hitl"]`                     | `afk` = agent-runnable; `hitl` = needs a human.         |
-| `:default-mode`      | `"hitl"`                             | Must be a member of `:modes`.                           |
+| Key                  | Default                                   | Notes                                                                                                                                                     |
+|----------------------|-------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `:tickets-dir`       | `".tickets"`                              | Where ticket files live, relative to `.knot.edn`.                                                                                                         |
+| `:prefix`            | auto-derived from project dir name        | Project shortcode prefixed onto every generated id.                                                                                                       |
+| `:project-name`      | nil                                       | Human-readable name shown in `knot prime`.                                                                                                                |
+| `:default-assignee`  | git `user.name`                           | Used when `--assignee` is omitted. When this key is set in `.knot.edn` (including to `nil`) it wins over git; `nil` opts out of auto-assignment entirely. |
+| `:default-type`      | `"task"`                                  | Must be a member of `:types`.                                                                                                                             |
+| `:default-priority`  | `2`                                       | Integer 0..4 (0 = highest).                                                                                                                               |
+| `:statuses`          | `["open" "in_progress" "closed"]`         | Workflow, ordered. Add e.g. `"review"` to extend.                                                                                                         |
+| `:terminal-statuses` | `#{"closed"}`                             | Tickets in these states auto-move to archive.                                                                                                             |
+| `:types`             | `["bug" "feature" "task" "epic" "chore"]` | Allowed values for ticket `:type`.                                                                                                                        |
+| `:modes`             | `["afk" "hitl"]`                          | `afk` = agent-runnable; `hitl` = needs a human.                                                                                                           |
+| `:default-mode`      | `"hitl"`                                  | Must be a member of `:modes`.                                                                                                                             |
 
 Project root is discovered by walking up from cwd looking for `.knot.edn`
 or `.tickets/`. When `.knot.edn` is found, its `:tickets-dir` controls
