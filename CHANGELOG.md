@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surfaced to users via `knot --version` and the `knot --help` banner.
 - Version bumps are driven by the `/release` slash command.
 
-## [Unreleased]
+## [0.0.1] - 2026-04-29
 
 Initial release. Knot is a file-based ticket store for AI-assisted development:
 plain Markdown tickets with YAML front-matter under `.tickets/`, queried and
