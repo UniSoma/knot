@@ -3,7 +3,8 @@
             [babashka.process]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [knot.help :as help]))
+            [knot.help :as help]
+            [knot.version :as version]))
 
 (def ^:private dep-entry
   "Fixture used across renderer tests."
@@ -523,3 +524,23 @@
   (testing "with :color? false, none of the above color escapes appear"
     (let [out (help/command-help-text "create" create-entry {:color? false})]
       (is (not (re-find #"" out))))))
+
+(deftest top-level-help-version-header-test
+  (testing "top-level help renders a `knot v<version>` header above USAGE"
+    (let [out (help/top-level-help-text toplevel-registry {:color? false})
+          banner (str "knot v" version/version)]
+      (is (str/includes? out banner))
+      (is (< (str/index-of out banner) (str/index-of out "USAGE"))
+          "version banner must appear before USAGE")))
+
+  (testing "version header reflects the current knot.version/version constant"
+    (let [out (help/top-level-help-text toplevel-registry {:color? false})]
+      (is (re-find (re-pattern (str "knot v" (java.util.regex.Pattern/quote version/version)))
+                   out)))))
+
+(deftest version-flag-routing-test
+  (testing "knot --version prints the bare version to stdout and exits 0"
+    (let [{:keys [exit out err]} (run-knot "--version")]
+      (is (zero? exit) (str "expected exit 0; err=" err))
+      (is (= (str version/version "\n") out))
+      (is (str/blank? err)))))

@@ -2,7 +2,8 @@
   "Help system: command registry (source of truth for parse + display)
    and renderers for top-level and per-command help."
   (:require [clojure.string :as str]
-            [knot.output :as output]))
+            [knot.output :as output]
+            [knot.version :as version]))
 
 (defn- bold
   "Bold `s` when `color?` is true; otherwise return `s` unchanged. Used
@@ -411,7 +412,9 @@
                      :when (seq lines)]
                  (str (bold color? header) "\n"
                       (str/join "\n" lines)))]
-    (str (bold color? "USAGE") "\n  " (cyan color? "knot <command> [args...]") "\n"
+    (str (cyan color? (str "knot v" version/version)) "\n"
+         "\n"
+         (bold color? "USAGE") "\n  " (cyan color? "knot <command> [args...]") "\n"
          "\n"
          "Run `knot help <command>` for per-command details.\n"
          "\n"

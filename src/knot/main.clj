@@ -10,7 +10,8 @@
             [knot.help :as help]
             [knot.output :as output]
             [knot.store :as store]
-            [knot.ticket :as ticket]))
+            [knot.ticket :as ticket]
+            [knot.version :as version]))
 
 (defn- spec
   "Look up a registry entry by id and derive its babashka.cli :spec map.
@@ -478,6 +479,13 @@
 (defn -main [& argv]
   (try
     (let [[cmd & rest-argv] argv]
+      ;; `--version` short-circuits everything else: print bare version
+      ;; and exit 0. `-v` is intentionally NOT wired — that slot is
+      ;; reserved for a future `--verbose`.
+      (when (= "--version" cmd)
+        (println version/version)
+        (System/exit 0))
+
       ;; Top-level / per-command help. `knot help`, `knot --help`, `knot -h`
       ;; (alone or chained with other help tokens like `knot help help`,
       ;; `knot --help -h`) all collapse to top-level help. With a trailing
