@@ -1,5 +1,7 @@
 # knot
 
+[![CI](https://github.com/UniSoma/knot/actions/workflows/ci.yml/badge.svg)](https://github.com/UniSoma/knot/actions/workflows/ci.yml)
+
 A CLI ticket tracker for solo developers. Tickets are
 markdown files with YAML frontmatter under `.tickets/`; closed tickets
 auto-move to `.tickets/archive/`. Built for one human on one machine,

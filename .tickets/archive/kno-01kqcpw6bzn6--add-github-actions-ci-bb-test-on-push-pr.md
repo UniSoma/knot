@@ -1,11 +1,12 @@
 ---
 id: kno-01kqcpw6bzn6
-status: open
+status: closed
 type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T13:29:24.607894173Z'
-updated: '2026-04-29T13:29:24.607894173Z'
+updated: '2026-04-29T14:24:09.509422468Z'
+closed: '2026-04-29T14:24:09.509422468Z'
 ---
 
 # Add GitHub Actions CI: bb test on push + PR
@@ -35,3 +36,9 @@ Set up minimal CI on GitHub Actions so `bb test` runs automatically on every pus
 ## Why this is deferred from kno-01kqb7833py3
 
 The v0.0.1 release ticket explicitly chose to defer GHA to keep release-tooling scope tight. Distribution does not require CI (bbin reads `bb.edn` from the git ref directly), so this is a quality-of-life add, not a release blocker.
+
+## Notes
+
+**2026-04-29T14:24:09.509422468Z**
+
+Added .github/workflows/ci.yml: matrix across ubuntu/macos/windows, bb 1.12.218 pinned via DeLaGuardo/setup-clojure@13.6 (handles tool caching), concurrency cancels stale runs, fail-fast disabled. CI badge added to README. Single bb version pinned per Option A; min-bb-version is a user-facing floor, not a CI concern.
