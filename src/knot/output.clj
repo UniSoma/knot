@@ -370,7 +370,7 @@ before issuing other Knot commands.")
   "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
 
 (def ^:private prime-commands-cheatsheet
-  "knot ls                          list live tickets
+  "knot list                        list live tickets (alias: ls)
 knot ready [--mode afk]          list non-blocked tickets (filter by mode)
 knot show <id>                   show one ticket (frontmatter + body)
 knot create \"<title>\"            create a new ticket

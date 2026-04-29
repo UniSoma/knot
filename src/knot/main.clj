@@ -175,7 +175,7 @@
         (die (str "knot show: no ticket matching " id))))))
 
 (defn- ls-handler [argv]
-  (let [{:keys [opts]} (bcli/parse-args argv (spec :ls))
+  (let [{:keys [opts]} (bcli/parse-args argv (spec :list))
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -456,12 +456,14 @@
 (defn- resolve-cmd-key
   "Look at the first one or two non-flag tokens of `argv` and return the
    matching registry key, preferring the two-token form when both match.
-   Returns nil when no token sequence matches."
+   Returns nil when no token sequence matches. Single-token names are
+   resolved through `help/resolve-key` so command aliases (e.g. `ls` →
+   `:list`) route to the canonical help entry."
   [argv]
   (let [[a b] argv]
     (cond
       (and a b (contains? help/registry (keyword a b))) (keyword a b)
-      (and a   (contains? help/registry (keyword a)))   (keyword a))))
+      (some? a)                                         (help/resolve-key help/registry a))))
 
 (defn- print-command-help [k]
   (println-out (help/command-help-text (help/key->cmd-name k)
@@ -516,7 +518,7 @@
         "prime"  (prime-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
-        "ls"     (ls-handler rest-argv)
+        ("list" "ls") (ls-handler rest-argv)
         "status"  (transition-handler "status" :status 2 cli/status-cmd rest-argv)
         "start"   (transition-handler "start"  :start  1 cli/start-cmd  rest-argv)
         "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)

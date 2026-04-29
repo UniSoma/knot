@@ -141,6 +141,29 @@
           (is (str/ends-with? trimmed "]"))
           (is (str/includes? trimmed "\"status\":\"open\"")))))))
 
+(deftest list-end-to-end-test
+  (testing "knot list renders the same table as knot ls"
+    (with-tmp tmp
+      (run-knot tmp "create" "First ticket")
+      (run-knot tmp "create" "Second ticket")
+      (let [{:keys [exit out err]} (run-knot tmp "list")]
+        (is (zero? exit) (str "list err=" err))
+        (is (str/includes? out "ID"))
+        (is (str/includes? out "STATUS"))
+        (is (str/includes? out "TITLE"))
+        (is (str/includes? out "First ticket"))
+        (is (str/includes? out "Second ticket")))))
+
+  (testing "knot list --json emits the same JSON shape as knot ls --json"
+    (with-tmp tmp
+      (run-knot tmp "create" "Hello")
+      (let [{:keys [exit out err]} (run-knot tmp "list" "--json")]
+        (is (zero? exit) (str "list --json err=" err))
+        (let [trimmed (str/trim out)]
+          (is (str/starts-with? trimmed "["))
+          (is (str/ends-with? trimmed "]"))
+          (is (str/includes? trimmed "\"status\":\"open\"")))))))
+
 (deftest show-json-end-to-end-test
   (testing "show --json emits a bare JSON object with snake_case keys"
     (with-tmp tmp

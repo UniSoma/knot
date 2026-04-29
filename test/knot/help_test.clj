@@ -190,6 +190,37 @@
                                       {:color? false :registry mini-registry})
               "SUBCOMMANDS")))))
 
+(deftest command-help-text-aliases-test
+  (testing "ALIASES section lists each alias when :aliases is present"
+    (let [entry (assoc create-entry :aliases ["mk" "new"])
+          out   (help/command-help-text "create" entry {:color? false})]
+      (is (str/includes? out "ALIASES"))
+      (is (str/includes? out "mk"))
+      (is (str/includes? out "new"))))
+
+  (testing "ALIASES section is omitted when entry has no :aliases"
+    (let [out (help/command-help-text "create" create-entry {:color? false})]
+      (is (not (str/includes? out "ALIASES")))))
+
+  (testing "ALIASES section is omitted when :aliases is empty"
+    (let [entry (assoc create-entry :aliases [])
+          out   (help/command-help-text "create" entry {:color? false})]
+      (is (not (str/includes? out "ALIASES"))))))
+
+(deftest resolve-key-test
+  (testing "exact registry key resolves to itself"
+    (is (= :list (help/resolve-key {:list {:aliases ["ls"]}} "list")))
+    (is (= :create (help/resolve-key {:create {}} "create"))))
+
+  (testing "alias string resolves to the underlying registry key"
+    (is (= :list (help/resolve-key {:list {:aliases ["ls"]}} "ls"))))
+
+  (testing "unknown name returns nil"
+    (is (nil? (help/resolve-key {:list {:aliases ["ls"]}} "bogus"))))
+
+  (testing "an alias matching no entry returns nil"
+    (is (nil? (help/resolve-key {:list {}} "ls")))))
+
 (deftest command-help-text-ansi-test
   (testing "with :color? false, no ANSI escapes appear in the output"
     (let [out (help/command-help-text "create" create-entry {:color? false})]
@@ -278,7 +309,7 @@
   "Every command name dispatched from `knot.main/-main`'s top-level case
    plus the two `dep` subcommands. The registry must cover all of these."
   #{:init :prime
-    :create :show :ls
+    :create :show :list
     :status :start :close :reopen
     :dep :dep/tree :dep/cycle :undep
     :link :unlink
@@ -288,7 +319,14 @@
 (deftest registry-parity-test
   (testing "every dispatched command has a registry entry"
     (doseq [k expected-cmd-keys]
-      (is (contains? help/registry k) (str "missing registry entry: " k)))))
+      (is (contains? help/registry k) (str "missing registry entry: " k))))
+
+  (testing ":list is the official listing command (not :ls)"
+    (is (contains? help/registry :list))
+    (is (not (contains? help/registry :ls))))
+
+  (testing ":list entry declares ls as an alias"
+    (is (= ["ls"] (:aliases (get help/registry :list))))))
 
 (deftest registry-shape-test
   (testing "every entry has a :group from the canonical five"
@@ -410,7 +448,26 @@
   (testing "knot -h create renders per-command help"
     (let [{:keys [exit out]} (run-knot "-h" "create")]
       (is (zero? exit))
-      (is (str/includes? out "knot create")))))
+      (is (str/includes? out "knot create"))))
+
+  (testing "knot help ls resolves the ls alias to the list page"
+    (let [{:keys [exit out err]} (run-knot "help" "ls")]
+      (is (zero? exit) (str "err=" err))
+      (is (str/includes? out "knot list"))
+      (is (str/includes? out "ALIASES"))
+      (is (str/includes? out "ls"))))
+
+  (testing "knot ls --help also routes to the list page"
+    (let [{:keys [exit out]} (run-knot "ls" "--help")]
+      (is (zero? exit))
+      (is (str/includes? out "knot list"))
+      (is (str/includes? out "ALIASES"))))
+
+  (testing "knot help list renders the list page directly"
+    (let [{:keys [exit out]} (run-knot "help" "list")]
+      (is (zero? exit))
+      (is (str/includes? out "knot list"))
+      (is (str/includes? out "FLAGS")))))
 
 (deftest body-flag-help-interaction-test
   ;; help-requested? runs `extract-body-flags` first so that a literal

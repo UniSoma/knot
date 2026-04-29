@@ -62,6 +62,17 @@
                        (str "  " (cyan color? label) pad "  " (or desc ""))))
            "\n"))))
 
+(defn- aliases-block
+  "Render an ALIASES section listing each alias on its own indented line.
+   Returns nil when `aliases` is empty/nil so the caller can omit the section."
+  [color? aliases]
+  (when (seq aliases)
+    (str "\n" (bold color? "ALIASES") "\n"
+         (str/join "\n"
+                   (for [a aliases]
+                     (str "  " (cyan color? a))))
+         "\n")))
+
 (defn- examples-block
   "Render an EXAMPLES section: each entry is `{:cmd ... :note ...}` printed
    as a two-line stanza (command indented two spaces, note indented four).
@@ -182,8 +193,9 @@
     :examples    [{:cmd "knot show kno-01abc"
                    :note "Render the ticket whose id starts with 01abc."}]}
 
-   :ls
+   :list
    {:group       :listing
+    :aliases     ["ls"]
     :description "List live (non-terminal) tickets."
     :args        []
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
@@ -193,7 +205,7 @@
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
-    :examples    [{:cmd "knot ls --mode afk --tag p0"
+    :examples    [{:cmd "knot list --mode afk --tag p0"
                    :note "Show afk-mode tickets tagged p0."}]}
 
    :status
@@ -360,7 +372,7 @@
   [:init :prime
    :create :start :status :close :reopen
    :dep :undep :link :unlink
-   :ls :show :ready :blocked :closed
+   :list :show :ready :blocked :closed
    :add-note :edit])
 
 (defn- cmd-line-label
@@ -428,15 +440,30 @@
    flag labels / example commands / subcommand labels) and `:registry`
    (used to resolve `:subcommands` keys to their display names +
    descriptions)."
-  [cmd-name {:keys [description flags examples exit-codes subcommands] :as entry}
+  [cmd-name {:keys [description flags examples exit-codes subcommands aliases]
+             :as entry}
    {:keys [color? registry] :as _opts}]
   (str (bold color? "USAGE") "\n  " (cyan color? (synopsis cmd-name entry)) "\n"
        (when description
          (str "\n" description "\n"))
+       (aliases-block color? aliases)
        (flags-block color? flags)
        (subcommands-block color? registry subcommands)
        (examples-block color? examples)
        (exit-codes-block color? exit-codes)))
+
+(defn resolve-key
+  "Resolve a user-typed command name to a registry key. Direct registry
+   keys win; otherwise scan entries for one whose `:aliases` contains
+   `name`. Returns nil when no match. `name` is a string."
+  [registry name]
+  (let [direct (keyword name)]
+    (if (contains? registry direct)
+      direct
+      (some (fn [[k entry]]
+              (when (some #{name} (:aliases entry))
+                k))
+            registry))))
 
 (defn derive-spec
   "Project a registry entry's :flags into a babashka.cli :spec map.

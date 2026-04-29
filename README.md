@@ -68,8 +68,8 @@ knot create "Fix login redirect"
 knot create "Backfill telemetry" -d "Description body" --afk -p 1
 
 # List the live (non-terminal) backlog
-knot ls
-knot ls --json                 # snake_case JSON for shell pipelines
+knot list                      # alias: `knot ls`
+knot list --json               # snake_case JSON for shell pipelines
 
 # Inspect one ticket — frontmatter, body, computed graph context
 knot show <id>                 # partial ids work: 01jq8p4a → unique full id

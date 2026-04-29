@@ -720,9 +720,9 @@
 (deftest prime-text-commands-before-schema-test
   (testing "the commands cheatsheet appears before the schema reference in text output"
     (let [out (output/prime-text sample-prime-data)
-          ;; `knot ls` is a unique anchor: only the commands cheatsheet lists
-          ;; the bare `ls` subcommand line.
-          cmds-i   (str/index-of out "knot ls")
+          ;; `knot list` is a unique anchor: only the commands cheatsheet
+          ;; lists the bare `list` subcommand line.
+          cmds-i   (str/index-of out "knot list")
           ;; "Frontmatter keys" only appears in the schema reference.
           schema-i (str/index-of out "Frontmatter keys")]
       (is (some? cmds-i)   "commands cheatsheet present")

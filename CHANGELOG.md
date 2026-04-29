@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `ls` command is now an alias for the canonical `list`. `knot list` and
+  `knot ls` are equivalent; help renders `list` with `ls` listed under the new
+  ALIASES block.
+
 ## [0.1.0] - 2026-04-29
 
 ### Changed (breaking)
