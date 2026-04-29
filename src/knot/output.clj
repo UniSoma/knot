@@ -6,15 +6,12 @@
             [clojure.string :as str]
             [knot.ticket :as ticket]))
 
-(defn- extract-title
-  "Return the H1 title from a markdown body (the first `# ...` line),
-   trimmed. Returns nil when no H1 is present."
-  [body]
-  (when body
-    (some (fn [line]
-            (let [m (re-matches #"#\s+(.*)" line)]
-              (when m (str/trim (second m)))))
-          (str/split-lines body))))
+(defn- ticket-title
+  "Read the title from a ticket's frontmatter, falling back to `\"\"` when
+   absent. Read sites stay forgiving so an unmigrated or malformed ticket
+   degrades gracefully instead of crashing."
+  [ticket]
+  (or (get-in ticket [:frontmatter :title]) ""))
 
 (defn- inverse-line
   "Format a single inverse entry as `- <id>  <title>` or
@@ -23,7 +20,7 @@
   (str "- " id "  "
        (cond
          missing?  "[missing]"
-         :else     (or (extract-title (:body ticket)) ""))))
+         :else     (ticket-title ticket))))
 
 (def ^:private inverse-section-order
   "Canonical render order: Blockers, Blocking, Children, Linked."
@@ -151,7 +148,7 @@
   (if missing?
     {:id id :missing true}
     {:id     id
-     :title  (or (extract-title (:body ticket)) "")
+     :title  (ticket-title ticket)
      :status (get-in ticket [:frontmatter :status])}))
 
 (defn- inverses->json-fields
@@ -211,7 +208,7 @@
   "Plain string for a single ls cell — no padding, no color."
   [ticket k]
   (case k
-    :title (or (extract-title (:body ticket)) "")
+    :title (ticket-title ticket)
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))
 
@@ -246,8 +243,8 @@
   [{:keys [id ticket missing? seen-before?]}]
   (cond
     missing?     (str id "  [missing]")
-    seen-before? (str id "  " (or (extract-title (:body ticket)) "") " ↑")
-    :else        (str id "  " (or (extract-title (:body ticket)) ""))))
+    seen-before? (str id "  " (ticket-title ticket) " ↑")
+    :else        (str id "  " (ticket-title ticket))))
 
 (defn- render-tree-lines
   "Recursively render a dep-tree node into a flat seq of strings using
@@ -287,7 +284,7 @@
     (assoc :missing true)
 
     (and (not missing?) ticket)
-    (merge {:title  (or (extract-title (:body ticket)) "")
+    (merge {:title  (ticket-title ticket)
             :status (get-in ticket [:frontmatter :status])})
 
     seen-before?
@@ -400,7 +397,7 @@ external_refs.")
         id    (or (:id fm) "")
         mode  (or (:mode fm) "-")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
-        title (or (extract-title (:body ticket)) "")]
+        title (ticket-title ticket)]
     (str id "  " mode "  " pri "  " title)))
 
 (defn- prime-section
@@ -466,7 +463,7 @@ external_refs.")
   [ticket]
   (let [fm (:frontmatter ticket)]
     (cond-> {:id (:id fm)
-             :title (or (extract-title (:body ticket)) "")}
+             :title (ticket-title ticket)}
       (:status fm)   (assoc :status (:status fm))
       (:type fm)     (assoc :type (:type fm))
       (some? (:priority fm)) (assoc :priority (:priority fm))

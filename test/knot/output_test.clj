@@ -19,10 +19,10 @@
 
 (defn- mk-resolved
   "Test helper: build a `{:id ... :ticket ...}` resolved-ref entry whose
-   embedded ticket has an H1 title for `extract-title` to recover."
+   embedded ticket carries the title in frontmatter."
   [id title]
-  {:id id :ticket {:frontmatter {:id id :status "open"}
-                   :body (str "# " title "\n")}})
+  {:id id :ticket {:frontmatter {:id id :title title :status "open"}
+                   :body ""}})
 
 (defn- mk-missing
   [id]
@@ -146,19 +146,21 @@
 
 (def sample-ls-tickets
   [{:frontmatter {:id "kno-01abcd0001"
+                  :title "Fix login bug"
                   :status "open"
                   :priority 2
                   :mode "afk"
                   :type "task"
                   :assignee "alice"}
-    :body "# Fix login bug\n"}
+    :body ""}
    {:frontmatter {:id "kno-01abcd0002"
+                  :title "Critical pager outage during peak hours please address"
                   :status "in_progress"
                   :priority 0
                   :mode "hitl"
                   :type "bug"
                   :assignee "bob"}
-    :body "# Critical pager outage during peak hours please address\n"}])
+    :body ""}])
 
 (deftest ls-table-headers-test
   (testing "header row contains the expected column names in order"
@@ -363,8 +365,10 @@
   [id title & {:keys [children seen-before? missing?]}]
   (cond-> {:id id}
     missing?       (assoc :missing? true)
-    (not missing?) (assoc :ticket {:frontmatter {:id id :status "open"}
-                                   :body (str "# " title "\n")})
+    (not missing?) (assoc :ticket {:frontmatter {:id id
+                                                  :title title
+                                                  :status "open"}
+                                   :body ""})
     seen-before?   (assoc :seen-before? true)
     children       (assoc :children children)))
 
@@ -490,15 +494,15 @@
 
 (defn- mk-prime-ticket
   "Build a ticket map suitable for the prime renderers. `opts` overrides
-   any frontmatter field; `:title` populates the body H1."
+   any frontmatter field; `:title` populates the frontmatter `:title`."
   [{:keys [id status priority mode title updated created]}]
-  {:frontmatter (cond-> {:id id}
+  {:frontmatter (cond-> {:id id :title (or title "Untitled")}
                   status   (assoc :status status)
                   priority (assoc :priority priority)
                   mode     (assoc :mode mode)
                   updated  (assoc :updated updated)
                   created  (assoc :created created))
-   :body (str "# " (or title "Untitled") "\n")})
+   :body ""})
 
 (def ^:private sample-prime-data
   {:project       {:found? true
@@ -819,3 +823,145 @@
       (is (str/includes? out "\"ready\":[]"))
       (is (str/includes? out "\"ready_truncated\":false"))
       (is (str/includes? out "\"ready_remaining\":0")))))
+
+;; -----------------------------------------------------------------------
+;; Title-from-frontmatter tests
+;;
+;; Every read site that historically called `extract-title` on the body
+;; should now read `(:title (:frontmatter ticket))` and fall back to "" when
+;; absent. These tickets supply a frontmatter title and either an empty
+;; body or a body without an H1 — proving the read path no longer depends
+;; on the body H1.
+;; -----------------------------------------------------------------------
+
+(defn- title-only-ticket
+  "Build a ticket whose title lives in frontmatter only — body has no H1."
+  [id title]
+  {:frontmatter {:id id :title title :status "open"}
+   :body ""})
+
+(deftest show-text-inverse-line-reads-frontmatter-title-test
+  (testing "inverse entries render the frontmatter `:title` (no H1 in body)"
+    (let [root      {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                     :body ""}
+          inverses  {:blockers [{:id "kno-B"
+                                 :ticket (title-only-ticket "kno-B" "Beta from FM")}]
+                     :blocking [] :children [] :linked []}
+          out (output/show-text root inverses)]
+      (is (str/includes? out "- kno-B  Beta from FM"))))
+
+  (testing "missing :title in inverse entry frontmatter renders as empty (no crash)"
+    (let [root     {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                    :body ""}
+          inverses {:blockers [{:id "kno-B"
+                                :ticket {:frontmatter {:id "kno-B" :status "open"}
+                                         :body ""}}]
+                    :blocking [] :children [] :linked []}
+          out (output/show-text root inverses)]
+      (is (str/includes? out "- kno-B  ")
+          "row prefix is present"))))
+
+(deftest show-json-inverse-reads-frontmatter-title-test
+  (testing "show-json inverse entries surface the frontmatter title"
+    (let [root     {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                    :body ""}
+          inverses {:blockers [{:id "kno-B"
+                                :ticket (title-only-ticket "kno-B" "Beta from FM")}]
+                    :blocking [] :children [] :linked []}
+          out (output/show-json root inverses)]
+      (is (str/includes? out "\"title\":\"Beta from FM\""))))
+
+  (testing "missing :title fallback yields empty string in JSON"
+    (let [root     {:frontmatter {:id "kno-A" :title "A" :status "open"}
+                    :body ""}
+          inverses {:blockers [{:id "kno-B"
+                                :ticket {:frontmatter {:id "kno-B" :status "open"}
+                                         :body ""}}]
+                    :blocking [] :children [] :linked []}
+          out (output/show-json root inverses)]
+      (is (str/includes? out "\"title\":\"\"")))))
+
+(deftest ls-table-reads-frontmatter-title-test
+  (testing "ls-table TITLE column comes from frontmatter, not body H1"
+    (let [tickets [(assoc-in (title-only-ticket "kno-1" "Title from frontmatter")
+                             [:frontmatter :priority] 2)]
+          out (output/ls-table tickets {:color? false :tty? false})]
+      (is (str/includes? out "Title from frontmatter"))))
+
+  (testing "ticket missing :title in frontmatter still renders without crash"
+    (let [tickets [{:frontmatter {:id "kno-2" :status "open" :priority 2
+                                   :mode "afk" :type "task" :assignee "x"}
+                    :body ""}]
+          out (output/ls-table tickets {:color? false :tty? false})]
+      (is (str/includes? out "kno-2")))))
+
+(deftest ls-json-includes-frontmatter-title-test
+  (testing "ls-json output includes the frontmatter title for each ticket"
+    (let [tickets [(title-only-ticket "kno-1" "From frontmatter")]
+          out (output/ls-json tickets)]
+      (is (str/includes? out "\"title\":\"From frontmatter\"")))))
+
+(deftest dep-tree-text-reads-frontmatter-title-test
+  (testing "dep-tree node label comes from frontmatter, not body H1"
+    (let [tree {:id "kno-A"
+                :ticket (title-only-ticket "kno-A" "Root title FM")
+                :children [{:id "kno-B"
+                            :ticket (title-only-ticket "kno-B" "Child FM")}]}
+          out (output/dep-tree-text tree)]
+      (is (str/includes? out "Root title FM"))
+      (is (str/includes? out "Child FM"))))
+
+  (testing "seen-before? leaf reads title from frontmatter"
+    (let [tree {:id "kno-A"
+                :ticket (title-only-ticket "kno-A" "Root")
+                :children [{:id "kno-D"
+                            :ticket (title-only-ticket "kno-D" "Delta FM")
+                            :seen-before? true}]}
+          out (output/dep-tree-text tree)]
+      (is (str/includes? out "Delta FM ↑")))))
+
+(deftest dep-tree-json-reads-frontmatter-title-test
+  (testing "dep-tree-json title field is sourced from frontmatter"
+    (let [tree {:id "kno-A"
+                :ticket (title-only-ticket "kno-A" "Alpha FM")
+                :children [{:id "kno-B"
+                            :ticket (title-only-ticket "kno-B" "Beta FM")}]}
+          out (output/dep-tree-json tree)]
+      (is (str/includes? out "\"title\":\"Alpha FM\""))
+      (is (str/includes? out "\"title\":\"Beta FM\"")))))
+
+(deftest prime-text-reads-frontmatter-title-test
+  (testing "prime-text in-progress and ready ticket lines surface the frontmatter title"
+    (let [data {:project {:found? true :prefix "kno"
+                          :live-count 1 :archive-count 0}
+                :in-progress [{:frontmatter {:id "kno-ip01"
+                                             :title "In-progress FM"
+                                             :status "in_progress"
+                                             :mode "afk"
+                                             :priority 1}
+                               :body ""}]
+                :ready       [{:frontmatter {:id "kno-rd01"
+                                             :title "Ready FM"
+                                             :status "open"
+                                             :mode "afk"
+                                             :priority 0}
+                               :body ""}]
+                :ready-truncated? false
+                :ready-remaining 0}
+          out (output/prime-text data)]
+      (is (str/includes? out "In-progress FM"))
+      (is (str/includes? out "Ready FM")))))
+
+(deftest prime-json-reads-frontmatter-title-test
+  (testing "prime-json ticket entries surface the frontmatter title"
+    (let [data {:project {:found? true :prefix "kno"
+                          :live-count 0 :archive-count 0}
+                :in-progress []
+                :ready [{:frontmatter {:id "kno-rd01"
+                                       :title "Ready JSON FM"
+                                       :status "open"}
+                         :body ""}]
+                :ready-truncated? false
+                :ready-remaining 0}
+          out (output/prime-json data)]
+      (is (str/includes? out "\"title\":\"Ready JSON FM\"")))))

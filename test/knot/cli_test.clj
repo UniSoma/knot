@@ -45,14 +45,14 @@
         (is (= "2026-04-28T10:00:00Z" (:created fm)))
         (is (= "2026-04-28T10:00:00Z" (:updated fm))))))
 
-  (testing "the body starts with # <title> and has no empty section placeholders"
+  (testing "the title is in frontmatter and the body has no empty section placeholders"
     (with-tmp tmp
-      (let [path (cli/create-cmd (ctx tmp) {:title "Fix login bug"})
-            body (slurp path)]
-        (is (str/includes? body "# Fix login bug"))
-        (is (not (str/includes? body "## Description")))
-        (is (not (str/includes? body "## Design")))
-        (is (not (str/includes? body "## Acceptance Criteria"))))))
+      (let [path    (cli/create-cmd (ctx tmp) {:title "Fix login bug"})
+            content (slurp path)]
+        (is (str/includes? content "title: Fix login bug"))
+        (is (not (str/includes? content "## Description")))
+        (is (not (str/includes? content "## Design")))
+        (is (not (str/includes? content "## Acceptance Criteria"))))))
 
   (testing "supplied --description writes a ## Description section"
     (with-tmp tmp
@@ -100,7 +100,7 @@
       (let [path (cli/create-cmd (ctx tmp) {:title ""})]
         (is (re-matches #".+/\.tickets/kno-[0-9a-z]{12}\.md" path)))))
 
-  (testing "rendered frontmatter has stable, human-readable key order (id first)"
+  (testing "rendered frontmatter has stable, human-readable key order (id first, title second)"
     (with-tmp tmp
       (let [path  (cli/create-cmd (ctx tmp) {:title "T"
                                              :assignee "alice"
@@ -115,8 +115,53 @@
                             (map #(re-find #"^[a-z_]+" %))
                             vec)]
         (is (= "id" (first first-keys)))
-        (is (= ["id" "status" "type" "priority" "mode" "created" "updated"]
-               (vec (take 7 first-keys))))))))
+        (is (= ["id" "title" "status" "type" "priority" "mode" "created" "updated"]
+               (vec (take 8 first-keys))))))))
+
+(deftest create-cmd-title-in-frontmatter-test
+  (testing "title is written into frontmatter (not just into the body H1)"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Fix login bug"})
+            id     (->> (fs/file-name path)
+                        (re-matches #"(.+)--fix-login-bug\.md")
+                        second)
+            loaded (store/load-one tmp ".tickets" id)]
+        (is (= "Fix login bug" (:title (:frontmatter loaded)))))))
+
+  (testing "title appears in frontmatter at position 2 (right after id)"
+    (with-tmp tmp
+      (let [path  (cli/create-cmd (ctx tmp) {:title "Hello"})
+            lines (str/split-lines (slurp path))
+            first-keys (->> lines
+                            (drop 1)
+                            (take-while #(not= "---" %))
+                            (map #(re-find #"^[a-z_]+" %))
+                            vec)]
+        (is (= "id"    (nth first-keys 0)))
+        (is (= "title" (nth first-keys 1)))))))
+
+(deftest create-cmd-body-no-h1-test
+  (testing "body does NOT contain a synthesized `# <title>` H1 line"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "Fix login bug"})
+            body (:body (ticket/parse (slurp path)))]
+        (is (not (str/includes? body "# Fix login bug"))
+            "no H1 in the body — title lives in frontmatter only"))))
+
+  (testing "with no section flags, the body is empty (no synthesized header)"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "Solo"})
+            body (:body (ticket/parse (slurp path)))]
+        (is (= "" body)
+            "body is empty when no sections supplied"))))
+
+  (testing "with --description, the body is sections-only (no H1)"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "T"
+                                             :description "Desc."})
+            body (:body (ticket/parse (slurp path)))]
+        (is (not (str/includes? body "# T")))
+        (is (str/starts-with? body "## Description"))))))
 
 (deftest create-cmd-default-assignee-from-git-test
   ;; Wiring test for issue 0001 AC: `git config user.name` is the default
@@ -220,7 +265,7 @@
             out  (cli/show-cmd (ctx tmp) {:id id})]
         (is (string? out))
         (is (str/includes? out (str "id: " id)))
-        (is (str/includes? out "# Hello")))))
+        (is (str/includes? out "title: Hello")))))
 
   (testing "show returns nil when no ticket matches the id"
     (with-tmp tmp
@@ -1087,13 +1132,13 @@ Restart the daemon.
             _        (spit legacy
                            (str "---\n"
                                 "id: kno-legacy0001\n"
+                                "title: Legacy\n"
                                 "status: closed\n"
                                 "type: task\n"
                                 "priority: 2\n"
                                 "created: 2025-01-01T00:00:00Z\n"
                                 "updated: 2025-01-01T00:00:00Z\n"
-                                "---\n"
-                                "# Legacy\n"))
+                                "---\n"))
             out      (cli/closed-cmd c {:tty? false :color? false})
             stamped-i (str/index-of out "Stamped")
             legacy-i  (str/index-of out "Legacy")]
@@ -1113,13 +1158,13 @@ Restart the daemon.
             _        (spit (str (fs/path archive "kno-aaa00001--aaa.md"))
                            (str "---\n"
                                 "id: kno-aaa00001\n"
+                                "title: Unstamped\n"
                                 "status: closed\n"
                                 "type: task\n"
                                 "priority: 2\n"
                                 "created: 2025-01-01T00:00:00Z\n"
                                 "updated: 2025-01-01T00:00:00Z\n"
-                                "---\n"
-                                "# Unstamped\n"))
+                                "---\n"))
             stamped  (cli/create-cmd c {:title "Zeta"})
             zeta-id  (id-of-created stamped "zeta")
             _        (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z")

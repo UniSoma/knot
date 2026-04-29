@@ -33,8 +33,10 @@
   (str (Instant/now)))
 
 (defn- build-body
-  "Assemble the markdown body from the title and optional section flags."
-  [{:keys [title description design acceptance]}]
+  "Assemble the markdown body from the optional section flags. The title
+   lives in frontmatter, not the body — with no sections supplied the
+   body is the empty string."
+  [{:keys [description design acceptance]}]
   (let [sections
         (cond-> []
           (not (str/blank? description))
@@ -44,20 +46,20 @@
           (conj (str "## Design\n\n" design "\n"))
 
           (not (str/blank? acceptance))
-          (conj (str "## Acceptance Criteria\n\n" acceptance "\n")))
-        head (str "# " title "\n")]
+          (conj (str "## Acceptance Criteria\n\n" acceptance "\n")))]
     (if (empty? sections)
-      (str head "\n")
-      (str head "\n" (str/join "\n" sections)))))
+      ""
+      (str/join "\n" sections))))
 
 (defn- build-frontmatter
   "Build a frontmatter map with a stable, human-readable key order. Keys
-   present in this canonical order: id, status, type, priority, mode,
-   created, updated, assignee, parent, tags, external_refs. Optional keys
-   are omitted when their value is nil/blank/empty."
-  [{:keys [id status type priority assignee mode created updated
+   present in this canonical order: id, title, status, type, priority,
+   mode, created, updated, assignee, parent, tags, external_refs. Optional
+   keys are omitted when their value is nil/blank/empty."
+  [{:keys [id title status type priority assignee mode created updated
            tags parent external-ref]}]
   (let [pairs [[:id            id]
+               [:title         title]
                [:status        status]
                [:type          type]
                [:priority      priority]
@@ -103,6 +105,7 @@
         slug     (ticket/derive-slug title)
         fm       (build-frontmatter
                   {:id           id
+                   :title        title
                    :status       "open"
                    :type         (or (:type opts) default-type)
                    :priority     (or (:priority opts) default-priority)

@@ -60,7 +60,7 @@
                 shown    (run-knot tmp "show" id)]
             (is (zero? (:exit shown)) (str "show exited non-zero. err=" (:err shown)))
             (is (str/includes? (:out shown) (str "id: " id)))
-            (is (str/includes? (:out shown) "# Fix login bug"))
+            (is (str/includes? (:out shown) "title: Fix login bug"))
             (testing "show preserves the file's frontmatter key order"
               (is (= (slurp path) (:out shown))))))))))
 
@@ -453,15 +453,15 @@
       (spit (str (fs/path tmp ".tickets" "tmp-noModeId01--no-mode.md"))
             (str "---\n"
                  "id: tmp-noModeId01\n"
+                 "title: No mode\n"
                  "status: open\n"
                  "type: task\n"
                  "priority: 2\n"
-                 "---\n\n"
-                 "# No mode\n"))
+                 "---\n"))
       (testing "show works and does not invent a :mode line"
         (let [{:keys [exit out]} (run-knot tmp "show" "tmp-noModeId01")]
           (is (zero? exit))
-          (is (str/includes? out "# No mode"))
+          (is (str/includes? out "title: No mode"))
           (is (not (re-find #"(?m)^mode: " out))
               "show output must not synthesize a mode line absent from disk")))
       (testing "ls includes the mode-less ticket by default"

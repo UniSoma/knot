@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surfaced to users via `knot --version` and the `knot --help` banner.
 - Version bumps are driven by the `/release` slash command.
 
+## [Unreleased]
+
+### Changed (breaking)
+
+- Ticket title now lives in frontmatter (`title:` as the second key, right
+  after `id:`) instead of as the first `# H1` line of the body. `knot create`
+  no longer prepends `# <title>` to the body — with no `--description` /
+  `--design` / `--acceptance` flags the body is empty. All read commands
+  (`ls`, `ready`, `closed`, `show`, `dep tree`, `prime`) read the title
+  directly from frontmatter and degrade to an empty title rather than crash
+  when the field is missing. Existing ticket files in `.tickets/` were
+  migrated in-place.
+
+### Added
+
+- `ls --json`, `ready --json`, `closed --json` now include `title` for each
+  entry as a side effect of the frontmatter move.
+
 ## [0.0.1] - 2026-04-29
 
 Initial release. Knot is a file-based ticket store for AI-assisted development:
