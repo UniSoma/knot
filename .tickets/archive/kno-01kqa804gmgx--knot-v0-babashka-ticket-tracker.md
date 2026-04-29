@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa804gmgx
+title: Knot v0 — babashka ticket tracker
 status: closed
 type: epic
 priority: 2
@@ -22,9 +23,6 @@ deps:
 - kno-01kqa6xfe80k
 - kno-01kqa6xff7ya
 ---
-
-# Knot v0 — babashka ticket tracker
-
 ## Description
 
 Umbrella ticket for the Knot v0 PRD. Body intentionally thin — see the PRD doc for the full spec. Children (computed from :parent backrefs) are the implementation issues 0001-0011.

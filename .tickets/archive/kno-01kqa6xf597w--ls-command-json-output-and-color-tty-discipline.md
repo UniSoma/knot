@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf597w
+title: ls command, --json output, and color/TTY discipline
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf42q9
 ---
-
-# ls command, --json output, and color/TTY discipline
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

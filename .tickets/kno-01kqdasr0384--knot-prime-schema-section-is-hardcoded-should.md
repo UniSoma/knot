@@ -1,5 +1,6 @@
 ---
 id: kno-01kqdasr0384
+title: 'knot prime ## Schema section is hardcoded — should reflect :statuses (and :modes) from config'
 status: open
 type: bug
 priority: 2
@@ -9,9 +10,6 @@ updated: '2026-04-29T19:17:58.427493937Z'
 links:
 - kno-01kqdat9xssc
 ---
-
-# knot prime ## Schema section is hardcoded — should reflect :statuses (and :modes) from config
-
 ## Description
 
 The `## Schema` section in `knot prime` output is rendered from a static string constant, so projects that override `:statuses` (or `:modes`) in `.knot.edn` still see the canonical defaults in the primer.

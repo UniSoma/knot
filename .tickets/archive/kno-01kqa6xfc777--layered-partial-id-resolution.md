@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xfc777
+title: Layered partial ID resolution
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf6gtf
 ---
-
-# Layered partial ID resolution
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

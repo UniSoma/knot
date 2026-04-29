@@ -1,5 +1,6 @@
 ---
 id: kno-01kqdaxz86nv
+title: Richer per-value colors for ls/ready/closed/blocked tables (type, priority, mode)
 status: open
 type: feature
 priority: 3
@@ -7,9 +8,6 @@ mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
 updated: '2026-04-29T19:19:54.374266390Z'
 ---
-
-# Richer per-value colors for ls/ready/closed/blocked tables (type, priority, mode)
-
 ## Description
 
 The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize the `:status` column per value, but `:type`, `:mode`, and `:priority` are mostly uniform — `:type` and `:mode` collapse to `[:faint]` regardless of value, and `:priority` only highlights `0`. Scanning a long list for, say, all bugs is harder than it should be.

@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa9tnd5qc
+title: create flag values starting with dash trigger babashka.cli mis-parse
 status: closed
 type: bug
 priority: 2
@@ -11,9 +12,6 @@ tags:
 - cli
 - parsing
 ---
-
-# create flag values starting with dash trigger babashka.cli mis-parse
-
 ## Reproduction Steps
 
 ```

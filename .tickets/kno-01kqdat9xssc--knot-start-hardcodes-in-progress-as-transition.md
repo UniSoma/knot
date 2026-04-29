@@ -1,5 +1,6 @@
 ---
 id: kno-01kqdat9xssc
+title: 'knot start hardcodes ''in_progress'' as transition target — breaks projects with custom :statuses'
 status: open
 type: bug
 priority: 1
@@ -9,9 +10,6 @@ updated: '2026-04-29T19:17:58.427493937Z'
 links:
 - kno-01kqdasr0384
 ---
-
-# knot start hardcodes 'in_progress' as transition target — breaks projects with custom :statuses
-
 ## Description
 
 `knot start` and the `## Commands` cheatsheet line that documents it both hardcode the literal status `"in_progress"`. On any project whose `:statuses` does not include `"in_progress"` (e.g. `["open" "active" "closed"]`), `knot start` will fail validation and the primer will document a target status that does not exist.

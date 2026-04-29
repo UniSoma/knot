@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf6gtf
+title: Lifecycle transitions and archive auto-move
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf42q9
 ---
-
-# Lifecycle transitions and archive auto-move
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

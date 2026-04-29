@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xfb39t
+title: add-note, knot edit, and close --summary
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf6gtf
 ---
-
-# add-note, knot edit, and close --summary
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

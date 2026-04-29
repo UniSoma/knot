@@ -1,5 +1,6 @@
 ---
 id: kno-01kqasv21t2x
+title: Rephrase knot prime output to be directive, not descriptive
 status: closed
 type: feature
 priority: 1
@@ -12,9 +13,6 @@ tags:
 - prime
 - agent
 ---
-
-# Rephrase knot prime output to be directive, not descriptive
-
 ## Description
 
 The current prime output reads as environment description ("You are working in a Knot project. Tickets are markdown files..."), so agents file it under background trivia rather than direction. Rephrase as directives — explicit user-says/you-do mappings, plus negative-space guidance — so agents reach for knot instead of cat/grep/hand-editing. Origin: session on 2026-04-28 where the agent went to the filesystem to inspect a ticket despite prime being injected at session start.

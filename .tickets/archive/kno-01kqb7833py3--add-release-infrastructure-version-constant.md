@@ -1,5 +1,6 @@
 ---
 id: kno-01kqb7833py3
+title: 'Add release infrastructure: version constant, CHANGELOG, fix /release slash command'
 status: closed
 type: feature
 priority: 2
@@ -12,9 +13,6 @@ tags:
 - infra
 - v0.1
 ---
-
-# Add release infrastructure: version constant, CHANGELOG, fix /release slash command
-
 ## Description
 
 Trying to cut v0.0.1 surfaced gaps in release tooling:

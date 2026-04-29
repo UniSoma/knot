@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf7mde
+title: .knot.edn config, walk-up discovery, and knot init
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf42q9
 ---
-
-# .knot.edn config, walk-up discovery, and knot init
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

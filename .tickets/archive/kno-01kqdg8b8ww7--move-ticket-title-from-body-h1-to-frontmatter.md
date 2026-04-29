@@ -1,12 +1,13 @@
 ---
 id: kno-01kqdg8b8ww7
 title: Move ticket title from body H1 to frontmatter field
-status: in_progress
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-04-29T20:52:57.242922337Z'
-updated: '2026-04-29T21:14:52.127694116Z'
+updated: '2026-04-29T21:34:10.851419425Z'
+closed: '2026-04-29T21:34:10.851419425Z'
 ---
 
 ## Description

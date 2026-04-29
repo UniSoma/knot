@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xfd7aw
+title: Mode (afk/hitl), ls filters, and closed --limit
 status: closed
 type: task
 priority: 2
@@ -15,9 +16,6 @@ deps:
 - kno-01kqa6xf7mde
 - kno-01kqa6xf8rcr
 ---
-
-# Mode (afk/hitl), ls filters, and closed --limit
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

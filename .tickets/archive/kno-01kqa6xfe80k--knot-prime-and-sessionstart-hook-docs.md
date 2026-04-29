@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xfe80k
+title: knot prime and SessionStart hook docs
 status: closed
 type: task
 priority: 2
@@ -15,9 +16,6 @@ deps:
 - kno-01kqa6xf8rcr
 - kno-01kqa6xfd7aw
 ---
-
-# knot prime and SessionStart hook docs
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

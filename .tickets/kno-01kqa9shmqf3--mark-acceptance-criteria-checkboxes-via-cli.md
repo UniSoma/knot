@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa9shmqf3
+title: Mark acceptance-criteria checkboxes via CLI
 status: open
 type: feature
 priority: 2
@@ -13,9 +14,6 @@ tags:
 deps:
 - kno-01kqa804gmgx
 ---
-
-# Mark acceptance-criteria checkboxes via CLI
-
 ## Description
 
 Acceptance criteria today live as freeform `- [ ]` markdown checkboxes in the body. There is no API to flip them — `edit` opens an editor, `add-note` only appends to `## Notes`, and `status`/`close` touch frontmatter only. This crosses the deliberate freeform-body boundary we drew in v0 (story 31) into structured territory, so it ships post-v0.

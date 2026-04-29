@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf9s1k
+title: Symmetric links and computed inverse sections in show
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xf8rcr
 ---
-
-# Symmetric links and computed inverse sections in show
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

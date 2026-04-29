@@ -1,5 +1,6 @@
 ---
 id: kno-01kqcpw6bzn6
+title: 'Add GitHub Actions CI: bb test on push + PR'
 status: closed
 type: task
 priority: 3
@@ -8,9 +9,6 @@ created: '2026-04-29T13:29:24.607894173Z'
 updated: '2026-04-29T14:24:09.509422468Z'
 closed: '2026-04-29T14:24:09.509422468Z'
 ---
-
-# Add GitHub Actions CI: bb test on push + PR
-
 ## Description
 
 Set up minimal CI on GitHub Actions so `bb test` runs automatically on every push to main and on pull requests. Currently there is no `.github/workflows/` directory; tests are only run locally.

@@ -1,5 +1,6 @@
 ---
 id: kno-01kqaw5aqxm1
+title: Structured help system with per-command --help support
 status: closed
 type: feature
 priority: 2
@@ -8,9 +9,6 @@ created: '2026-04-28T20:23:18.013529700Z'
 updated: '2026-04-28T23:32:52.637736467Z'
 closed: '2026-04-28T23:32:52.637736467Z'
 ---
-
-# Structured help system with per-command --help support
-
 ## Description
 
 The CLI has no --help flag at root or for any subcommand. bb knot --help falls through the case in -main and exits 1 with 'unknown command: --help' plus the bare usage on stderr. Bare bb knot prints usage to stderr and exits 1. There is no per-command help, no flag-level documentation, no usage examples, no exit-code documentation, and no structural grouping in the existing flat usage block.

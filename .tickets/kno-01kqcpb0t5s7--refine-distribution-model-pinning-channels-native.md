@@ -1,5 +1,6 @@
 ---
 id: kno-01kqcpb0t5s7
+title: 'Refine distribution model: pinning, channels, native-image'
 status: open
 type: task
 priority: 3
@@ -9,9 +10,6 @@ updated: '2026-04-29T14:26:02.746799096Z'
 deps:
 - kno-01kqcpw6bzn6
 ---
-
-# Refine distribution model: pinning, channels, native-image
-
 ## Description
 
 Once v0.0.1 ships (tracking main via bbin), the install story will need to evolve as knot picks up users beyond the author. This ticket captures the decision space.

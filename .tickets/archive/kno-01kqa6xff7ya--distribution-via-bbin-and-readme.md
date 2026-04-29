@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xff7ya
+title: Distribution via bbin and README
 status: closed
 type: task
 priority: 2
@@ -14,9 +15,6 @@ external_refs:
 deps:
 - kno-01kqa6xfe80k
 ---
-
-# Distribution via bbin and README
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

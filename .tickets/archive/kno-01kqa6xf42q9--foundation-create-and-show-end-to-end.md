@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf42q9
+title: Foundation - create and show end-to-end
 status: closed
 type: task
 priority: 2
@@ -12,9 +13,6 @@ external_refs:
 - docs/prd/knot-v0.md
 - issues/0001-foundation-create-and-show.md
 ---
-
-# Foundation - create and show end-to-end
-
 ## Parent document
 
 `docs/prd/knot-v0.md`

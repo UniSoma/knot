@@ -1,5 +1,6 @@
 ---
 id: kno-01kqa6xf8rcr
+title: Dependency graph - dep, undep, dep tree, dep cycle, ready, blocked
 status: closed
 type: task
 priority: 2
@@ -15,9 +16,6 @@ deps:
 - kno-01kqa6xf6gtf
 - kno-01kqa6xf7mde
 ---
-
-# Dependency graph - dep, undep, dep tree, dep cycle, ready, blocked
-
 ## Parent document
 
 `docs/prd/knot-v0.md`
