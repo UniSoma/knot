@@ -5,7 +5,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T13:20:01.861232445Z'
-updated: '2026-04-29T13:29:45.789015200Z'
+updated: '2026-04-29T14:26:02.746799096Z'
 deps:
 - kno-01kqcpw6bzn6
 ---
@@ -31,3 +31,9 @@ Once v0.0.1 ships (tracking main via bbin), the install story will need to evolv
 ## When this matters
 
 Deferred for v0.0.1 — the project has one user and bbin-tracking-main is sufficient. Revisit when external users emerge or a binary-distribution story is needed.
+
+## Notes
+
+**2026-04-29T14:26:02.746799096Z**
+
+https://github.com/unisoma/aishell has good ideas
