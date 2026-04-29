@@ -27,6 +27,7 @@
                      (map (fn [p] (-> p
                                       (str/replace ".clj" "")
                                       (str/replace "/" ".")
+                                      (str/replace "\\" ".")
                                       (str/replace "_" "-"))))
                      (map symbol)
                      vec)]
