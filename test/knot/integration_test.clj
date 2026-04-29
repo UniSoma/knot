@@ -96,8 +96,10 @@
         (let [{:keys [exit out]} (run-knot sub "create" "Walk up works")]
           (is (zero? exit))
           ;; the created file lives under the *project root's* .tickets, not
-          ;; under the subdirectory we ran from
-          (is (str/starts-with? (str/trim out) (str tmp "/.tickets/"))))))))
+          ;; under the subdirectory we ran from. Canonicalize tmp because
+          ;; macOS symlinks /var → /private/var; knot's output is canonical.
+          (is (str/starts-with? (str/trim out)
+                                (str (fs/canonicalize tmp) "/.tickets/"))))))))
 
 (deftest unknown-command-test
   (testing "unknown commands fail with non-zero exit and a stderr message"
@@ -503,7 +505,8 @@
       (fs/create-dirs (fs/path tmp "tasks"))
       (let [{:keys [exit out err]} (run-knot tmp "create" "Routed")]
         (is (zero? exit) (str "create err=" err))
-        (is (str/starts-with? (str/trim out) (str tmp "/tasks/"))
+        (is (str/starts-with? (str/trim out)
+                              (str (fs/canonicalize tmp) "/tasks/"))
             "ticket should be written under the configured tickets-dir"))))
 
   (testing "invalid .knot.edn fails fast with a clear stderr error"
