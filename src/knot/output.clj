@@ -224,14 +224,42 @@
   [s width]
   (if (<= (count s) width) s (subs s 0 width)))
 
+(defn status-role
+  "Resolve a ticket status string to a render role based on project config.
+   Returns one of `:terminal` (status is in `terminal-statuses`),
+   `:active` (status equals `active-status`),
+   `:open` (status is the first entry in `statuses` that is neither active
+   nor terminal — i.e. the project's intake/todo lane),
+   `:other` (any other configured or unknown status).
+
+   Roles, not literal status names, drive color choice in `ls-table` so
+   projects with custom `:statuses` (e.g. \"active\" / \"review\") inherit
+   the same visual contract as the default `:open`/`:in_progress`/`:closed`
+   workflow."
+  [status statuses terminal-statuses active-status]
+  (let [terminal-set (set terminal-statuses)
+        open-status  (->> statuses
+                          (remove (fn [s]
+                                    (or (= s active-status)
+                                        (contains? terminal-set s))))
+                          first)]
+    (cond
+      (contains? terminal-set status) :terminal
+      (= status active-status)        :active
+      (= status open-status)          :open
+      :else                           :other)))
+
+(def ^:private role->codes
+  {:terminal [:dim]
+   :active   [:yellow]
+   :open     [:cyan]
+   :other    []})
+
 (defn- color-codes-for
-  [k value]
+  [k value status-context]
   (case k
-    :status   (case value
-                "open"        [:cyan]
-                "in_progress" [:yellow]
-                "closed"      [:dim]
-                [])
+    :status   (let [{:keys [statuses terminal-statuses active-status]} status-context]
+                (role->codes (status-role value statuses terminal-statuses active-status)))
     :priority (if (= "0" value) [:red :bold] [])
     :mode     [:faint]
     :type     [:faint]
@@ -308,10 +336,25 @@
    PRI is right-aligned. TITLE is full-width when piped (`:tty? false`)
    and truncated to fit `:width` (default 80) when `:tty? true`.
    Pass `:color? true` to apply ANSI color to data rows; the header row
-   is always plain text."
-  [tickets {:keys [color? tty? width]
-            :or {color? false tty? false width 80}}]
-  (let [non-title        (vec (butlast ls-columns))
+   is always plain text.
+
+   Status colors are role-based (terminal → :dim, active → :yellow,
+   intake/open lane → :cyan). The role is resolved per ticket from
+   `:statuses`, `:terminal-statuses`, and `:active-status` so projects
+   with custom `:statuses` get matching colors. Defaults match the v0
+   schema for callers that do not pass a status context:
+     :statuses          [\"open\" \"in_progress\" \"closed\"]
+     :terminal-statuses #{\"closed\"}
+     :active-status     \"in_progress\""
+  [tickets {:keys [color? tty? width statuses terminal-statuses active-status]
+            :or {color? false tty? false width 80
+                 statuses          ["open" "in_progress" "closed"]
+                 terminal-statuses #{"closed"}
+                 active-status     "in_progress"}}]
+  (let [status-ctx       {:statuses          statuses
+                          :terminal-statuses terminal-statuses
+                          :active-status     active-status}
+        non-title        (vec (butlast ls-columns))
         title-col        (last ls-columns)
         non-title-widths (mapv (fn [{:keys [key header]}]
                                  (apply max (count header)
@@ -330,7 +373,7 @@
                                  p (pad t w (:align col))]
                              (if color-on?
                                (colorize color?
-                                         (color-codes-for (:key col) t)
+                                         (color-codes-for (:key col) t status-ctx)
                                          p)
                                p)))
         format-row       (fn [color-on? raw-row]

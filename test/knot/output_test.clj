@@ -241,6 +241,114 @@
     (let [out (output/ls-table sample-ls-tickets {:color? true :tty? true :width 200})]
       (is (re-find #"\[" out)))))
 
+(deftest status-role-test
+  (testing "status in :terminal-statuses → :terminal"
+    (is (= :terminal
+           (output/status-role "closed"
+                               ["open" "in_progress" "closed"]
+                               #{"closed"}
+                               "in_progress"))))
+  (testing "status equal to :active-status → :active"
+    (is (= :active
+           (output/status-role "in_progress"
+                               ["open" "in_progress" "closed"]
+                               #{"closed"}
+                               "in_progress"))))
+  (testing "first non-active non-terminal status in :statuses ordering → :open"
+    (is (= :open
+           (output/status-role "open"
+                               ["open" "in_progress" "closed"]
+                               #{"closed"}
+                               "in_progress"))))
+  (testing "custom :statuses with extra non-special entry → :other"
+    (let [statuses ["open" "active" "review" "closed"]
+          terminal #{"closed"}
+          active   "active"]
+      (is (= :terminal (output/status-role "closed" statuses terminal active)))
+      (is (= :active   (output/status-role "active" statuses terminal active)))
+      (is (= :open     (output/status-role "open"   statuses terminal active)))
+      (is (= :other    (output/status-role "review" statuses terminal active)))))
+  (testing "the :open lane is the first non-active non-terminal in :statuses order"
+    (let [statuses ["todo" "open" "active" "closed"]
+          terminal #{"closed"}
+          active   "active"]
+      (is (= :open  (output/status-role "todo" statuses terminal active)))
+      (is (= :other (output/status-role "open" statuses terminal active)))))
+  (testing "status not present in :statuses at all → :other"
+    (is (= :other
+           (output/status-role "wat"
+                               ["open" "in_progress" "closed"]
+                               #{"closed"}
+                               "in_progress")))))
+
+(def ^:private custom-statuses-tickets
+  [{:frontmatter {:id "kno-01abcd0010"
+                  :title "Custom open"
+                  :status "open"
+                  :priority 2
+                  :mode "hitl"
+                  :type "task"
+                  :assignee "alice"}
+    :body ""}
+   {:frontmatter {:id "kno-01abcd0011"
+                  :title "Custom active"
+                  :status "active"
+                  :priority 2
+                  :mode "hitl"
+                  :type "task"
+                  :assignee "alice"}
+    :body ""}
+   {:frontmatter {:id "kno-01abcd0012"
+                  :title "Custom review"
+                  :status "review"
+                  :priority 2
+                  :mode "hitl"
+                  :type "task"
+                  :assignee "alice"}
+    :body ""}
+   {:frontmatter {:id "kno-01abcd0013"
+                  :title "Custom closed"
+                  :status "closed"
+                  :priority 2
+                  :mode "hitl"
+                  :type "task"
+                  :assignee "alice"}
+    :body ""}])
+
+(deftest ls-table-default-statuses-color-roles-test
+  (testing "default :statuses preserves current colors (closed=dim, in_progress=yellow, open=cyan)"
+    (let [out (output/ls-table sample-ls-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "in_progress" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "in_progress"})]
+      (is (re-find #"\[36mopen" out)
+          "open lane wraps the cell in the :cyan SGR (36)")
+      (is (re-find #"\[33min_progress" out)
+          "active lane (in_progress) wraps the cell in the :yellow SGR (33)"))))
+
+(deftest ls-table-custom-statuses-color-roles-test
+  (testing "with :active-status \"active\" and a custom :statuses, the active lane is yellow"
+    (let [out (output/ls-table custom-statuses-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "active" "review" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "active"})]
+      (is (re-find #"\[36mopen" out)
+          "first non-active non-terminal lane (\"open\") wraps in :cyan SGR (36)")
+      (is (re-find #"\[33mactive" out)
+          "active-status lane (\"active\") wraps in :yellow SGR (33)")
+      (is (re-find #"\[2mclosed" out)
+          "terminal lane (\"closed\") wraps in :dim SGR (2)")
+      (is (not (re-find #"\[[0-9;]+mreview" out))
+          "non-special status (\"review\") receives no SGR around the status cell"))))
+
+(deftest ls-table-no-status-options-back-compat-test
+  (testing "ls-table without status options still colors in_progress yellow (defaults)"
+    (let [out (output/ls-table sample-ls-tickets {:color? true :tty? true :width 200})]
+      (is (re-find #"\[33min_progress" out)
+          "defaults preserve the in_progress=yellow color"))))
+
 (deftest show-json-test
   (testing "renders a bare JSON object (not wrapped in an envelope)"
     (let [ticket {:frontmatter {:id "kno-01abc"

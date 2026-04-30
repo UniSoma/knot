@@ -428,6 +428,16 @@
                   (when (seq v) [k v]))))
         [:status :assignee :tag :type :mode]))
 
+(defn- ls-table-opts
+  "Build the `output/ls-table` options map from CLI `opts` plus the
+   resolved-ctx status fields (`:statuses`, `:terminal-statuses`,
+   `:active-status`). Threading these through is what lets the table
+   color custom-status projects correctly — the renderer otherwise
+   falls back to defaults that hide custom :active-status lanes."
+  [resolved opts]
+  (merge (select-keys opts [:tty? :color? :width])
+         (select-keys resolved [:statuses :terminal-statuses :active-status])))
+
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.
    With `:json? true`, returns a bare JSON array. Otherwise returns the
@@ -439,7 +449,8 @@
    `:status` set replaces the default non-terminal filter — so
    `--status closed` surfaces archived tickets."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+  (let [resolved (resolve-ctx ctx)
+        {:keys [project-root tickets-dir terminal-statuses]} resolved
         all      (store/load-all project-root tickets-dir)
         criteria (filter-criteria opts)
         base     (if (contains? criteria :status)
@@ -448,7 +459,7 @@
         visible  (query/filter-tickets base criteria)]
     (if (:json? opts)
       (output/ls-json visible)
-      (output/ls-table visible (select-keys opts [:tty? :color? :width])))))
+      (output/ls-table visible (ls-table-opts resolved opts)))))
 
 (defn- tree-tickets
   "Walk a dep-tree node and return the unique full tickets it contains, in
@@ -520,14 +531,15 @@
    BEFORE `:limit` truncation so `--mode afk --limit 5` returns up to
    five afk-mode ready tickets, not five from the unfiltered set."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+  (let [resolved (resolve-ctx ctx)
+        {:keys [project-root tickets-dir terminal-statuses]} resolved
         all      (store/load-all project-root tickets-dir)
         ready*   (query/ready all terminal-statuses)
         filtered (query/filter-tickets ready* (filter-criteria opts))
         result   (apply-limit filtered (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
+      (output/ls-table result (ls-table-opts resolved opts)))))
 
 (defn- closed?
   "True when the ticket's `:status` is in `terminal-statuses`."
@@ -553,26 +565,28 @@
    `:json? true`, returns a bare JSON array; otherwise a rendered text
    table. Tickets missing a `:closed` stamp sort last."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+  (let [resolved (resolve-ctx ctx)
+        {:keys [project-root tickets-dir terminal-statuses]} resolved
         all      (store/load-all project-root tickets-dir)
         terminal (filter (partial closed? terminal-statuses) all)
         sorted   (sort by-closed-desc terminal)
         result   (apply-limit sorted (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
+      (output/ls-table result (ls-table-opts resolved opts)))))
 
 (defn blocked-cmd
   "List non-terminal tickets that have at least one non-terminal `:deps`
    entry (or a missing referent). With `:json? true`, returns a bare
    JSON array. Otherwise returns the rendered text table."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+  (let [resolved (resolve-ctx ctx)
+        {:keys [project-root tickets-dir terminal-statuses]} resolved
         all     (store/load-all project-root tickets-dir)
         result  (query/blocked all terminal-statuses)]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (select-keys opts [:tty? :color? :width])))))
+      (output/ls-table result (ls-table-opts resolved opts)))))
 
 (def ^:private prime-default-limit 20)
 (def ^:private prime-recently-closed-limit 3)
@@ -743,6 +757,10 @@
      " :default-priority " (:default-priority d) "\n"
      "\n"
      " ;; Status workflow, in display order. Edit to add e.g. \"review\".\n"
+     " ;; List-table colors are role-driven: terminal statuses render dim,\n"
+     " ;; the active lane renders yellow, and the first entry below that is\n"
+     " ;; neither active nor terminal renders cyan as the intake lane; any\n"
+     " ;; remaining entries render uncolored.\n"
      " :statuses " (pr-str (:statuses d)) "\n"
      "\n"
      " ;; Statuses that are terminal — files of tickets in these statuses\n"

@@ -398,6 +398,93 @@
         (is (str/includes? out "Will close"))
         (is (not (str/includes? out "Live one")))))))
 
+(deftest ls-cmd-custom-statuses-color-test
+  (testing "ls-cmd colors the active lane yellow under a custom :statuses ctx"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["open" "active" "review" "closed"]
+                              :terminal-statuses #{"closed"}
+                              :active-status     "active")
+            a-path (cli/create-cmd custom-ctx {:title "Custom-active ticket"})
+            a-id   (->> (fs/file-name a-path)
+                        (re-matches #"(.+)--custom-active-ticket\.md")
+                        second)
+            b-path (cli/create-cmd custom-ctx {:title "Custom-review ticket"})
+            b-id   (->> (fs/file-name b-path)
+                        (re-matches #"(.+)--custom-review-ticket\.md")
+                        second)
+            _      (cli/start-cmd custom-ctx {:id a-id})
+            _      (cli/status-cmd custom-ctx {:id b-id :status "review"})
+            out    (cli/ls-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[33mactive" out)
+            "active-status lane (\"active\") wraps in :yellow SGR (33)")
+        (is (not (re-find #"\[33min_progress" out))
+            "literal in_progress is not colored — config-driven, not literal-driven")
+        (is (not (re-find #"\[[0-9;]+mreview" out))
+            "non-special status (\"review\") receives no SGR end-to-end through the CLI")))))
+
+(deftest list-cmds-thread-status-context-test
+  ;; ls-cmd is covered in ls-cmd-custom-statuses-color-test; this test pins the
+  ;; symmetric wiring for ready-cmd, closed-cmd, and blocked-cmd so a future
+  ;; refactor that drops :statuses/:active-status from any one of those four
+  ;; sites is caught by tests rather than by users with custom :statuses.
+  (testing "ready-cmd threads the active-status ctx (active lane → yellow)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["open" "active" "review" "closed"]
+                              :terminal-statuses #{"closed"}
+                              :active-status     "active")
+            a-path (cli/create-cmd custom-ctx {:title "Ready-active ticket"})
+            a-id   (->> (fs/file-name a-path)
+                        (re-matches #"(.+)--ready-active-ticket\.md")
+                        second)
+            _      (cli/start-cmd custom-ctx {:id a-id})
+            out    (cli/ready-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[33mactive" out)
+            "ready-cmd colors the :active-status row yellow")
+        (is (not (re-find #"\[33min_progress" out))
+            "ready-cmd does not color a literal in_progress"))))
+
+  (testing "closed-cmd threads the terminal-statuses ctx (custom terminal lane → dim)"
+    ;; Use a non-default terminal-status name ("done") so this test would
+    ;; catch a wiring drop: under the v0 fallback (#{"closed"}), "done"
+    ;; would not be recognized as terminal and would render uncolored.
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["open" "active" "done"]
+                              :terminal-statuses #{"done"}
+                              :active-status     "active")
+            a-path (cli/create-cmd custom-ctx {:title "Done ticket"})
+            a-id   (->> (fs/file-name a-path)
+                        (re-matches #"(.+)--done-ticket\.md")
+                        second)
+            _      (cli/close-cmd custom-ctx {:id a-id})
+            out    (cli/closed-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[2mdone" out)
+            "closed-cmd colors a custom terminal status (\"done\") dim"))))
+
+  (testing "blocked-cmd threads the active-status ctx (active lane → yellow)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["open" "active" "review" "closed"]
+                              :terminal-statuses #{"closed"}
+                              :active-status     "active")
+            a-path (cli/create-cmd custom-ctx {:title "Blocker ticket"})
+            b-path (cli/create-cmd custom-ctx {:title "Blocked-active ticket"})
+            a-id   (->> (fs/file-name a-path)
+                        (re-matches #"(.+)--blocker-ticket\.md")
+                        second)
+            b-id   (->> (fs/file-name b-path)
+                        (re-matches #"(.+)--blocked-active-ticket\.md")
+                        second)
+            _      (cli/dep-cmd custom-ctx {:from b-id :to a-id})
+            _      (cli/start-cmd custom-ctx {:id b-id})
+            out    (cli/blocked-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[33mactive" out)
+            "blocked-cmd colors the :active-status row yellow")
+        (is (not (re-find #"\[33min_progress" out))
+            "blocked-cmd does not color a literal in_progress")))))
+
 (defn- id-of-created [path slug-pat]
   (->> (fs/file-name path)
        (re-matches (re-pattern (str "(.+)--" slug-pat "\\.md")))
