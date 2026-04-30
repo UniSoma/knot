@@ -2,24 +2,7 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bb knot prime"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Read|Glob|Grep|Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": ".claude/hooks/block-tickets-read.sh"
-          }
-        ]
+        "hooks": [{ "type": "command", "command": "knot prime" }]
       }
     ]
   }
