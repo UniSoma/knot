@@ -154,7 +154,7 @@
 
    :prime
    {:group       :project
-    :description "Emit a five-section primer for AI agent context-injection."
+    :description "Emit a markdown primer for AI agent context-injection (project, in-progress, ready, recently-closed, commands)."
     :args        []
     :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit JSON instead of markdown."}

@@ -350,13 +350,33 @@
 
 When the user says... → you do:
   \"what's next?\" / \"what should I work on?\"        → `knot ready`
+  \"any pending bugs?\" / \"list bugs\"                → `knot list --type bug`
   \"let's tackle <id>\" / \"start working on <id>\"    → `knot show <id>`, then `knot start <id>`
   \"I'm done\" / \"shipped\" / \"let's close this\"      → `knot close <id> --summary \"...\"`
   \"note that...\" / \"FYI...\" mid-task               → `knot add-note <id> \"...\"`
   \"blocked on <other>\"                            → `knot dep <current> <other>`
   \"what's blocking this?\"                         → `knot dep tree <id>`
 
-Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `edit` keep frontmatter valid.")
+Read commands accept `--type`, `--mode`, `--tag`, `--status`, `--assignee` filters — pass the matching flag instead of scanning a bare list.
+
+Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `edit` keep frontmatter valid.
+
+For the full reference (lifecycle, graph ops, JSON shapes, partial-id resolution, AFK vs HITL), invoke the `knot` skill.")
+
+(def ^:private prime-preamble-afk
+  "You are an autonomous agent picking up unblocked work in this project. Use the `knot` CLI for all ticket reads and writes — don't `cat`, `grep`, or hand-edit files under `.tickets/`.
+
+Autonomous flow:
+
+  knot ready --mode afk --json     enumerate unblocked agent-runnable candidates
+  knot show <id>                   confirm scope before claiming
+  knot start <id>                  claim
+  knot add-note <id> \"<progress>\"  log progress on long runs
+  knot close <id> --summary \"...\"  ship — the summary lands in the ticket as a note
+
+Don't pick up `hitl` tickets — those need a human in the loop. The `mode` field is the contract.
+
+For the full reference (lifecycle, graph ops, JSON shapes, partial-id resolution), invoke the `knot` skill.")
 
 (def ^:private prime-preamble-no-project
   "No Knot project was discovered from the current directory. Run `knot init`
@@ -376,29 +396,24 @@ knot show <id>                   show one ticket (frontmatter + body)
 knot create \"<title>\"            create a new ticket
 knot start <id>                  transition to in_progress
 knot close <id> [--summary <s>]  transition to terminal status + auto-archive
-knot add-note <id> [text]        append a timestamped note
-knot dep <from> <to>             add a dependency edge (cycle-checked)
-knot dep tree <id>               show what's blocking a ticket")
-
-(def ^:private prime-schema-cheatsheet
-  "Fallback for direct file edits only — prefer the commands above.
-Frontmatter keys: id, status (open|in_progress|closed), type, priority
-(0=highest..4), mode (afk=agent-runnable, hitl=human-in-the-loop),
-created, updated, closed, assignee, parent, tags, deps, links,
-external_refs.")
+knot add-note <id> [text]        append a timestamped note")
 
 (defn- prime-ticket-line
   "Format a ticket as `id  mode  pri  title` for the prime in-progress and
    ready sections. Missing fields render as `-` so columns stay aligned.
-   The renderer is whitespace-only — no ANSI codes — because prime output
+   When `:prime-stale?` is truthy on the ticket map (set by the in-progress
+   pipeline when `:updated` is older than the staleness threshold), the
+   line is prefixed with `[stale] ` so agents notice forgotten work. The
+   renderer is whitespace-only — no ANSI codes — because prime output
    is consumed by AI agents and downstream tools, not human terminals."
   [ticket]
-  (let [fm    (:frontmatter ticket)
-        id    (or (:id fm) "")
-        mode  (or (:mode fm) "-")
-        pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
-        title (ticket-title ticket)]
-    (str id "  " mode "  " pri "  " title)))
+  (let [fm     (:frontmatter ticket)
+        id     (or (:id fm) "")
+        mode   (or (:mode fm) "-")
+        pri    (let [p (:priority fm)] (if (some? p) (str p) "-"))
+        title  (ticket-title ticket)
+        prefix (if (:prime-stale? ticket) "[stale] " "")]
+    (str prefix id "  " mode "  " pri "  " title)))
 
 (defn- prime-section
   "Render a `## <header>` section: heading, optional one-line behavioral
@@ -411,6 +426,25 @@ external_refs.")
         body  (if (seq lines) (str (str/join "\n" lines) "\n") "")
         foot  (if (str/blank? footer) "" (str footer "\n"))]
     (str "## " header "\n\n" nudge-block body foot)))
+
+(defn- prime-recently-closed-line
+  "Render a single recently-closed entry as one or two lines: `id  title`,
+   then an indented summary line when `:summary` is present and non-blank."
+  [{:keys [id title summary]}]
+  (let [head (str (or id "") "  " (or title ""))]
+    (if (and (some? summary) (not (str/blank? summary)))
+      (str head "\n    " summary)
+      head)))
+
+(defn- prime-recently-closed-section
+  "Render the `## Recently Closed` section. Returns `\"\"` when entries is
+   empty or nil so the caller can concatenate unconditionally."
+  [entries]
+  (if (empty? entries)
+    ""
+    (str "## Recently Closed\n\n"
+         (str/join "\n" (map prime-recently-closed-line entries))
+         "\n\n")))
 
 (defn- prime-project-section
   "Render the `## Project` metadata section. Always shows prefix and
@@ -428,38 +462,48 @@ external_refs.")
   "Render the directive markdown primer for the `prime` command:
      1. Directive preamble (or `knot init` directive when no project found)
      2. `## Project` metadata
-     3. `## In Progress` ticket lines (with behavioral nudge)
+     3. `## In Progress` ticket lines (omitted entirely when no tickets are
+        in_progress — empty heading is dead weight on every quiet session)
      4. `## Ready` ticket lines (with behavioral nudge and optional footer)
-     5. `## Commands` cheatsheet
-     6. `## Schema` reference (framed as a fallback for direct edits)
+     5. `## Recently Closed` (omitted when no entries are supplied — gives
+        agents a 'what shipped lately' view without scrolling the archive)
+     6. `## Commands` cheatsheet
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
-  [{:keys [project in-progress ready ready-truncated? ready-remaining]}]
+  [{:keys [project in-progress ready ready-truncated? ready-remaining
+           recently-closed mode]}]
   (let [found? (:found? project)
-        preamble (if found?
-                   prime-preamble-found
-                   prime-preamble-no-project)
+        preamble (cond
+                   (not found?)        prime-preamble-no-project
+                   (= mode "afk")      prime-preamble-afk
+                   :else               prime-preamble-found)
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
-                            " more (run `knot ready`)"))]
+                            " more (run `knot ready`)"))
+        in-progress-block (when (seq in-progress)
+                            (str (prime-section "In Progress"
+                                                (when found? prime-in-progress-nudge)
+                                                in-progress
+                                                nil)
+                                 "\n"))
+        recently-closed-block (prime-recently-closed-section recently-closed)]
     (str preamble "\n\n"
          (prime-project-section project) "\n"
-         (prime-section "In Progress"
-                        (when found? prime-in-progress-nudge)
-                        in-progress
-                        nil) "\n"
+         in-progress-block
          (prime-section "Ready"
                         (when found? prime-ready-nudge)
                         ready
                         ready-footer) "\n"
-         "## Commands\n\n" prime-commands-cheatsheet "\n\n"
-         "## Schema\n\n" prime-schema-cheatsheet "\n")))
+         recently-closed-block
+         "## Commands\n\n" prime-commands-cheatsheet "\n")))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:
    `{id, status, type, priority, mode, assignee, title}`. Body is omitted
    to keep payloads tight; consumers needing the body call `knot show
-   <id> --json`."
+   <id> --json`. When `:prime-stale?` is truthy on the ticket map, adds
+   `\"stale\":true` so JSON consumers can flag forgotten work without
+   re-deriving the threshold."
   [ticket]
   (let [fm (:frontmatter ticket)]
     (cond-> {:id (:id fm)
@@ -470,7 +514,8 @@ external_refs.")
       (:mode fm)     (assoc :mode (:mode fm))
       (:assignee fm) (assoc :assignee (:assignee fm))
       (:updated fm)  (assoc :updated (:updated fm))
-      (:created fm)  (assoc :created (:created fm)))))
+      (:created fm)  (assoc :created (:created fm))
+      (:prime-stale? ticket) (assoc :stale true))))
 
 (defn- jsonify-prime-project
   "Project the project metadata into a JSON-friendly map with snake_case
@@ -483,16 +528,28 @@ external_refs.")
            :archive_count (or archive-count 0)}
     (and name (not (str/blank? name))) (assoc :name name)))
 
+(defn- jsonify-recently-closed
+  "Project a recently-closed entry (already in `{:id :title :closed
+   :summary}` shape) into the snake_case JSON form. Drops `:summary`
+   when absent so the JSON shape stays compact."
+  [{:keys [id title closed summary]}]
+  (cond-> {:id (or id "") :title (or title "")}
+    closed                        (assoc :closed closed)
+    (and summary
+         (not (str/blank? summary))) (assoc :summary summary)))
+
 (defn prime-json
   "Render the actionable subset of prime data as a bare JSON object.
    Keys are snake_case: `project`, `in_progress`, `ready`,
-   `ready_truncated`, `ready_remaining`. The preamble, schema, and
-   command cheatsheet are omitted — JSON consumers are tools that know
-   the schema by definition."
-  [{:keys [project in-progress ready ready-truncated? ready-remaining]}]
+   `ready_truncated`, `ready_remaining`, `recently_closed`. The
+   preamble and command cheatsheet are omitted — JSON consumers are
+   tools that know the schema by definition."
+  [{:keys [project in-progress ready ready-truncated? ready-remaining
+           recently-closed]}]
   (json/generate-string
    {:project          (jsonify-prime-project project)
     :in_progress      (mapv jsonify-prime-ticket in-progress)
     :ready            (mapv jsonify-prime-ticket ready)
     :ready_truncated  (boolean ready-truncated?)
-    :ready_remaining  (or ready-remaining 0)}))
+    :ready_remaining  (or ready-remaining 0)
+    :recently_closed  (mapv jsonify-recently-closed (or recently-closed []))}))

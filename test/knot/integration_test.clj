@@ -946,15 +946,18 @@
         (is (str/includes? err "summary"))))))
 
 (deftest prime-end-to-end-test
-  (testing "prime in a populated project exits 0 and emits the five sections"
+  (testing "prime in a populated project exits 0 and emits Project + Ready + Commands"
     (with-tmp tmp
       (run-knot tmp "create" "Live ticket")
       (let [{:keys [exit out err]} (run-knot tmp "prime")]
         (is (zero? exit) (str "prime err=" err))
         (is (str/includes? out "## Project"))
-        (is (str/includes? out "## In Progress"))
         (is (str/includes? out "## Ready"))
-        (is (str/includes? out "## Schema"))
+        (is (str/includes? out "## Commands"))
+        (is (not (str/includes? out "## Schema"))
+            "schema cheatsheet is retired")
+        (is (not (str/includes? out "## In Progress"))
+            "open-but-not-started ticket should not trigger an In Progress section")
         (is (str/includes? out "Live ticket")))))
 
   (testing "prime --json emits a bare object with the documented snake_case keys"
@@ -982,16 +985,17 @@
         (is (str/includes? out "knot init")
             "preamble points the user at `knot init`"))))
 
-  (testing "prime in an empty Knot project exits 0 with all section headings present"
+  (testing "prime in an empty Knot project exits 0 with Project + Ready headings (no In Progress)"
     (with-tmp tmp
       (run-knot tmp "init")
       (let [{:keys [exit out err]} (run-knot tmp "prime")]
         (is (zero? exit) (str "prime in empty project err=" err))
         (is (str/includes? out "## Project"))
-        (is (str/includes? out "## In Progress"))
-        (is (str/includes? out "## Ready")))))
+        (is (str/includes? out "## Ready"))
+        (is (not (str/includes? out "## In Progress"))
+            "empty project has no in-progress tickets — heading is suppressed"))))
 
-  (testing "prime in an archive-only project exits 0 with empty in-progress/ready sections"
+  (testing "prime in an archive-only project exits 0 with empty ready section and no In Progress"
     (with-tmp tmp
       (let [a-out (run-knot tmp "create" "Will close")
             a-id  (id-from-create-out (:out a-out) "will-close")
@@ -999,13 +1003,14 @@
             {:keys [exit out err]} (run-knot tmp "prime")]
         (is (zero? exit) (str "prime in archive-only project err=" err))
         (is (re-find #"archive: 1" out))
-        (let [ip-start (str/index-of out "## In Progress")
-              rd-start (str/index-of out "## Ready")
-              sc-start (str/index-of out "## Schema")
-              ip-section (subs out ip-start rd-start)
-              rd-section (subs out rd-start sc-start)]
-          (is (not (str/includes? ip-section "Will close"))
-              "closed ticket does not appear in in-progress")
+        (is (not (str/includes? out "## In Progress"))
+            "no in-progress tickets → no In Progress heading")
+        (let [rd-start (str/index-of out "## Ready")
+              ;; Closed tickets surface under Recently Closed, so the
+              ;; Ready slice ends at that heading (or Commands if absent).
+              rd-end   (or (str/index-of out "## Recently Closed")
+                           (str/index-of out "## Commands"))
+              rd-section (subs out rd-start rd-end)]
           (is (not (str/includes? rd-section "Will close"))
               "closed ticket does not appear in ready")))))
 
@@ -1016,8 +1021,8 @@
       (let [{:keys [exit out err]} (run-knot tmp "prime" "--mode" "afk")]
         (is (zero? exit) (str "prime --mode afk err=" err))
         (let [rd-start (str/index-of out "## Ready")
-              sc-start (str/index-of out "## Schema")
-              section  (subs out rd-start sc-start)]
+              cm-start (str/index-of out "## Commands")
+              section  (subs out rd-start cm-start)]
           (is (str/includes? section "Afk job"))
           (is (not (str/includes? section "Hitl job")))))))
 

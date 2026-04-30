@@ -220,3 +220,28 @@
           "all anchors should still be present")
       (is (< notes-pos new-pos other-pos last-pos)
           "order: Notes heading → new note → ## Other → Last."))))
+
+(deftest latest-note-content-test
+  (testing "returns nil when body is nil or has no Notes section"
+    (is (nil? (ticket/latest-note-content nil)))
+    (is (nil? (ticket/latest-note-content "")))
+    (is (nil? (ticket/latest-note-content "## Description\n\nNo notes here.\n"))))
+
+  (testing "returns the content of a single note"
+    (let [body (ticket/append-note "" "2026-04-29T10:00:00Z" "shipped in #482")]
+      (is (= "shipped in #482" (ticket/latest-note-content body)))))
+
+  (testing "returns the content of the most recent note when multiple notes exist"
+    (let [body (-> ""
+                   (ticket/append-note "2026-04-28T10:00:00Z" "first note")
+                   (ticket/append-note "2026-04-29T10:00:00Z" "second note")
+                   (ticket/append-note "2026-04-30T10:00:00Z" "latest note"))]
+      (is (= "latest note" (ticket/latest-note-content body)))))
+
+  (testing "ignores `## ` headings that follow the Notes section"
+    (let [body (str (ticket/append-note "" "2026-04-30T10:00:00Z" "summary text")
+                    "\n## Other\n\nSome other content.\n")]
+      (is (= "summary text" (ticket/latest-note-content body)))))
+
+  (testing "returns nil when the Notes section exists but has no `**iso**` block"
+    (is (nil? (ticket/latest-note-content "## Notes\n\nfree-form text without a stamp.\n")))))

@@ -1,15 +1,17 @@
 ---
 id: kno-01kqdasr0384
 title: 'knot prime ## Schema section is hardcoded — should reflect :statuses (and :modes) from config'
-status: open
+status: closed
 type: bug
 priority: 2
 mode: hitl
 created: '2026-04-29T19:17:35.875652651Z'
-updated: '2026-04-29T19:17:58.427493937Z'
+updated: '2026-04-30T03:15:20.867834031Z'
+closed: '2026-04-30T03:15:20.867834031Z'
 links:
 - kno-01kqdat9xssc
 ---
+
 ## Description
 
 The `## Schema` section in `knot prime` output is rendered from a static string constant, so projects that override `:statuses` (or `:modes`) in `.knot.edn` still see the canonical defaults in the primer.
@@ -30,3 +32,9 @@ The `## Schema` section in `knot prime` output is rendered from a static string 
 4. Update affected tests in `test/knot/output_test.clj` and any integration test that asserts on the schema text.
 
 **Out of scope:** the `## Commands` cheatsheet line about `knot start` and the `start-cmd` hardcoded `in_progress` target — tracked separately.
+
+## Notes
+
+**2026-04-30T03:15:20.867834031Z**
+
+Schema block dropped from prime entirely; agents read .knot.edn or 'knot prime --json' for project schema instead. Removed the hardcoded ## Schema cheatsheet from prime-text along with prime-schema-cheatsheet def in src/knot/output.clj.

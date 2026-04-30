@@ -124,13 +124,30 @@ at command start with a clear message.
 
 ## AI-agent integration
 
-`knot prime` emits a five-section markdown primer summarizing project
-state — preamble, project metadata, in-progress tickets, ready tickets
-(capped at 20 by default), and a schema/command cheatsheet — for
-injection into a fresh AI agent session.
+For best results, configure three layers together so the agent
+recognizes the project, knows current state, and has the canonical
+reference on hand:
+
+1. **Project rules** in `CLAUDE.md` / `AGENTS.md` (~12 lines, always
+   loaded) — names knot as the tracker and forbids hand-editing
+   `.tickets/`.
+2. **SessionStart hook** running `knot prime` — injects live + ready
+   tickets at the start of each session.
+3. **Skill** (`skills/knot/SKILL.md`) — canonical reference, loaded on
+   demand by the agent.
+
+Each layer carries different content because they have different costs
+(per-turn tokens vs. per-session vs. on-demand). Skip any one layer
+and Claude will fall back to reading `.tickets/` files directly, which
+silently drifts from the CLI's invariants.
+
+`knot prime` emits a markdown primer summarizing project state —
+preamble, project metadata, in-progress tickets, ready tickets (capped
+at 20 by default), recently-closed tickets, and a commands cheatsheet
+— for injection into a fresh AI agent session.
 
 ```sh
-knot prime                    # five-section markdown primer
+knot prime                    # markdown primer (project, in-progress, ready, recently-closed, commands)
 knot prime --mode afk         # filter ready section to agent-runnable work
 knot prime --limit 5          # override the default ready cap of 20
 knot prime --json             # bare object: {project, in_progress, ready, ready_truncated, ready_remaining}
@@ -173,6 +190,73 @@ For example, Claude Code users can add this to `~/.claude/settings.json`
 
 For agent-runnable session presets, run `knot prime --mode afk` to
 surface only `mode: afk` ready tickets.
+
+### Project rules (`CLAUDE.md` / `AGENTS.md`)
+
+Add a short block to your project's agent rules file so Claude (or
+another agent) recognizes the tracker on every turn — not just when an
+intent phrase happens to fire the skill. The strongest reason to pay
+the per-turn token cost is to prevent the dominant failure mode:
+Claude reaching for `Read`, `Write`, `Edit`, or `grep` against
+`.tickets/` instead of the CLI.
+
+Recommended snippet (paste into `CLAUDE.md` or `AGENTS.md` at the repo
+root):
+
+```md
+## Issue tracking
+
+This project tracks work with **knot** — markdown tickets under
+`.tickets/` (closed auto-archive to `.tickets/archive/`), config in
+`.knot.edn` at the repo root.
+
+For any ticket-shaped intent ("what's next", "track this", "show me
+<id>", "I'm done", "blocked on X", "any open bugs?"), use the `knot`
+skill — it's the canonical reference. The CLI keeps frontmatter, the
+dep graph, and the archive consistent, and resolves partial IDs across
+live + archive.
+
+**Never read or write `.tickets/` by hand.** No `Read`, `cat`, `grep`,
+`Write`, `Edit`, `sed`, or `mv` against files in there — use `knot
+show` / `knot list --json` / `knot create` / `knot add-note` /
+`knot close` instead. If a knot command behaves unexpectedly, surface
+the bug; don't bypass.
+
+Hosted-tracker prefixes (`GH-`, `ENG-`, `LIN-`, `JIRA-`) point at
+*other* trackers — use the matching tool, not knot.
+```
+
+Why this earns its per-turn tokens: the filesystem markers help the
+agent spot the project even before user intent fires, the listed
+trigger phrases create keyword redundancy with the skill description,
+and the tool-named anti-pattern (`Read`, `Write`, `Edit`, `cat`,
+`grep`, `sed`, `mv`) maps cleanly onto the agent's actual tool palette.
+
+### Skill
+
+A `knot` skill is bundled with this repo at `skills/knot/SKILL.md`. It
+contains the canonical reference (full intent table, lifecycle,
+graph operations, JSON usage, AFK/HITL, partial-ID rules, tool
+mapping). Claude Code loads it on demand when triggers fire — no
+per-turn cost.
+
+To install the skill in your project, copy it to a location your agent
+loads from. For Claude Code, that's typically:
+
+```sh
+mkdir -p .claude/skills
+cp -r /path/to/knot/skills/knot .claude/skills/knot
+```
+
+Or for a global install on your machine:
+
+```sh
+mkdir -p ~/.claude/skills
+cp -r /path/to/knot/skills/knot ~/.claude/skills/knot
+```
+
+The skill is plain markdown; nothing in it is project-specific, so the
+same file works in every knot-tracked project.
 
 ## Philosophy
 

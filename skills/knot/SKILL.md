@@ -1,0 +1,294 @@
+---
+name: knot
+description: Use when working in a knot-tracked project, signaled by `.knot.edn` or `.tickets/` at any ancestor of cwd, ids matching `<prefix>-01<base32>`, or intent like "what's next?", "what's blocked?", "list tickets", "show the backlog", "any pending bugs?", "what's open?", "what's tagged <x>?", "my tickets", "show me <id>", "track this", "open a ticket", "start <id>", "close this", "ship it", "add a note", or an autonomous agent told to pick up unblocked work. Do NOT use for hosted trackers (GitHub Issues, Linear, Jira, Basecamp, Asana, Trello) or for ids prefixed with hosted-tracker shortcodes (`GH-1234`, `ENG-1234`, `LIN-1234`, `JIRA-PROJ-1234`) — those have their own tools.
+---
+
+# knot — file-based CLI ticket tracker
+
+knot stores each ticket as a markdown file with YAML frontmatter under
+`.tickets/`. Closed tickets auto-move to `.tickets/archive/`. Configuration
+lives in `.knot.edn` at the repo root (or any ancestor — knot walks up).
+Verify cwd is inside the project root before running commands; running
+from a parent directory may quietly pick up a different knot project.
+
+If `.knot.edn` and `.tickets/` are both absent and the user wants to start
+tracking work with knot, run `knot init`. Don't init without an explicit
+signal — the user may already use a different tracker.
+
+## The one rule: use the CLI
+
+**Read tickets only via** `knot show` / `knot list` / `knot ready` /
+`knot blocked` / `knot closed` / `knot prime`.
+
+**Write tickets only via** `knot create` / `knot start` / `knot status` /
+`knot close` / `knot reopen` / `knot add-note` / `knot edit` / `knot dep` /
+`knot link`.
+
+Never `cat .tickets/<id>--*.md`, `grep -r ... .tickets/`, `vim .tickets/...`,
+write a new file under `.tickets/` by hand, or `mv` files between
+`.tickets/` and `.tickets/archive/`.
+
+Why this matters:
+
+- `knot` keeps `:updated` and the computed graph consistent on every write.
+  A hand-edit silently drifts.
+- `knot` resolves partial IDs across both live and archive. File globs miss
+  archived tickets entirely.
+- `knot close` routes the file from `.tickets/` to `.tickets/archive/`. A
+  hand-edit that flips `status: closed` leaves the file in the wrong
+  directory and breaks future queries.
+
+If a `knot` command behaves unexpectedly, surface the bug to the user.
+Don't reach for `vim`, `sed`, `cat`, or `mv`. **The CLI is the contract**
+— `.tickets/` is an implementation detail. If knot's surface area can't
+express what you need, that's a knot bug; file it, don't work around it.
+
+### Red flags — STOP
+
+| Rationalization | Reality |
+|---|---|
+| "I'll just cat the file once to verify the close worked." | `knot show <id>` works on archived tickets too. |
+| "I just need to peek at `.knot.edn` for the allowed statuses." | `knot prime --json` exposes the schema. |
+| "knot show failed, let me read the markdown directly." | Surface the bug. The file is not the contract. |
+| "I want to see all tickets at once, `ls .tickets/` is faster." | `knot list --json` is stable and sees archive. `ls` doesn't. |
+| "The user's in a hurry, I'll grep once and move on." | Greppable now, broken later. `knot list --json | jq` instead. |
+| "I'll list everything and scan the TYPE column for bugs." | `knot list --type bug`. Filters exist on every read command — use them. |
+
+### Tool mapping — what to reach for
+
+The rule is easier to internalize at the tool-call level. Before invoking
+one of these against `.tickets/`, switch to the knot equivalent:
+
+| Tempted to use… on `.tickets/` | Use this instead |
+|---|---|
+| `Read` / `cat` / `head` / `tail` | `knot show <id>` |
+| `Grep` / `grep` / `rg` | `knot list --json \| jq …` |
+| `ls` | `knot list` (or `knot list --json`) |
+| `Write` (new file) | `knot create "<title>" -d "..."` |
+| `Edit` (modify file) | `knot add-note <id> "..."` (additive) or `knot edit <id>` (interactive) |
+| `Bash` + `mv` to `archive/` | `knot close <id> --summary "..."` |
+| `Bash` + `mv` from `archive/` | `knot reopen <id>` |
+| `sed -i` to flip `status:` | `knot status <id> <new>` |
+
+### Already primed?
+
+If a `<system-reminder>` from `SessionStart` already injected `knot
+prime` output (look for it near the top of the conversation), don't
+re-run `knot prime`. The state there is current as of session start; for
+fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
+
+## Translating user intent → command
+
+| User says…                                              | You run…                                                     |
+|---------------------------------------------------------|--------------------------------------------------------------|
+| "what's next?" / "what should I pick up?"               | `knot ready`                                                 |
+| "what should an agent work on?"                         | `knot ready --mode afk`                                      |
+| "show me the backlog" / "list tickets"                  | `knot list`                                                  |
+| "any pending bugs?" / "what bugs are open?"             | `knot list --type bug`                                       |
+| "what's afk?" / "what can an agent grab?"               | `knot ready --mode afk` (or `knot list --mode afk`)          |
+| "what's tagged <x>?"                                    | `knot list --tag <x>`                                        |
+| "what's open for <user>?" / "my tickets"                | `knot list --assignee <user>`                                |
+| "what's blocked?"                                       | `knot blocked`                                               |
+| "what did I close recently?"                            | `knot closed --limit 10`                                     |
+| "show me <id>" / "tell me about <id>"                   | `knot show <id>`                                             |
+| "let's start <id>" / "begin <id>"                       | `knot show <id>`, then `knot start <id>`                     |
+| "I'm done" / "shipped" / "close this"                   | `knot close <id> --summary "<what shipped>"`                 |
+| "reopen <id>"                                           | `knot reopen <id>`                                           |
+| "track this as a bug" / "open a ticket for X"           | `knot create "<title>" -t bug …`                             |
+| "note that…" / "FYI mid-task"                           | `knot add-note <id> "…"`                                     |
+| "blocked on <other>"                                    | `knot dep <current> <other>`                                 |
+| "what's blocking <id>?"                                 | `knot dep tree <id>`                                         |
+| "these are related: a, b, c"                            | `knot link <a> <b> <c>`                                      |
+| "scan for cycles"                                       | `knot dep cycle`                                             |
+| "give me a summary of project state"                    | `knot prime`                                                 |
+
+### Filter, don't eyeball
+
+When the user's question targets a *subset* — a type, mode, tag, status,
+or assignee — pass the matching filter rather than running bare `list` /
+`ready` / `blocked` / `closed` and scanning the columns. All four reads
+accept the same filter flags (each repeatable):
+
+```
+--type <type>      --mode <afk|hitl>    --tag <tag>
+--status <status>  --assignee <user>
+```
+
+Combine freely: `knot list --type bug --type chore`, `knot ready --mode
+afk --tag p0`. Visual filtering is error-prone (titles wrap, columns
+shift, archived tickets are absent) and harder for the user to verify.
+Reach for bare `list` only when the user actually wants the full picture.
+
+When the user gives a partial id (`01kqa9`), pass it through verbatim —
+knot resolves it across live + archive. If it's ambiguous, knot prints
+candidates; relay them, don't guess.
+
+## Writing tickets
+
+### Create
+
+`knot create "<title>" [flags]` is the only way to create a ticket. Run
+`knot create --help` for the full flag list. Most-used flags:
+
+- `-t / --type` (default `task`)
+- `-p / --priority` 0 (highest) … 4 (default 2)
+- `-a / --assignee`
+- `--afk` / `--hitl` (default `hitl`)
+- `--tags`, `--parent`, `--external-ref`
+- `-d / --description`, `--design`, `--acceptance` for body sections
+
+Always pass `--description` when there's any context worth saving — a
+title-only ticket forces the next reader to reconstruct intent from
+scratch. Default `--afk` when the work is well-specified and an agent
+could run end-to-end without a human; otherwise leave the `hitl` default.
+
+For multi-line prose flags, use a quoted-delimiter heredoc so `$vars`,
+backticks, and quotes pass through literally:
+
+```sh
+knot create "Title" -t bug -p 1 --description "$(cat <<'EOF'
+body with `code`, $vars, and "quotes" — all literal
+EOF
+)"
+```
+
+`knot add-note <id>` reads stdin natively — pipe directly:
+
+```sh
+knot add-note <id> <<'EOF'
+note body
+EOF
+```
+
+### Lifecycle
+
+```sh
+knot start <id>                                # → in_progress
+knot status <id> <new-status>                  # generic transition
+knot close <id> --summary "shipped in #482"
+knot reopen <id>                               # restore from archive
+```
+
+Always pass `--summary` to `knot close`. The summary becomes a timestamped
+note and is the most useful artifact for "what did we ship recently?"
+later. Skipping it loses information for free.
+
+For projects with custom `:statuses` (e.g. adding `"review"` between
+`in_progress` and `closed`), prefer explicit `knot status <id> <new>` over
+`knot start` / `knot close` so you don't accidentally skip a non-terminal
+stage.
+
+### Notes and editing
+
+```sh
+knot add-note <id> "raced GC under load"      # one-shot, append-only
+knot add-note <id>                            # opens $EDITOR
+knot edit <id>                                # opens whole file in $EDITOR
+```
+
+Prefer `knot add-note` for capturing observations mid-task. Reach for
+`knot edit` only to revise frontmatter or rewrite a body section, and only
+in interactive sessions — in an autonomous run with no terminal, `knot
+edit` will fail. Use `add-note` for additive context instead.
+
+### Graph operations
+
+```sh
+knot dep <from> <to>            # <from> waits on <to>; cycle-checked
+knot dep tree <id>              # ASCII tree; --full to expand dups
+knot dep cycle                  # scan all open tickets
+knot undep <from> <to>
+
+knot link <a> <b> [<c>...]      # symmetric peer link across every pair
+knot unlink <from> <to>
+```
+
+`deps` are directional ("blocks") and honored by `knot ready`. `links`
+are symmetric ("see also"). Use `dep` when one ticket has to wait on
+another; use `link` for "here's context".
+
+## AFK vs HITL: agent-runnable work
+
+`mode` is a peer dimension to status and priority:
+
+- `afk` = an agent can run this alone, no human in the loop
+- `hitl` = needs a human (default for new tickets)
+
+`knot ready --mode afk` is the canonical "what can an agent grab?" query.
+When **you** are the agent and the user has handed you autonomy, run the
+checklist:
+
+- [ ] `knot prime --mode afk` (skip if prime is already in the session)
+- [ ] `knot ready --mode afk --json` to enumerate candidates
+- [ ] `knot show <id>` to confirm scope
+- [ ] `knot start <id>` to claim
+- [ ] `knot add-note <id> "<progress>"` after non-trivial milestones
+- [ ] `knot close <id> --summary "<what landed>"` when shipped
+
+Don't autonomously pick up `hitl` tickets unless the user explicitly
+authorizes that ticket. The mode is the contract.
+
+## JSON for parsing
+
+Every read command accepts `--json` and emits snake_case keys on stdout;
+warnings and errors go to stderr.
+
+```sh
+knot list --json           | jq '.[] | select(.priority <= 1)'
+knot ready --json --mode afk
+knot show <id> --json      | jq -r '.title'
+knot prime --json
+
+# Pick the highest-priority unblocked afk ticket, id only:
+knot ready --json --mode afk | jq -r 'sort_by(.priority) | .[0].id'
+```
+
+For any decision logic, prefer `--json | jq` over parsing tables. Don't
+pipe table output through `awk`/`grep` — column widths shift and titles
+can contain whitespace. `--json` is stable.
+
+## Partial ID resolution
+
+Ids are 12-char ULID suffixes (`01` + 10 base32 chars) prefixed with the
+project shortcode (`kno-`, `app-`, etc.). The first 6–8 chars of the
+suffix are usually unique — `01kqa9sh` resolves day-to-day. knot resolves
+across live + archive. On ambiguity, knot prints candidates; relay them
+to the user instead of guessing.
+
+## Project setup
+
+```sh
+knot init
+```
+
+Run `knot init --help` for prefix / tickets-dir / force overrides.
+`.knot.edn` is plain EDN — `knot prime --json` exposes the project's
+allowed `:statuses`, `:types`, and `:modes` if you need them; reading
+`.knot.edn` directly with the Read tool is also fine when the CLI doesn't
+cover what you need.
+
+## When this skill DOESN'T apply
+
+GitHub Issues, Linear, Jira, Basecamp, Asana, Trello — different tools,
+different skills. Knot tickets live in the working tree as markdown;
+hosted trackers do not. If the user names one of those (or references a
+remote id like `GH-482`, `ENG-1234`), use the tool they named.
+
+## Quick reference
+
+```
+init / prime                           project setup, agent context primer
+list (alias ls) / show                 read live; show one
+ready / blocked / closed               backlog views (--limit, terminal status)
+create                                 new ticket (-t -p -a --tags --afk --hitl
+                                       -d --design --acceptance --parent
+                                       --external-ref)
+start / status / close / reopen        lifecycle (--summary on close)
+add-note / edit                        annotation (edit is interactive)
+dep / undep / dep tree / dep cycle     directional graph; cycle-checked
+link / unlink                          symmetric graph
+```
+
+All commands return `0` on success, `1` on error. Every read command
+supports `--json` and these filter flags (each repeatable): `--type`,
+`--mode`, `--tag`, `--status`, `--assignee`.

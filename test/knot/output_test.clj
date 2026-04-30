@@ -531,7 +531,7 @@
    :ready-truncated? false
    :ready-remaining 0})
 
-(deftest prime-text-five-sections-test
+(deftest prime-text-canonical-sections-test
   (testing "preamble paragraph appears at the top before all section headings"
     (let [out (output/prime-text sample-prime-data)
           first-section (or (str/index-of out "## ") (count out))
@@ -539,15 +539,15 @@
       (is (pos? (count (str/trim preamble)))
           "preamble is a non-empty paragraph above the first heading")))
 
-  (testing "project, in-progress, ready, and schema sections appear in canonical order"
+  (testing "project, in-progress, ready, commands sections appear in canonical order"
     (let [out (output/prime-text sample-prime-data)
           p-i  (str/index-of out "## Project")
           ip-i (str/index-of out "## In Progress")
           rd-i (str/index-of out "## Ready")
-          sc-i (str/index-of out "## Schema")]
-      (is (every? some? [p-i ip-i rd-i sc-i])
+          cm-i (str/index-of out "## Commands")]
+      (is (every? some? [p-i ip-i rd-i cm-i])
           "all four section headings present (preamble has no heading)")
-      (is (< p-i ip-i rd-i sc-i)
+      (is (< p-i ip-i rd-i cm-i)
           "section headings appear in the canonical order"))))
 
 (deftest prime-text-project-metadata-test
@@ -592,7 +592,7 @@
   (testing "ready ticket lines contain id, mode, priority, and title"
     (let [out (output/prime-text sample-prime-data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Schema") (count out))
+          end   (or (str/index-of out "## Commands") (count out))
           section (subs out start end)]
       (is (str/includes? section "kno-rd01"))
       (is (str/includes? section "afk"))
@@ -610,7 +610,7 @@
                                          :created "2026-04-27T09:00:00Z"})])
           out (output/prime-text data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Schema") (count out))
+          end   (or (str/index-of out "## Commands") (count out))
           section (subs out start end)
           ;; The id contains no digits and the title contains no digits,
           ;; so the digit `2` unambiguously locates the priority column.
@@ -629,7 +629,7 @@
   (testing "the ready section emits tickets in the order supplied (caller controls the sort)"
     (let [out (output/prime-text sample-prime-data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Schema") (count out))
+          end   (or (str/index-of out "## Commands") (count out))
           section (subs out start end)
           rd01-i (str/index-of section "kno-rd01")
           rd02-i (str/index-of section "kno-rd02")]
@@ -652,7 +652,7 @@
           "no truncation footer when ready section is not truncated"))))
 
 (deftest prime-text-empty-sections-test
-  (testing "empty in-progress and ready sections still emit their headings (zero-ticket project)"
+  (testing "zero-ticket project: Project + Ready emit headings; empty In Progress is suppressed"
     (let [data {:project {:found? true
                           :prefix "kno"
                           :name nil
@@ -664,9 +664,12 @@
                 :ready-remaining 0}
           out (output/prime-text data)]
       (is (str/includes? out "## Project"))
-      (is (str/includes? out "## In Progress"))
       (is (str/includes? out "## Ready"))
-      (is (str/includes? out "## Schema")))))
+      (is (str/includes? out "## Commands"))
+      (is (not (str/includes? out "## In Progress"))
+          "empty In Progress is dropped — heading-only sections are dead weight")
+      (is (not (str/includes? out "## Schema"))
+          "Schema cheatsheet was hardcoded and has been retired"))))
 
 (deftest prime-text-no-project-test
   (testing "preamble directs the user to `knot init` when no project is found"
@@ -717,24 +720,182 @@
       (is (str/includes? out ".tickets")
           "output references the .tickets/ directory the agent might otherwise touch"))))
 
-(deftest prime-text-commands-before-schema-test
-  (testing "the commands cheatsheet appears before the schema reference in text output"
+(deftest prime-text-afk-mode-preamble-test
+  (testing "with :mode \"afk\", the preamble shifts to the autonomous-agent flow"
+    (let [data (assoc sample-prime-data :mode "afk")
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"(?i)autonomous|agent" preamble)
+          "afk preamble is framed for autonomous agents")
+      (is (re-find #"knot ready --mode afk" preamble)
+          "afk preamble surfaces the candidate-enumeration command")
+      (is (re-find #"knot start" preamble)
+          "afk preamble surfaces the claim command")
+      (is (re-find #"knot close" preamble)
+          "afk preamble surfaces the ship command")
+      (is (not (re-find #"what's next" preamble))
+          "afk preamble drops the human-oriented intent phrases")
+      (is (re-find #"(?i)hitl" preamble)
+          "afk preamble warns against picking up hitl tickets")))
+
+  (testing "without :mode, the preamble keeps the human-oriented intent table"
     (let [out (output/prime-text sample-prime-data)
-          ;; `knot list` is a unique anchor: only the commands cheatsheet
-          ;; lists the bare `list` subcommand line.
-          cmds-i   (str/index-of out "knot list")
-          ;; "Frontmatter keys" only appears in the schema reference.
-          schema-i (str/index-of out "Frontmatter keys")]
-      (is (some? cmds-i)   "commands cheatsheet present")
-      (is (some? schema-i) "schema reference present")
-      (is (< cmds-i schema-i)
-          "commands cheatsheet appears before the schema reference"))))
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"what's next" preamble)
+          "default preamble retains the human intent phrases")))
+
+  (testing "with :mode \"hitl\", the human-oriented preamble is preserved"
+    (let [data (assoc sample-prime-data :mode "hitl")
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"what's next" preamble)
+          "hitl mode is the human default — no shift to agent flow"))))
+
+(deftest prime-text-mentions-skill-test
+  (testing "preamble mentions the `knot` skill so non-CC agents discover the canonical doc"
+    (let [out (output/prime-text sample-prime-data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"(?i)skill" preamble)
+          "preamble references the skill")
+      (is (re-find #"(?i)knot.*skill|skill.*knot" preamble)
+          "the skill mention is anchored to `knot`, not just any skill"))))
+
+(deftest prime-text-stale-in-progress-flag-test
+  (testing "in-progress entries carrying :prime-stale? render with a [stale] prefix"
+    (let [stale-ticket  (-> (mk-prime-ticket {:id "kno-stale" :status "in_progress"
+                                              :mode "afk" :priority 1
+                                              :title "Stalled work"
+                                              :updated "2026-04-01T10:00:00Z"})
+                            (assoc :prime-stale? true))
+          fresh-ticket  (mk-prime-ticket {:id "kno-fresh" :status "in_progress"
+                                          :mode "hitl" :priority 2
+                                          :title "Active work"
+                                          :updated "2026-04-29T10:00:00Z"})
+          data (assoc sample-prime-data :in-progress [stale-ticket fresh-ticket])
+          out  (output/prime-text data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          section  (subs out ip-start ip-end)]
+      (is (re-find #"\[stale\]\s+kno-stale" section)
+          "stalled ticket line is prefixed with [stale]")
+      (is (not (re-find #"\[stale\]\s+kno-fresh" section))
+          "fresh ticket line is not prefixed")))
+
+  (testing "the [stale] prefix is omitted when :prime-stale? is absent or false"
+    (let [t1 (mk-prime-ticket {:id "kno-a" :status "in_progress"
+                               :mode "afk" :priority 1 :title "Alpha"
+                               :updated "2026-04-29T10:00:00Z"})
+          t2 (-> t1
+                 (assoc :prime-stale? false)
+                 (assoc-in [:frontmatter :id] "kno-b")
+                 (assoc-in [:frontmatter :title] "Beta"))
+          data (assoc sample-prime-data :in-progress [t1 t2])
+          out  (output/prime-text data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          section  (subs out ip-start ip-end)]
+      (is (not (str/includes? section "[stale]"))
+          "no prefix when the flag is absent or false"))))
+
+(deftest prime-json-stale-flag-test
+  (testing "in_progress entries carrying :prime-stale? get a \"stale\":true field"
+    (let [stale-ticket (-> (mk-prime-ticket {:id "kno-stale" :status "in_progress"
+                                             :mode "afk" :priority 1
+                                             :title "Stalled work"
+                                             :updated "2026-04-01T10:00:00Z"})
+                           (assoc :prime-stale? true))
+          fresh-ticket (mk-prime-ticket {:id "kno-fresh" :status "in_progress"
+                                         :mode "hitl" :priority 2
+                                         :title "Active"
+                                         :updated "2026-04-29T10:00:00Z"})
+          data (assoc sample-prime-data :in-progress [stale-ticket fresh-ticket])
+          out  (output/prime-json data)]
+      (is (str/includes? out "\"id\":\"kno-stale\""))
+      (is (re-find #"\"id\":\"kno-stale\"[^}]*\"stale\":true" out)
+          "stale ticket carries \"stale\":true")
+      (is (not (re-find #"\"id\":\"kno-fresh\"[^}]*\"stale\":" out))
+          "fresh ticket has no \"stale\" key (omitted to keep payload tight)"))))
+
+(deftest prime-text-recently-closed-section-test
+  (testing "## Recently Closed heading appears between Ready and Commands when entries exist"
+    (let [data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-cl01"
+                        :title "Shipped feature X"
+                        :closed "2026-04-29T10:00:00Z"
+                        :summary "shipped in #482"}])
+          out (output/prime-text data)
+          rd-i (str/index-of out "## Ready")
+          rc-i (str/index-of out "## Recently Closed")
+          cm-i (str/index-of out "## Commands")]
+      (is (every? some? [rd-i rc-i cm-i]))
+      (is (< rd-i rc-i cm-i)
+          "Recently Closed appears between Ready and Commands")))
+
+  (testing "each entry surfaces id and title"
+    (let [data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-aaa" :title "Alpha shipped" :closed "2026-04-29T10:00:00Z"}
+                       {:id "kno-bbb" :title "Beta shipped"  :closed "2026-04-28T10:00:00Z"}])
+          out (output/prime-text data)
+          rc-start (str/index-of out "## Recently Closed")
+          cm-start (str/index-of out "## Commands")
+          section  (subs out rc-start cm-start)]
+      (is (str/includes? section "kno-aaa"))
+      (is (str/includes? section "Alpha shipped"))
+      (is (str/includes? section "kno-bbb"))
+      (is (str/includes? section "Beta shipped"))))
+
+  (testing "entries with a :summary surface the summary text in the section"
+    (let [data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-aaa" :title "Alpha" :closed "2026-04-29T10:00:00Z"
+                        :summary "shipped in PR #482"}])
+          out (output/prime-text data)
+          rc-start (str/index-of out "## Recently Closed")
+          cm-start (str/index-of out "## Commands")
+          section  (subs out rc-start cm-start)]
+      (is (str/includes? section "shipped in PR #482"))))
+
+  (testing "the section is omitted entirely when :recently-closed is empty"
+    (let [data (assoc sample-prime-data :recently-closed [])
+          out (output/prime-text data)]
+      (is (not (str/includes? out "## Recently Closed"))
+          "no closes → no heading")))
+
+  (testing "the section is omitted when :recently-closed is absent (backwards compat)"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (not (str/includes? out "## Recently Closed"))
+          "callers that don't supply :recently-closed get the prior behavior"))))
+
+(deftest prime-text-commands-cheatsheet-trim-test
+  (testing "Commands cheatsheet covers the 7 most-used lifecycle/read commands"
+    (let [out      (output/prime-text sample-prime-data)
+          start    (str/index-of out "## Commands")
+          section  (subs out start (count out))]
+      (doseq [cmd ["knot list" "knot ready" "knot show" "knot create"
+                   "knot start" "knot close" "knot add-note"]]
+        (is (str/includes? section cmd)
+            (str cmd " stays in the prime cheatsheet — it's a high-frequency op")))))
+
+  (testing "graph commands are NOT in the prime cheatsheet — they live in the skill"
+    (let [out      (output/prime-text sample-prime-data)
+          start    (str/index-of out "## Commands")
+          section  (subs out start (count out))]
+      (is (not (re-find #"(?m)^knot dep\b" section))
+          "`knot dep` belongs in the skill, not the per-session primer")
+      (is (not (re-find #"(?m)^knot link\b" section))
+          "`knot link` belongs in the skill, not the per-session primer"))))
 
 (deftest prime-text-close-shows-summary-flag-test
   (testing "Commands cheatsheet documents --summary on the close line, not buried in the user-says mapping"
     (let [out      (output/prime-text sample-prime-data)
           start    (str/index-of out "## Commands")
-          end      (str/index-of out "## Schema")
+          end      (count out)
           section  (subs out start end)
           close-line (some (fn [l] (when (re-find #"^knot close\b" l) l))
                            (str/split-lines section))]

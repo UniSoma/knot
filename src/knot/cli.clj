@@ -573,17 +573,63 @@
       (output/ls-table result (select-keys opts [:tty? :color? :width])))))
 
 (def ^:private prime-default-limit 20)
+(def ^:private prime-recently-closed-limit 3)
+(def ^:private prime-stale-days 14)
+(def ^:private millis-per-day 86400000)
+
+(defn- parse-instant-ms
+  "Parse an ISO 8601 timestamp string to epoch millis. Returns nil for
+   nil/blank/unparseable input so the staleness check degrades silently
+   on malformed timestamps rather than crashing prime."
+  [iso]
+  (when (and (string? iso) (not (str/blank? iso)))
+    (try
+      (.toEpochMilli (Instant/parse iso))
+      (catch Exception _ nil))))
+
+(defn- stale-in-progress?
+  "True when an in-progress ticket's `:updated` is `prime-stale-days` or
+   more older than `now-iso`. Returns false on any nil/unparseable input
+   so unmigrated tickets degrade gracefully."
+  [ticket now-iso]
+  (let [updated (get-in ticket [:frontmatter :updated])
+        a (parse-instant-ms updated)
+        b (parse-instant-ms now-iso)]
+    (boolean
+     (when (and a b)
+       (>= (- b a) (* prime-stale-days millis-per-day))))))
+
+(defn- recently-closed-tickets
+  "Project the top-N most recently closed tickets into the compact shape
+   prime renders. Filters by terminal status, sorts by `:closed`
+   descending, and extracts the latest body note as `:summary` (typically
+   the close --summary). Tickets without `:closed` sort last."
+  [tickets terminal-statuses]
+  (->> tickets
+       (filter (partial closed? terminal-statuses))
+       (sort by-closed-desc)
+       (take prime-recently-closed-limit)
+       (mapv (fn [t]
+               (let [fm (:frontmatter t)]
+                 {:id      (:id fm)
+                  :title   (or (:title fm) "")
+                  :closed  (:closed fm)
+                  :summary (ticket/latest-note-content (:body t))})))))
 
 (defn- in-progress-tickets
   "Pick non-terminal tickets with status `in_progress` and sort by
    `:updated` descending so the most-recently-touched work surfaces
-   first. Tickets without `:updated` sort last in stable input order."
-  [tickets]
+   first. Tickets without `:updated` sort last in stable input order.
+   Each returned map carries `:prime-stale?` — true when `:updated` is
+   `prime-stale-days` or more older than `now-iso`. The flag drives the
+   `[stale]` prefix in the renderer and the `\"stale\":true` field in
+   the JSON projection."
+  [tickets now-iso]
   (->> tickets
        (filter (fn [t] (= "in_progress" (get-in t [:frontmatter :status]))))
        (sort-by (fn [t] (or (get-in t [:frontmatter :updated]) ""))
                 #(compare %2 %1))
-       vec))
+       (mapv (fn [t] (assoc t :prime-stale? (stale-in-progress? t now-iso))))))
 
 (defn- count-archive
   "Count tickets whose status is in `terminal-statuses`."
@@ -629,11 +675,11 @@
         (output/prime-json data)
         (output/prime-text data)))
     (let [{:keys [project-root tickets-dir terminal-statuses
-                  prefix project-name]} (resolve-ctx ctx)
+                  prefix project-name now]} (resolve-ctx ctx)
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
-          in-progress* (in-progress-tickets all)
+          in-progress* (in-progress-tickets all now)
           ready*       (query/ready all terminal-statuses)
           mode-filter  (when mode {:mode #{mode}})
           ready-filtered (query/filter-tickets ready* (or mode-filter {}))
@@ -642,6 +688,7 @@
           ready-total  (count ready-filtered)
           truncated?   (> ready-total cap)
           remaining    (if truncated? (- ready-total cap) 0)
+          recently-closed* (recently-closed-tickets all terminal-statuses)
           data         {:project          {:found?        true
                                            :prefix        prefix
                                            :name          project-name
@@ -650,7 +697,9 @@
                         :in-progress      in-progress*
                         :ready            ready-shown
                         :ready-truncated? truncated?
-                        :ready-remaining  remaining}]
+                        :ready-remaining  remaining
+                        :recently-closed  recently-closed*
+                        :mode             mode}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))

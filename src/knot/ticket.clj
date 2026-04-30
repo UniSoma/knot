@@ -148,6 +148,27 @@
             sep  (if (str/blank? head) "" "\n\n")]
         (str head sep notes-heading "\n\n" block "\n")))))
 
+(defn latest-note-content
+  "Extract the content of the most recent note under `## Notes` in `body`.
+   Returns nil when there is no `## Notes` section or no `**<iso>**`
+   block within it. Notes are stored as `**<iso>**\\n\\n<content>` and
+   appended in chronological order, so the last block is the newest.
+   The returned string is whitespace-trimmed."
+  [body]
+  (when-let [{:keys [start end]} (notes-region (or body ""))]
+    (let [section (subs body start end)
+          ;; Find every `**<iso>**` line and capture its index. The last
+          ;; match's content runs from after that line to the section end.
+          m       (re-matcher #"(?m)^\*\*([^*\n]+)\*\*\s*$" section)
+          last-after (loop [last-end nil]
+                       (if (.find m)
+                         (recur (.end m))
+                         last-end))]
+      (when last-after
+        (let [content (subs section last-after)
+              trimmed (str/trim content)]
+          (when (seq trimmed) trimmed))))))
+
 (def ^:private prefix-fallback
   "Literal default used when a directory name yields no alphanumeric content
    (empty, whitespace-only, or pure punctuation)."
