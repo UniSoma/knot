@@ -1,9 +1,6 @@
+pre_start: "bbin install ."
+
 mounts:
   - $HOME/.m2
   - $HOME/.clojure
   - $HOME/.cache
-
-detection:
-  allowlist:
-    - { path: ".envrc", reason: "devenv support" }
-    - { path: "[?]/.cache/**", reason: "clojure-lsp cache in git worktree" }
