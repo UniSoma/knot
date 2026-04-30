@@ -2025,7 +2025,32 @@ Restart the daemon.
                   (assoc (prime-ctx tmp) :now "2026-05-01T10:00:00Z")
                   {:json? true})]
         (is (str/includes? out "\"stale\":true")
-            "JSON in_progress entry carries stale:true for old tickets")))))
+            "JSON in_progress entry carries stale:true for old tickets"))))
+
+  (testing "exactly 14 days old is stale (boundary lock)"
+    (with-tmp tmp
+      (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
+            a (cli/create-cmd c-old {:title "Edge case"})
+            a-id (id-of-created a "edge-case")
+            _    (cli/start-cmd c-old {:id a-id})
+            ;; 14 days exactly after the start (which set :updated).
+            out  (cli/prime-cmd
+                  (assoc (prime-ctx tmp) :now "2026-04-15T10:00:00Z")
+                  {})]
+        (is (str/includes? out "[stale]")
+            "14d threshold is inclusive — at exactly 14 days a ticket is stale"))))
+
+  (testing "13 days 23 hours is NOT stale (boundary lock)"
+    (with-tmp tmp
+      (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
+            a (cli/create-cmd c-old {:title "Just under threshold"})
+            a-id (id-of-created a "just-under-threshold")
+            _    (cli/start-cmd c-old {:id a-id})
+            out  (cli/prime-cmd
+                  (assoc (prime-ctx tmp) :now "2026-04-15T09:00:00Z")
+                  {})]
+        (is (not (str/includes? out "[stale]"))
+            "13d 23h is NOT stale — locks the boundary against future drift")))))
 
 (deftest prime-cmd-recently-closed-test
   (testing "closing a ticket with --summary surfaces both title and summary in Recently Closed"
@@ -2081,7 +2106,28 @@ Restart the daemon.
             out  (cli/prime-cmd (prime-ctx tmp) {:json? true})]
         (is (str/includes? out "\"recently_closed\""))
         (is (str/includes? out "\"summary\":\"wrapped up\""))
-        (is (str/includes? out "\"title\":\"Done\""))))))
+        (is (str/includes? out "\"title\":\"Done\"")))))
+
+  (testing "Recently Closed surfaces the close --summary, not earlier progress notes"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Built it"})
+            a-id (id-of-created a "built-it")
+            _    (cli/start-cmd c {:id a-id})
+            _    (cli/add-note-cmd
+                  (assoc c :now "2026-04-29T10:00:00Z")
+                  {:id a-id :text "halfway there"})
+            _    (cli/close-cmd
+                  (assoc c :now "2026-04-30T10:00:00Z")
+                  {:id a-id :summary "shipped in #999"})
+            out  (cli/prime-cmd (prime-ctx tmp) {})
+            rc-start (str/index-of out "## Recently Closed")
+            cm-start (str/index-of out "## Commands")
+            section  (subs out rc-start cm-start)]
+        (is (str/includes? section "shipped in #999")
+            "the latest note (close summary) surfaces")
+        (is (not (str/includes? section "halfway there"))
+            "earlier progress notes are not surfaced as the summary")))))
 
 (deftest prime-cmd-omits-schema-section-test
   (testing "prime text never emits the legacy ## Schema cheatsheet"

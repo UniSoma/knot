@@ -150,7 +150,11 @@ at 20 by default), recently-closed tickets, and a commands cheatsheet
 knot prime                    # markdown primer (project, in-progress, ready, recently-closed, commands)
 knot prime --mode afk         # filter ready section to agent-runnable work
 knot prime --limit 5          # override the default ready cap of 20
-knot prime --json             # bare object: {project, in_progress, ready, ready_truncated, ready_remaining}
+knot prime --json             # bare object with snake_case keys:
+                              #   project, in_progress, ready, ready_truncated,
+                              #   ready_remaining, recently_closed
+                              # JSON consumers should tolerate unknown keys —
+                              # new ones may be added in future minor versions.
 ```
 
 `knot prime` always exits 0, including when run from a directory with
@@ -244,15 +248,16 @@ To install the skill in your project, copy it to a location your agent
 loads from. For Claude Code, that's typically:
 
 ```sh
+# Replace KNOT_REPO with the path to your local clone of UniSoma/knot.
 mkdir -p .claude/skills
-cp -r /path/to/knot/skills/knot .claude/skills/knot
+cp -r "$KNOT_REPO/skills/knot" .claude/skills/knot
 ```
 
 Or for a global install on your machine:
 
 ```sh
 mkdir -p ~/.claude/skills
-cp -r /path/to/knot/skills/knot ~/.claude/skills/knot
+cp -r "$KNOT_REPO/skills/knot" ~/.claude/skills/knot
 ```
 
 The skill is plain markdown; nothing in it is project-specific, so the

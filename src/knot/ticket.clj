@@ -153,13 +153,16 @@
    Returns nil when there is no `## Notes` section or no `**<iso>**`
    block within it. Notes are stored as `**<iso>**\\n\\n<content>` and
    appended in chronological order, so the last block is the newest.
-   The returned string is whitespace-trimmed."
+   The returned string is whitespace-trimmed.
+
+   The header regex requires an ISO-8601 timestamp (`YYYY-MM-DDT...`) so
+   that standalone bold lines inside note content (e.g. `**Caveat:**`,
+   `**TODO:**`) are not misread as note headers — the append-note format
+   always emits an ISO timestamp, so this matches the actual contract."
   [body]
   (when-let [{:keys [start end]} (notes-region (or body ""))]
     (let [section (subs body start end)
-          ;; Find every `**<iso>**` line and capture its index. The last
-          ;; match's content runs from after that line to the section end.
-          m       (re-matcher #"(?m)^\*\*([^*\n]+)\*\*\s*$" section)
+          m       (re-matcher #"(?m)^\*\*(\d{4}-\d{2}-\d{2}T[^*\n]+)\*\*\s*$" section)
           last-after (loop [last-end nil]
                        (if (.find m)
                          (recur (.end m))

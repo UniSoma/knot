@@ -473,10 +473,15 @@ knot add-note <id> [text]        append a timestamped note")
   [{:keys [project in-progress ready ready-truncated? ready-remaining
            recently-closed mode]}]
   (let [found? (:found? project)
+        ;; Coerce mode through name+lower-case+trim so keywords (`:afk`),
+        ;; uppercase (`"AFK"`), and stray whitespace all reach the same
+        ;; preamble. Stringly-typed dispatch is a future trap otherwise.
+        mode-norm (some-> mode (cond-> (keyword? mode) name)
+                          str str/trim str/lower-case)
         preamble (cond
-                   (not found?)        prime-preamble-no-project
-                   (= mode "afk")      prime-preamble-afk
-                   :else               prime-preamble-found)
+                   (not found?)            prime-preamble-no-project
+                   (= mode-norm "afk")     prime-preamble-afk
+                   :else                   prime-preamble-found)
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
                             " more (run `knot ready`)"))

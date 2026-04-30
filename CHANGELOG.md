@@ -14,11 +14,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `knot prime` emits a new `## Recently Closed` section showing the last 3
+  closed tickets with their close `--summary` (extracted as the most recent
+  `## Notes` block from the ticket body).
+- `knot prime --mode afk` swaps the human-oriented preamble for an
+  autonomous-agent flow checklist (claim → work → add-note → close).
+- In-progress tickets older than 14 days are flagged with a `[stale]` prefix
+  in the text primer and a `"stale": true` field on JSON `in_progress`
+  entries.
+- `knot prime --json` output gains a top-level `recently_closed` array.
+  JSON consumers should tolerate unknown keys; new fields may be added in
+  future minor versions.
+- `knot.ticket/latest-note-content` extracts the most recent timestamped
+  note from a ticket body (used by Recently Closed).
+- A bundled `knot` skill at `skills/knot/SKILL.md` ships in the repo for
+  agent platforms that load skill files. README documents a recommended
+  three-layer setup (project rules + SessionStart hook + skill).
+
 ### Changed
 
 - The `ls` command is now an alias for the canonical `list`. `knot list` and
   `knot ls` are equivalent; help renders `list` with `ls` listed under the new
   ALIASES block.
+- `knot prime` suppresses the `## In Progress` heading entirely on quiet
+  projects (no in-progress tickets) — empty heading-only sections were
+  dead weight on every session.
+- `knot prime` Commands cheatsheet trimmed from 9 lines to 7 (`knot dep`
+  and `knot dep tree` moved to the bundled skill).
+- `knot prime` preamble first line now references the `knot` skill so
+  non-Claude agents discover the canonical reference.
+
+### Removed
+
+- `knot prime` no longer emits the `## Schema` cheatsheet. Agents reading
+  the project schema should consult `.knot.edn` directly or
+  `knot prime --json` for the actionable subset. (Closes
+  [kno-01kqdasr0384](.tickets/archive/kno-01kqdasr0384--knot-prime-schema-section-is-hardcoded-should.md).)
 
 ## [0.1.0] - 2026-04-29
 

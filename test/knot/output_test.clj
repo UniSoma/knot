@@ -752,7 +752,16 @@
           first-section (str/index-of out "## ")
           preamble (subs out 0 first-section)]
       (is (re-find #"what's next" preamble)
-          "hitl mode is the human default — no shift to agent flow"))))
+          "hitl mode is the human default — no shift to agent flow")))
+
+  (testing "mode dispatch tolerates keyword, uppercase, and whitespace"
+    (doseq [m [:afk "AFK" "  afk  " "Afk"]]
+      (let [data (assoc sample-prime-data :mode m)
+            out  (output/prime-text data)
+            first-section (str/index-of out "## ")
+            preamble (subs out 0 first-section)]
+        (is (re-find #"(?i)autonomous" preamble)
+            (str "mode " (pr-str m) " should still pick the afk preamble"))))))
 
 (deftest prime-text-mentions-skill-test
   (testing "preamble mentions the `knot` skill so non-CC agents discover the canonical doc"

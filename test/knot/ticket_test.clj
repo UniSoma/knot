@@ -244,4 +244,17 @@
       (is (= "summary text" (ticket/latest-note-content body)))))
 
   (testing "returns nil when the Notes section exists but has no `**iso**` block"
-    (is (nil? (ticket/latest-note-content "## Notes\n\nfree-form text without a stamp.\n")))))
+    (is (nil? (ticket/latest-note-content "## Notes\n\nfree-form text without a stamp.\n"))))
+
+  (testing "bold-only lines inside note content (e.g. **Caveat:**) are NOT mistaken for note headers"
+    (let [body (ticket/append-note ""
+                                   "2026-04-30T10:00:00Z"
+                                   "Closed because it duplicates kno-xyz.\n\n**Caveat:**\n\nWatch the rollback case.")]
+      (is (= "Closed because it duplicates kno-xyz.\n\n**Caveat:**\n\nWatch the rollback case."
+             (ticket/latest-note-content body))
+          "the timestamp regex must require ISO shape, not just any **...** line")))
+
+  (testing "only ISO-8601 timestamps qualify as note headers"
+    (let [body "## Notes\n\n**Not a date**\n\nbody for the bogus header\n\n**2026-04-30T10:00:00Z**\n\nreal close summary\n"]
+      (is (= "real close summary" (ticket/latest-note-content body))
+          "non-ISO bold strings are ignored; the real timestamp wins"))))
