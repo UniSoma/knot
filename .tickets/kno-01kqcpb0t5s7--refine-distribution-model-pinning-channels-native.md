@@ -6,10 +6,13 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T13:20:01.861232445Z'
-updated: '2026-04-29T14:26:02.746799096Z'
+updated: '2026-04-30T04:07:45.935297640Z'
 deps:
 - kno-01kqcpw6bzn6
+links:
+- kno-01kqe94cgmd2
 ---
+
 ## Description
 
 Once v0.0.1 ships (tracking main via bbin), the install story will need to evolve as knot picks up users beyond the author. This ticket captures the decision space.
