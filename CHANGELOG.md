@@ -29,9 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   future minor versions.
 - `knot.ticket/latest-note-content` extracts the most recent timestamped
   note from a ticket body (used by Recently Closed).
-- A bundled `knot` skill at `skills/knot/SKILL.md` ships in the repo for
-  agent platforms that load skill files. README documents a recommended
-  three-layer setup (project rules + SessionStart hook + skill).
+- A bundled `knot` skill at `.claude/skills/knot/SKILL.md` ships in the
+  repo for agent platforms that load skill files. README documents the
+  recommended three-layer setup (project rules + SessionStart hook +
+  skill).
 
 ### Changed
 

@@ -133,8 +133,8 @@ reference on hand:
    `.tickets/`.
 2. **SessionStart hook** running `knot prime` — injects live + ready
    tickets at the start of each session.
-3. **Skill** (`skills/knot/SKILL.md`) — canonical reference, loaded on
-   demand by the agent.
+3. **Skill** (`.claude/skills/knot/SKILL.md`) — canonical reference,
+   loaded on demand by the agent.
 
 Each layer carries different content because they have different costs
 (per-turn tokens vs. per-session vs. on-demand). Skip any one layer
@@ -238,11 +238,11 @@ and the tool-named anti-pattern (`Read`, `Write`, `Edit`, `cat`,
 
 ### Skill
 
-A `knot` skill is bundled with this repo at `skills/knot/SKILL.md`. It
-contains the canonical reference (full intent table, lifecycle,
-graph operations, JSON usage, AFK/HITL, partial-ID rules, tool
-mapping). Claude Code loads it on demand when triggers fire — no
-per-turn cost.
+A `knot` skill is bundled with this repo at
+`.claude/skills/knot/SKILL.md`. It contains the canonical reference
+(full intent table, lifecycle, graph operations, JSON usage, AFK/HITL,
+partial-ID rules, tool mapping). Claude Code loads it on demand when
+triggers fire — no per-turn cost.
 
 To install the skill in your project, copy it to a location your agent
 loads from. For Claude Code, that's typically:
@@ -250,14 +250,14 @@ loads from. For Claude Code, that's typically:
 ```sh
 # Replace KNOT_REPO with the path to your local clone of UniSoma/knot.
 mkdir -p .claude/skills
-cp -r "$KNOT_REPO/skills/knot" .claude/skills/knot
+cp -r "$KNOT_REPO/.claude/skills/knot" .claude/skills/knot
 ```
 
 Or for a global install on your machine:
 
 ```sh
 mkdir -p ~/.claude/skills
-cp -r "$KNOT_REPO/skills/knot" ~/.claude/skills/knot
+cp -r "$KNOT_REPO/.claude/skills/knot" ~/.claude/skills/knot
 ```
 
 The skill is plain markdown; nothing in it is project-specific, so the
