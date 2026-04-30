@@ -1,0 +1,40 @@
+;; Knot project config. All keys are optional; sensible defaults apply.
+;; See the project README for the full schema.
+{
+ ;; Where ticket files live, relative to this file.
+ :tickets-dir ".tickets"
+
+ ;; Project shortcode prefixed onto every generated ticket id.
+ :prefix "kno"           ; auto-derived from project dir name when omitted
+
+ ;; Optional human-readable project name shown in `knot prime`.
+ :project-name "Knot"
+
+ ;; Default assignee on `knot create`. When this key is set here,
+ ;; it wins over git config user.name. Set to nil to opt out of
+ ;; auto-assignment entirely (no assignee unless --assignee is passed).
+ :default-assignee nil 
+
+ ;; Default ticket type on `knot create` (must be in :types below).
+ :default-type "task"
+
+ ;; Default priority on `knot create` — integer 0..4 (0 = highest).
+ :default-priority 2
+
+ ;; Status workflow, in display order. Edit to add e.g. "review".
+ :statuses ["open" "in_progress" "closed"]
+
+ ;; Statuses that are terminal — files of tickets in these statuses
+ ;; auto-move to <tickets-dir>/archive/.
+ :terminal-statuses #{"closed"}
+
+ ;; Allowed values for the :type field on each ticket.
+ :types ["bug" "feature" "task" "epic" "chore"]
+
+ ;; Allowed values for the :mode field — `afk` is agent-runnable,
+ ;; `hitl` requires a human.
+ :modes ["afk" "hitl"]
+
+ ;; Default mode on `knot create` (must be in :modes above).
+ :default-mode "hitl"
+}
