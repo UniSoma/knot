@@ -476,7 +476,8 @@ before issuing other Knot commands.")
      5. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
      6. `## Commands` cheatsheet (the `knot start` line names
-        `:active-status` from data, falling back to `\"in_progress\"`)
+        `:active-status`, which the caller threads through from config —
+        the no-project branch in `prime-cmd` substitutes `(config/defaults)`)
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
@@ -510,7 +511,7 @@ before issuing other Knot commands.")
                         ready-footer) "\n"
          recently-closed-block
          "## Commands\n\n"
-         (prime-commands-cheatsheet (or active-status "in_progress")) "\n")))
+         (prime-commands-cheatsheet active-status) "\n")))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:

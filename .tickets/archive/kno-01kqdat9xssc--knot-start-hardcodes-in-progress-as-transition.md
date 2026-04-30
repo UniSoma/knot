@@ -6,10 +6,11 @@ type: bug
 priority: 1
 mode: hitl
 created: '2026-04-29T19:17:54.233556456Z'
-updated: '2026-04-30T20:44:54.870433523Z'
+updated: '2026-04-30T21:03:14.340121261Z'
 closed: '2026-04-30T20:44:54.870433523Z'
 links:
 - kno-01kqdasr0384
+- kno-01kqg37mssy3
 ---
 
 ## Description

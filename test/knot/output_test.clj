@@ -914,12 +914,17 @@
       (is (not (str/includes? start-line "in_progress"))
           "literal in_progress is gone when active-status is something else")))
 
-  (testing "Commands cheatsheet falls back to in_progress when :active-status absent (no-project case)"
+  (testing "no-project caller (prime-cmd) threads :active-status from (config/defaults) so the cheatsheet renders in_progress"
+    ;; The renderer requires :active-status in the data arg — the
+    ;; no-project branch in prime-cmd substitutes (config/defaults) so
+    ;; the cheatsheet still renders. This test mirrors what that caller
+    ;; does, locking in the contract that the caller owns the fallback.
     (let [data {:project {:found? false}
                 :in-progress []
                 :ready []
                 :ready-truncated? false
-                :ready-remaining 0}
+                :ready-remaining 0
+                :active-status "in_progress"}
           out (output/prime-text data)
           start (str/index-of out "## Commands")
           section (subs out start (count out))
@@ -927,7 +932,7 @@
                            (str/split-lines section))]
       (is (some? start-line))
       (is (str/includes? start-line "transition to in_progress")
-          "no-project default fallback renders the in_progress literal"))))
+          "default :active-status from (config/defaults) yields the in_progress literal"))))
 
 (deftest prime-text-close-shows-summary-flag-test
   (testing "Commands cheatsheet documents --summary on the close line, not buried in the user-says mapping"

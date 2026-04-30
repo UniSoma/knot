@@ -95,7 +95,7 @@
                            "strings, all present in :statuses") {})))
     (when-not (and (non-blank-string? active-status)
                    ((set statuses) active-status)
-                   (not (contains? (or terminal-statuses #{}) active-status)))
+                   (not (contains? terminal-statuses active-status)))
       (throw (ex-info
               (str ".knot.edn :active-status " (pr-str active-status)
                    " must be one of :statuses " (pr-str (vec statuses))

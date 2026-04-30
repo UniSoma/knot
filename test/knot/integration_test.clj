@@ -1128,19 +1128,25 @@
           (is (str/includes? out "transition to active")
               "Commands cheatsheet `knot start` line names the active status")))))
 
-  (testing "custom :statuses without :active-status fails fast with a strict-validation error"
+  (testing "custom :statuses without :active-status fails fast with a strict-validation error on start"
     (with-tmp tmp
-      (fs/create-dirs (fs/path tmp ".tickets"))
-      ;; Override :statuses to a list that does NOT contain "in_progress",
-      ;; without supplying :active-status. The default :active-status
-      ;; (in_progress) no longer satisfies the validator.
-      (spit (str (fs/path tmp ".knot.edn"))
-            (pr-str {:statuses          ["open" "active" "closed"]
-                     :terminal-statuses #{"closed"}}))
-      (let [{:keys [exit err]} (run-knot tmp "create" "X")]
-        (is (= 1 exit) "config validation should fail before write")
-        (is (str/includes? err "active-status")
-            "stderr names :active-status as the offending key"))))
+      ;; Set up a valid config and create a ticket under it, so we can
+      ;; later run `start` against a real id once the config is broken.
+      (run-knot tmp "init")
+      (let [a-out (run-knot tmp "create" "Will be started")
+            a-id  (id-from-create-out (:out a-out) "will-be-started")]
+        ;; Now break the config: override :statuses to a list that does
+        ;; NOT contain "in_progress", without supplying :active-status.
+        ;; The default :active-status (in_progress) no longer satisfies
+        ;; the validator, and any command that reads config — including
+        ;; the original-bug surface, `start` — must fail fast.
+        (spit (str (fs/path tmp ".knot.edn"))
+              (pr-str {:statuses          ["open" "active" "closed"]
+                       :terminal-statuses #{"closed"}}))
+        (let [{:keys [exit err]} (run-knot tmp "start" a-id)]
+          (is (= 1 exit) "start must abort on config validation")
+          (is (str/includes? err "active-status")
+              "stderr names :active-status as the offending key")))))
 
   (testing "knot init does NOT modify .claude/settings.json"
     ;; Ensure a global SessionStart hook can be wired from the README
