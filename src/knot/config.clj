@@ -10,6 +10,7 @@
    :default-priority  2
    :statuses          ["open" "in_progress" "closed"]
    :terminal-statuses #{"closed"}
+   :active-status     "in_progress"
    :types             ["bug" "feature" "task" "epic" "chore"]
    :modes             ["afk" "hitl"]
    :default-mode      "hitl"})
@@ -55,8 +56,8 @@
 
 (def ^:private known-keys
   #{:tickets-dir :prefix :project-name :default-assignee :default-type
-    :default-priority :statuses :terminal-statuses :types :modes
-    :default-mode})
+    :default-priority :statuses :terminal-statuses :active-status
+    :types :modes :default-mode})
 
 (defn- warn! [msg]
   (binding [*out* *err*] (println msg)))
@@ -74,8 +75,8 @@
    overrides) violates the schema. Returns `merged` unchanged on success."
   [merged]
   (let [{:keys [tickets-dir prefix project-name default-assignee default-type
-                default-priority statuses terminal-statuses types modes
-                default-mode]} merged]
+                default-priority statuses terminal-statuses active-status
+                types modes default-mode]} merged]
     (when-not (non-blank-string? tickets-dir)
       (throw (ex-info ".knot.edn :tickets-dir must be a non-blank string" {})))
     (when (and (some? prefix) (not (and (non-blank-string? prefix)
@@ -92,6 +93,18 @@
                    (every? (set statuses) terminal-statuses))
       (throw (ex-info (str ".knot.edn :terminal-statuses must be a set of "
                            "strings, all present in :statuses") {})))
+    (when-not (and (non-blank-string? active-status)
+                   ((set statuses) active-status)
+                   (not (contains? (or terminal-statuses #{}) active-status)))
+      (throw (ex-info
+              (str ".knot.edn :active-status " (pr-str active-status)
+                   " must be one of :statuses " (pr-str (vec statuses))
+                   " and not in :terminal-statuses "
+                   (pr-str terminal-statuses)
+                   " — set :active-status explicitly when customizing :statuses")
+              {:active-status     active-status
+               :statuses          statuses
+               :terminal-statuses terminal-statuses})))
     (when-not (list-of-non-blank-strings? types)
       (throw (ex-info ".knot.edn :types must be a non-empty list of strings" {})))
     (when-not ((set types) default-type)

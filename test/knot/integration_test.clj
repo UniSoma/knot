@@ -1101,6 +1101,47 @@
         (is (str/includes? err "kno-01abc111111"))
         (is (str/includes? err "kno-01abc222222")))))
 
+  (testing "custom :statuses + :active-status: init, create, start, prime end-to-end"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      ;; Replace the stub config with a custom statuses workflow.
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:statuses          ["open" "active" "closed"]
+                     :terminal-statuses #{"closed"}
+                     :active-status     "active"}))
+      (let [{:keys [exit out]} (run-knot tmp "create" "Custom workflow")
+            id (id-from-create-out out "custom-workflow")]
+        (is (zero? exit) "create succeeds under custom :statuses")
+        (let [{:keys [exit err]} (run-knot tmp "start" id)]
+          (is (zero? exit)
+              (str "start succeeds under custom :statuses; err=" err))
+          (is (not (str/includes? err "validation"))
+              "start does not bounce off status validation"))
+        (let [{:keys [out]} (run-knot tmp "show" id "--json")]
+          (is (str/includes? out "\"status\":\"active\"")
+              "ticket landed in the configured active status, not in_progress"))
+        (let [{:keys [exit out err]} (run-knot tmp "prime")]
+          (is (zero? exit) (str "prime err=" err))
+          (is (str/includes? out "## In Progress")
+              "ticket in :active-status surfaces under ## In Progress")
+          (is (str/includes? out "Custom workflow"))
+          (is (str/includes? out "transition to active")
+              "Commands cheatsheet `knot start` line names the active status")))))
+
+  (testing "custom :statuses without :active-status fails fast with a strict-validation error"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      ;; Override :statuses to a list that does NOT contain "in_progress",
+      ;; without supplying :active-status. The default :active-status
+      ;; (in_progress) no longer satisfies the validator.
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:statuses          ["open" "active" "closed"]
+                     :terminal-statuses #{"closed"}}))
+      (let [{:keys [exit err]} (run-knot tmp "create" "X")]
+        (is (= 1 exit) "config validation should fail before write")
+        (is (str/includes? err "active-status")
+            "stderr names :active-status as the offending key"))))
+
   (testing "knot init does NOT modify .claude/settings.json"
     ;; Ensure a global SessionStart hook can be wired from the README
     ;; without `knot init` clobbering it. The init command writes only

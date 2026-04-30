@@ -566,7 +566,20 @@
             id      (id-of-created created "t")
             _       (cli/start-cmd (ctx tmp) {:id id})
             loaded  (store/load-one tmp ".tickets" id)]
-        (is (= "in_progress" (get-in loaded [:frontmatter :status])))))))
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))))))
+
+  (testing "start-cmd transitions to a custom :active-status from config"
+    (with-tmp tmp
+      (let [ctx*    (assoc (ctx tmp)
+                           :statuses          ["open" "active" "closed"]
+                           :terminal-statuses #{"closed"}
+                           :active-status     "active")
+            created (cli/create-cmd ctx* {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd ctx* {:id id})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "active" (get-in loaded [:frontmatter :status]))
+            "start-cmd reads :active-status from ctx, not the literal in_progress")))))
 
 (deftest close-cmd-test
   (testing "close-cmd transitions to the first terminal status from :statuses"
@@ -724,12 +737,42 @@
           ;; every known key should appear in the stub
           (doseq [k [":tickets-dir" ":prefix" ":default-assignee"
                      ":default-type" ":default-priority" ":statuses"
-                     ":terminal-statuses" ":types" ":modes" ":default-mode"]]
+                     ":terminal-statuses" ":active-status"
+                     ":types" ":modes" ":default-mode"]]
             (is (str/includes? content k)
                 (str "stub should mention " k)))
           ;; the stub should be self-documenting (contain comments)
           (is (str/includes? content ";")
               "stub should include EDN line comments")))))
+
+  (testing "stub :active-status defaults to in_progress and is uncommented"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))
+            active-line (some (fn [l] (when (re-find #"^\s*:active-status\b" l) l))
+                              (str/split-lines content))]
+        (is (some? active-line)
+            "stub has an uncommented :active-status line")
+        (is (str/includes? active-line "\"in_progress\"")
+            ":active-status defaults to in_progress"))))
+
+  (testing "stub explains the constraint linking :active-status to :statuses"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))
+            ;; The comment block right above :active-status names both
+            ;; consumers (knot start / prime In Progress) and the
+            ;; constraint (must be a non-terminal :statuses member).
+            active-idx (str/index-of content ":active-status")
+            preceding  (subs content 0 active-idx)
+            ;; tail of the file before the line, looking back for comments
+            preceding-tail (last (str/split preceding #"\n\n"))]
+        (is (re-find #";;" preceding-tail)
+            "explanatory comment precedes :active-status")
+        (is (or (re-find #"(?i)knot start" preceding-tail)
+                (re-find #"(?i)in progress" preceding-tail)
+                (re-find #"(?i)active lane" preceding-tail))
+            "comment names at least one consumer of :active-status"))))
 
   (testing "creates the tickets-dir if missing"
     (with-tmp tmp
@@ -1793,6 +1836,22 @@ Restart the daemon.
             section (subs out start end)]
         (is (re-find #"live: 1" section))
         (is (re-find #"archive: 1" section))))))
+
+(deftest prime-cmd-in-progress-active-status-test
+  (testing "## In Progress section uses :active-status from config (custom statuses)"
+    (with-tmp tmp
+      (let [c (assoc (ctx tmp)
+                     :statuses          ["open" "active" "closed"]
+                     :terminal-statuses #{"closed"}
+                     :active-status     "active")
+            a (cli/create-cmd c {:title "Doing it"})
+            a-id (id-of-created a "doing-it")
+            _    (cli/start-cmd c {:id a-id})
+            pctx (cond-> (assoc c :project-found? true))
+            out  (cli/prime-cmd pctx {})]
+        (is (str/includes? out "## In Progress")
+            "ticket in the configured active status surfaces under In Progress")
+        (is (str/includes? out "Doing it"))))))
 
 (deftest prime-cmd-in-progress-sort-test
   (testing "in-progress section is sorted by :updated descending"

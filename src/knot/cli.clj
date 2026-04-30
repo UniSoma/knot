@@ -209,9 +209,11 @@
                      {:now now :terminal-statuses terminal-statuses})))))
 
 (defn start-cmd
-  "Sugar for `status-cmd`: transition `(:id opts)` to `in_progress`."
+  "Sugar for `status-cmd`: transition `(:id opts)` to the project's
+   active status (`:active-status` from config; defaults to `\"in_progress\"`)."
   [ctx opts]
-  (status-cmd ctx (assoc opts :status "in_progress")))
+  (let [{:keys [active-status]} (resolve-ctx ctx)]
+    (status-cmd ctx (assoc opts :status active-status))))
 
 (defn close-cmd
   "Sugar for `status-cmd`: transition `(:id opts)` to the first status from
@@ -617,16 +619,16 @@
                   :summary (ticket/latest-note-content (:body t))})))))
 
 (defn- in-progress-tickets
-  "Pick non-terminal tickets with status `in_progress` and sort by
-   `:updated` descending so the most-recently-touched work surfaces
-   first. Tickets without `:updated` sort last in stable input order.
-   Each returned map carries `:prime-stale?` — true when `:updated` is
-   `prime-stale-days` or more older than `now-iso`. The flag drives the
-   `[stale]` prefix in the renderer and the `\"stale\":true` field in
-   the JSON projection."
-  [tickets now-iso]
+  "Pick non-terminal tickets whose status equals `active-status` (the
+   project's active lane) and sort by `:updated` descending so the
+   most-recently-touched work surfaces first. Tickets without `:updated`
+   sort last in stable input order. Each returned map carries
+   `:prime-stale?` — true when `:updated` is `prime-stale-days` or more
+   older than `now-iso`. The flag drives the `[stale]` prefix in the
+   renderer and the `\"stale\":true` field in the JSON projection."
+  [tickets active-status now-iso]
   (->> tickets
-       (filter (fn [t] (= "in_progress" (get-in t [:frontmatter :status]))))
+       (filter (fn [t] (= active-status (get-in t [:frontmatter :status]))))
        (sort-by (fn [t] (or (get-in t [:frontmatter :updated]) ""))
                 #(compare %2 %1))
        (mapv (fn [t] (assoc t :prime-stale? (stale-in-progress? t now-iso))))))
@@ -670,16 +672,17 @@
                 :in-progress      []
                 :ready            []
                 :ready-truncated? false
-                :ready-remaining  0}]
+                :ready-remaining  0
+                :active-status    (:active-status (config/defaults))}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))
-    (let [{:keys [project-root tickets-dir terminal-statuses
+    (let [{:keys [project-root tickets-dir terminal-statuses active-status
                   prefix project-name now]} (resolve-ctx ctx)
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
-          in-progress* (in-progress-tickets all now)
+          in-progress* (in-progress-tickets all active-status now)
           ready*       (query/ready all terminal-statuses)
           mode-filter  (when mode {:mode #{mode}})
           ready-filtered (query/filter-tickets ready* (or mode-filter {}))
@@ -699,7 +702,8 @@
                         :ready-truncated? truncated?
                         :ready-remaining  remaining
                         :recently-closed  recently-closed*
-                        :mode             mode}]
+                        :mode             mode
+                        :active-status    active-status}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))
@@ -744,6 +748,12 @@
      " ;; Statuses that are terminal — files of tickets in these statuses\n"
      " ;; auto-move to <tickets-dir>/archive/.\n"
      " :terminal-statuses " (pr-str (:terminal-statuses d)) "\n"
+     "\n"
+     " ;; The active lane: status `knot start` transitions to, and the one\n"
+     " ;; the prime ## In Progress section filters by. Must be a member of\n"
+     " ;; :statuses and not in :terminal-statuses. Update this when you\n"
+     " ;; edit :statuses to a list that does not include \"in_progress\".\n"
+     " :active-status \"" (:active-status d) "\"\n"
      "\n"
      " ;; Allowed values for the :type field on each ticket.\n"
      " :types " (pr-str (:types d)) "\n"

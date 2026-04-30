@@ -31,6 +31,15 @@
    :exit-codes  [{:code 0 :when "ticket written"}
                  {:code 1 :when "missing title or write failure"}]})
 
+(deftest start-description-active-status-test
+  (testing ":start description names the active-lane concept (not the literal in_progress)"
+    (let [desc (get-in help/registry [:start :description])]
+      (is (string? desc))
+      (is (re-find #"(?i)active" desc)
+          ":start description references the active-lane concept")
+      (is (str/includes? desc "in_progress")
+          "the literal default value is named once as a hint, but only as the default"))))
+
 (deftest derive-spec-test
   (testing "a boolean flag becomes a babashka.cli :spec entry with :coerce :boolean"
     (is (= {:spec {:json {:coerce :boolean}}}

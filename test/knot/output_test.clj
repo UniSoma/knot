@@ -900,6 +900,35 @@
       (is (not (re-find #"(?m)^knot link\b" section))
           "`knot link` belongs in the skill, not the per-session primer"))))
 
+(deftest prime-text-active-status-cheatsheet-test
+  (testing "Commands cheatsheet `knot start` line reflects :active-status from data"
+    (let [data (assoc sample-prime-data :active-status "active")
+          out  (output/prime-text data)
+          start (str/index-of out "## Commands")
+          section (subs out start (count out))
+          start-line (some (fn [l] (when (re-find #"^knot start\b" l) l))
+                           (str/split-lines section))]
+      (is (some? start-line))
+      (is (str/includes? start-line "transition to active")
+          "knot start line reflects the configured active status")
+      (is (not (str/includes? start-line "in_progress"))
+          "literal in_progress is gone when active-status is something else")))
+
+  (testing "Commands cheatsheet falls back to in_progress when :active-status absent (no-project case)"
+    (let [data {:project {:found? false}
+                :in-progress []
+                :ready []
+                :ready-truncated? false
+                :ready-remaining 0}
+          out (output/prime-text data)
+          start (str/index-of out "## Commands")
+          section (subs out start (count out))
+          start-line (some (fn [l] (when (re-find #"^knot start\b" l) l))
+                           (str/split-lines section))]
+      (is (some? start-line))
+      (is (str/includes? start-line "transition to in_progress")
+          "no-project default fallback renders the in_progress literal"))))
+
 (deftest prime-text-close-shows-summary-flag-test
   (testing "Commands cheatsheet documents --summary on the close line, not buried in the user-says mapping"
     (let [out      (output/prime-text sample-prime-data)

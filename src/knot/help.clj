@@ -218,11 +218,11 @@
 
    :start
    {:group       :lifecycle
-    :description "Transition a ticket to in_progress."
+    :description "Transition a ticket to the project's active status (default: in_progress)."
     :args        [{:name "id" :required true}]
     :flags       []
     :examples    [{:cmd "knot start kno-01abc"
-                   :note "Mark a ticket as in_progress."}]}
+                   :note "Mark a ticket as active (in_progress by default)."}]}
 
    :close
    {:group       :lifecycle

@@ -21,6 +21,7 @@
       (is (= 2 (:default-priority d)))
       (is (= ["open" "in_progress" "closed"] (:statuses d)))
       (is (= #{"closed"} (:terminal-statuses d)))
+      (is (= "in_progress" (:active-status d)))
       (is (= ["bug" "feature" "task" "epic" "chore"] (:types d)))
       (is (= ["afk" "hitl"] (:modes d)))
       (is (= "hitl" (:default-mode d))))))
@@ -65,6 +66,7 @@
                      :default-priority  0
                      :statuses          ["open" "review" "done"]
                      :terminal-statuses #{"done"}
+                     :active-status     "review"
                      :types             ["feature" "chore"]
                      :modes             ["afk" "hitl"]
                      :default-mode      "afk"}))
@@ -76,6 +78,7 @@
         (is (= 0 (:default-priority c)))
         (is (= ["open" "review" "done"] (:statuses c)))
         (is (= #{"done"} (:terminal-statuses c)))
+        (is (= "review" (:active-status c)))
         (is (= ["feature" "chore"] (:types c)))
         (is (= ["afk" "hitl"] (:modes c)))
         (is (= "afk" (:default-mode c))))))
@@ -185,6 +188,43 @@
       (write-config! tmp {:prefix "BAD!"})
       (is (str/includes? (load-throws tmp) "prefix"))))
 
+  (testing ":active-status must be a member of :statuses"
+    (with-tmp tmp
+      (write-config! tmp {:statuses ["open" "active" "closed"]
+                          :terminal-statuses #{"closed"}
+                          :active-status "in_progress"})
+      (let [msg (load-throws tmp)]
+        (is (some? msg))
+        (is (str/includes? msg "active-status"))
+        (is (str/includes? msg "in_progress")
+            "error names the offending value")
+        (is (str/includes? msg "open")
+            "error names the valid set"))))
+
+  (testing ":active-status must not be in :terminal-statuses"
+    (with-tmp tmp
+      (write-config! tmp {:statuses ["open" "in_progress" "closed"]
+                          :terminal-statuses #{"closed"}
+                          :active-status "closed"})
+      (let [msg (load-throws tmp)]
+        (is (some? msg))
+        (is (str/includes? msg "active-status"))
+        (is (str/includes? msg "terminal")))))
+
+  (testing ":active-status equal to (first :statuses) is allowed"
+    (with-tmp tmp
+      (write-config! tmp {:statuses ["open" "in_progress" "closed"]
+                          :terminal-statuses #{"closed"}
+                          :active-status "open"})
+      (is (nil? (load-throws tmp)))))
+
+  (testing "user override of :active-status wins on merge"
+    (with-tmp tmp
+      (write-config! tmp {:statuses ["open" "active" "closed"]
+                          :terminal-statuses #{"closed"}
+                          :active-status "active"})
+      (is (= "active" (:active-status (config/load-config tmp))))))
+
   (testing "valid full config does NOT throw"
     (with-tmp tmp
       (write-config! tmp {:tickets-dir       "tasks"
@@ -194,6 +234,7 @@
                           :default-priority  0
                           :statuses          ["open" "review" "done"]
                           :terminal-statuses #{"done"}
+                          :active-status     "review"
                           :types             ["feature" "chore"]
                           :modes             ["afk" "hitl"]
                           :default-mode      "afk"})

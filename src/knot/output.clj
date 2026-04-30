@@ -389,14 +389,21 @@ before issuing other Knot commands.")
 (def ^:private prime-ready-nudge
   "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
 
-(def ^:private prime-commands-cheatsheet
-  "knot list                        list live tickets (alias: ls)
-knot ready [--mode afk]          list non-blocked tickets (filter by mode)
-knot show <id>                   show one ticket (frontmatter + body)
-knot create \"<title>\"            create a new ticket
-knot start <id>                  transition to in_progress
-knot close <id> [--summary <s>]  transition to terminal status + auto-archive
-knot add-note <id> [text]        append a timestamped note")
+(defn- prime-commands-cheatsheet
+  "Render the static `## Commands` cheatsheet block, parameterized by
+   `active-status` so the `knot start` line names the project's active
+   lane. The caller (prime-cmd) supplies the value from config; the
+   no-project branch falls back to `(config/defaults)` so this function
+   never has to reason about absence."
+  [active-status]
+  (str
+   "knot list                        list live tickets (alias: ls)\n"
+   "knot ready [--mode afk]          list non-blocked tickets (filter by mode)\n"
+   "knot show <id>                   show one ticket (frontmatter + body)\n"
+   "knot create \"<title>\"            create a new ticket\n"
+   "knot start <id>                  transition to " active-status "\n"
+   "knot close <id> [--summary <s>]  transition to terminal status + auto-archive\n"
+   "knot add-note <id> [text]        append a timestamped note"))
 
 (defn- prime-ticket-line
   "Format a ticket as `id  mode  pri  title` for the prime in-progress and
@@ -463,15 +470,17 @@ knot add-note <id> [text]        append a timestamped note")
      1. Directive preamble (or `knot init` directive when no project found)
      2. `## Project` metadata
      3. `## In Progress` ticket lines (omitted entirely when no tickets are
-        in_progress — empty heading is dead weight on every quiet session)
+        in the project's active lane — empty heading is dead weight on
+        every quiet session)
      4. `## Ready` ticket lines (with behavioral nudge and optional footer)
      5. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
-     6. `## Commands` cheatsheet
+     6. `## Commands` cheatsheet (the `knot start` line names
+        `:active-status` from data, falling back to `\"in_progress\"`)
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
-           recently-closed mode]}]
+           recently-closed mode active-status]}]
   (let [found? (:found? project)
         ;; Coerce mode through name+lower-case+trim so keywords (`:afk`),
         ;; uppercase (`"AFK"`), and stray whitespace all reach the same
@@ -500,7 +509,8 @@ knot add-note <id> [text]        append a timestamped note")
                         ready
                         ready-footer) "\n"
          recently-closed-block
-         "## Commands\n\n" prime-commands-cheatsheet "\n")))
+         "## Commands\n\n"
+         (prime-commands-cheatsheet (or active-status "in_progress")) "\n")))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:
