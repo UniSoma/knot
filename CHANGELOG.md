@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surfaced to users via `knot --version` and the `knot --help` banner.
 - Version bumps are driven by the `/release` slash command.
 
-## [Unreleased]
+## [0.2.0] - 2026-04-30
 
 ### Added
 
@@ -33,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repo for agent platforms that load skill files. README documents the
   recommended three-layer setup (project rules + SessionStart hook +
   skill).
+- `.pi/extensions/knot-prime.ts` ships a Pi extension that runs `knot prime`
+  at session start and injects the output as a hidden custom message, with a
+  10s timeout, failure warning, and de-duplication of prior prime messages.
+- `AGENTS.md` documents that issue tracking is managed via the `knot` CLI
+  and that `.tickets/` should not be read or modified directly.
 
 ### Changed
 
@@ -46,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `knot dep tree` moved to the bundled skill).
 - `knot prime` preamble first line now references the `knot` skill so
   non-Claude agents discover the canonical reference.
+- `.claude/settings.json` SessionStart hook now invokes `knot prime`
+  directly; the bespoke `block-tickets-read.sh` hook was removed in favor
+  of the AGENTS.md guidance.
 
 ### Removed
 
@@ -53,6 +61,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the project schema should consult `.knot.edn` directly or
   `knot prime --json` for the actionable subset. (Closes
   [kno-01kqdasr0384](.tickets/archive/kno-01kqdasr0384--knot-prime-schema-section-is-hardcoded-should.md).)
+- `.claude/hooks/block-tickets-read.sh` removed; agent guidance to avoid
+  hand-editing `.tickets/` now lives in `AGENTS.md`.
 
 ## [0.1.0] - 2026-04-29
 
