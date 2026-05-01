@@ -1,12 +1,13 @@
 ---
 id: kno-01kqa9shmqf3
 title: Mark acceptance-criteria checkboxes via CLI
-status: open
+status: closed
 type: feature
 priority: 2
 mode: hitl
 created: '2026-04-28T15:02:17.495095855Z'
-updated: '2026-04-28T15:10:01.742198683Z'
+updated: '2026-05-01T03:03:08.271456083Z'
+closed: '2026-05-01T03:03:08.271456083Z'
 tags:
 - v0.1
 - cli
@@ -14,6 +15,7 @@ tags:
 deps:
 - kno-01kqa804gmgx
 ---
+
 ## Description
 
 Acceptance criteria today live as freeform `- [ ]` markdown checkboxes in the body. There is no API to flip them — `edit` opens an editor, `add-note` only appends to `## Notes`, and `status`/`close` touch frontmatter only. This crosses the deliberate freeform-body boundary we drew in v0 (story 31) into structured territory, so it ships post-v0.
@@ -46,3 +48,9 @@ Open questions to resolve before implementation:
 - [ ] `knot show` continues to render the body verbatim, including `[x]` markers, with no special formatting
 - [ ] `:updated` frontmatter timestamp bumps on every flip (re-uses the `store/save!` path so archive routing still works if the ticket is also closed)
 - [ ] Usage text and any docs are updated
+
+## Notes
+
+**2026-05-01T03:03:08.271456083Z**
+
+Superseded by kno-01kqgqdxbxye (promote ACs to frontmatter). Q8 of the v0.3 API review chose to promote ACs to structured data rather than add CLI to flip in-body checkboxes; the new ticket subsumes this work.

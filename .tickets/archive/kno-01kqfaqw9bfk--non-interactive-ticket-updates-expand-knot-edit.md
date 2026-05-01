@@ -1,12 +1,13 @@
 ---
 id: kno-01kqfaqw9bfk
 title: 'Non-interactive ticket updates: expand ''knot edit'' or add ''knot update''?'
-status: open
+status: closed
 type: task
 priority: 3
 mode: hitl
 created: '2026-04-30T13:55:03.595115390Z'
-updated: '2026-04-30T13:55:03.595115390Z'
+updated: '2026-05-01T03:03:07.772672225Z'
+closed: '2026-05-01T03:03:07.772672225Z'
 ---
 
 ## Description
@@ -51,3 +52,9 @@ Candidate flags either way:
 - Stdin behavior defined for `--body` and section flags
 - `:updated` bumped on every successful write, same as other write commands
 - Help text + README updated; AFK agents documented as the primary consumer
+
+## Notes
+
+**2026-05-01T03:03:07.772672225Z**
+
+Superseded by kno-01kqgqcqmy19 (new knot update command). Q6 of the v0.3 API review picked the 'add update' path; that ticket now carries the work.
