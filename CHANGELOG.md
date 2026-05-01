@@ -12,6 +12,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surfaced to users via `knot --version` and the `knot --help` banner.
 - Version bumps are driven by the `/release` slash command.
 
+## [Unreleased]
+
+### Changed (BREAKING)
+
+- All `--json` read commands now wrap their output in a tagged envelope
+  `{schema_version: 1, ok: true, data: <payload>}` instead of returning a
+  bare object/array. `knot list/ready/blocked/closed --json` change from
+  `[ ... ]` to `{"schema_version": 1, "ok": true, "data": [ ... ]}`;
+  `knot show --json`, `knot dep tree --json`, and `knot prime --json`
+  change from `{ ... }` to `{"schema_version": 1, "ok": true,
+  "data": { ... }}`. The `data` payload is unchanged from prior shapes.
+
+### Added
+
+- Error path for `--json` read commands now emits a structured error
+  envelope on stdout with exit code 1 instead of a stderr message:
+  `{"schema_version": 1, "ok": false, "error": {"code": "...",
+  "message": "...", "candidates"?: [...]}}`. `knot show <missing>
+  --json` carries `code: "not_found"`; partial-id ambiguity on `knot
+  show --json` and `knot dep tree --json` carries `code:
+  "ambiguous_id"` with a `candidates` array.
+- `knot dep tree <unknown-id> --json` intentionally returns a *success*
+  envelope with `data.missing: true` rather than a `not_found` error —
+  dep tree is tolerant of missing roots so consumers can discover broken
+  `:deps` refs *via* the parent that links to them. JSON consumers
+  should branch on `data.missing` distinctly from `ok: false`.
+- Argument-parsing failures (e.g. `--limit 0`, missing required
+  positional args) continue to die on stderr with exit 1 — these are
+  CLI-usage errors, not data conditions, and stay outside the JSON
+  envelope contract.
+
 ## [0.2.0] - 2026-04-30
 
 ### Added

@@ -129,7 +129,6 @@
           path          (cli/create-cmd (discover-ctx) opts)]
       (println (str path)))))
 
-
 (defn- ->set
   "Coerce an opt value to a non-empty set, or nil. babashka.cli with
    `:coerce []` always returns a vector even for a single occurrence; a
@@ -163,16 +162,42 @@
     (println s))
   (flush))
 
+(defn- emit-not-found-envelope!
+  "Print a v0.3 not_found error envelope to stdout and exit 1."
+  [id]
+  (println-out (output/error-envelope-str
+                {:code    "not_found"
+                 :message (str "no ticket matching " id)}))
+  (System/exit 1))
+
+(defn- emit-ambiguous-envelope!
+  "Print a v0.3 ambiguous_id error envelope to stdout and exit 1.
+   `data` is the `ex-data` map carrying `:input` and `:candidates`.
+   `:candidates` is already a vector by construction in `knot.store/ambiguous!`."
+  [^Exception e data]
+  (println-out (output/error-envelope-str
+                {:code       "ambiguous_id"
+                 :message    (.getMessage e)
+                 :candidates (:candidates data)}))
+  (System/exit 1))
+
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
-        id (first args)]
+        id (first args)
+        json? (boolean (:json opts))]
     (when (or (nil? id) (str/blank? id))
       (die "knot show: an id is required"))
-    (let [out (cli/show-cmd (discover-ctx)
-                            {:id id :json? (boolean (:json opts))})]
-      (if out
-        (println-out out)
-        (die (str "knot show: no ticket matching " id))))))
+    (try
+      (let [out (cli/show-cmd (discover-ctx) {:id id :json? json?})]
+        (cond
+          out   (println-out out)
+          json? (emit-not-found-envelope! id)
+          :else (die (str "knot show: no ticket matching " id))))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (if (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
+            (throw e)))))))
 
 (defn- ls-handler [argv]
   (let [{:keys [opts]} (bcli/parse-args argv (spec :list))
@@ -243,14 +268,21 @@
 
 (defn- dep-tree-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :dep/tree))
-        id (first args)]
+        id    (first args)
+        json? (boolean (:json opts))]
     (when (or (nil? id) (str/blank? id))
       (die "knot dep tree: an id is required"))
-    (let [out (cli/dep-tree-cmd (discover-ctx)
-                                {:id    id
-                                 :json? (boolean (:json opts))
-                                 :full? (boolean (:full opts))})]
-      (println-out out))))
+    (try
+      (let [out (cli/dep-tree-cmd (discover-ctx)
+                                  {:id    id
+                                   :json? json?
+                                   :full? (boolean (:full opts))})]
+        (println-out out))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (if (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
+            (throw e)))))))
 
 (defn- dep-cycle-handler [_argv]
   (let [cycles (cli/dep-cycle-cmd (discover-ctx) {})]
@@ -383,12 +415,12 @@
     (let [ctx  (discover-ctx)
           tty? (some? (System/console))
           path (cli/add-note-cmd
-                 ctx
-                 {:id              id
-                  :text            text
-                  :stdin-tty?      tty?
-                  :stdin-reader-fn (fn [] (slurp *in*))
-                  :editor-fn       (editor-fn-for-note)})]
+                ctx
+                {:id              id
+                 :text            text
+                 :stdin-tty?      tty?
+                 :stdin-reader-fn (fn [] (slurp *in*))
+                 :editor-fn       (editor-fn-for-note)})]
       (if path
         (println-out (str path))
         ;; nil from add-note-cmd is either "id missing" or "empty content

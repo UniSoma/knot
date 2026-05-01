@@ -158,7 +158,7 @@
   (testing "with --description, the body is sections-only (no H1)"
     (with-tmp tmp
       (let [path (cli/create-cmd (ctx tmp) {:title "T"
-                                             :description "Desc."})
+                                            :description "Desc."})
             body (:body (ticket/parse (slurp path)))]
         (is (not (str/includes? body "# T")))
         (is (str/starts-with? body "## Description"))))))
@@ -272,7 +272,7 @@
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/show-cmd (ctx tmp) {:id "nope-x"})))))
 
-  (testing "show with :json? true returns a bare JSON object string"
+  (testing "show with :json? true returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (let [path (cli/create-cmd (ctx tmp) {:title "Hello"})
             id   (->> (fs/file-name path)
@@ -281,6 +281,8 @@
             out  (cli/show-cmd (ctx tmp) {:id id :json? true})]
         (is (string? out))
         (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
         (is (str/includes? out (str "\"id\":\"" id "\"")))
         (is (str/includes? out "\"status\":\"open\""))
         (is (str/includes? out "\"body\""))
@@ -299,13 +301,16 @@
         (is (str/includes? out "First ticket"))
         (is (str/includes? out "Second ticket")))))
 
-  (testing "ls with :json? true returns a bare JSON array"
+  (testing "ls with :json? true returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "First"})
       (cli/create-cmd (ctx tmp) {:title "Second"})
       (let [out (cli/ls-cmd (ctx tmp) {:json? true})]
         (is (string? out))
-        (is (str/starts-with? out "["))
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":["))
         (is (str/includes? out "\"status\":\"open\"")))))
 
   (testing "ls excludes terminal-status tickets by default"
@@ -754,9 +759,9 @@
             id      (id-of-created created "t")
             before  (slurp created)]
         (is (thrown-with-msg? Exception #"summary"
-              (cli/status-cmd (ctx tmp)
-                              {:id id :status "in_progress"
-                               :summary "should fail"})))
+                              (cli/status-cmd (ctx tmp)
+                                              {:id id :status "in_progress"
+                                               :summary "should fail"})))
         (is (= before (slurp created))
             "no file change on rejected --summary"))))
 
@@ -768,8 +773,8 @@
             id      (id-of-created created "t")
             before  (slurp created)]
         (is (thrown-with-msg? Exception #"summary"
-              (cli/status-cmd (ctx tmp)
-                              {:id id :status "in_progress" :summary ""})))
+                              (cli/status-cmd (ctx tmp)
+                                              {:id id :status "in_progress" :summary ""})))
         (is (= before (slurp created))
             "no file change on rejected empty --summary"))))
 
@@ -778,8 +783,8 @@
       (let [created (cli/create-cmd (ctx tmp) {:title "T"})
             id      (id-of-created created "t")]
         (is (thrown-with-msg? Exception #"summary"
-              (cli/start-cmd (ctx tmp)
-                             {:id id :summary "should fail"}))))))
+                              (cli/start-cmd (ctx tmp)
+                                             {:id id :summary "should fail"}))))))
 
   (testing "reopen --summary errors (reopen is always non-terminal)"
     (with-tmp tmp
@@ -787,8 +792,8 @@
             id      (id-of-created created "t")
             _       (cli/close-cmd (ctx tmp) {:id id})]
         (is (thrown-with-msg? Exception #"summary"
-              (cli/reopen-cmd (ctx tmp)
-                              {:id id :summary "should fail"}))))))
+                              (cli/reopen-cmd (ctx tmp)
+                                              {:id id :summary "should fail"}))))))
 
   (testing "summary persists across reopen — historical journal"
     (with-tmp tmp
@@ -885,7 +890,7 @@
     (with-tmp tmp
       (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"feature\"}")
       (is (thrown-with-msg? Exception #"already exists"
-            (cli/init-cmd {:project-root tmp} {})))
+                            (cli/init-cmd {:project-root tmp} {})))
       (is (= "{:default-type \"feature\"}"
              (slurp (str (fs/path tmp ".knot.edn"))))
           "existing config should be untouched on abort")))
@@ -913,7 +918,7 @@
   (testing "init refuses an invalid --prefix before writing"
     (with-tmp tmp
       (is (thrown-with-msg? Exception #"prefix"
-            (cli/init-cmd {:project-root tmp} {:prefix "BAD!"})))
+                            (cli/init-cmd {:project-root tmp} {:prefix "BAD!"})))
       (is (not (fs/exists? (fs/path tmp ".knot.edn")))
           "no stub should have been written on validation failure")
       (is (not (fs/directory? (fs/path tmp ".tickets")))
@@ -922,7 +927,7 @@
   (testing "init refuses an invalid --tickets-dir before writing"
     (with-tmp tmp
       (is (thrown-with-msg? Exception #"tickets-dir"
-            (cli/init-cmd {:project-root tmp} {:tickets-dir ""})))
+                            (cli/init-cmd {:project-root tmp} {:tickets-dir ""})))
       (is (not (fs/exists? (fs/path tmp ".knot.edn")))))))
 
 (deftest dep-cmd-test
@@ -952,7 +957,7 @@
       (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
             from-id   (id-of-created from-path "from")]
         (is (thrown-with-msg? Exception #"cycle"
-              (cli/dep-cmd (ctx tmp) {:from from-id :to from-id}))))))
+                              (cli/dep-cmd (ctx tmp) {:from from-id :to from-id}))))))
 
   (testing "dep-cmd rejects an edge that would close a cycle"
     (with-tmp tmp
@@ -1054,11 +1059,14 @@
         (is (not (str/includes? out "Alpha task")) "blocked Alpha excluded")
         (is (str/includes? out "Beta task") "Beta has no deps, is ready"))))
 
-  (testing "ready-cmd with :json? returns a bare JSON array"
+  (testing "ready-cmd with :json? returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (let [out (cli/ready-cmd (ctx tmp) {:json? true})]
-        (is (str/starts-with? out "["))
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":["))
         (is (str/includes? out "\"status\":\"open\"")))))
 
   (testing "ready-cmd --mode afk excludes hitl tickets"
@@ -1223,14 +1231,17 @@ Restart the daemon.
         (is (str/includes? out "Will close"))
         (is (not (str/includes? out "Live one"))))))
 
-  (testing "closed-cmd with :json? true returns a bare JSON array"
+  (testing "closed-cmd with :json? true returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (let [c (ctx tmp)
             a (cli/create-cmd c {:title "Alpha"})
             a-id (id-of-created a "alpha")
             _    (cli/close-cmd c {:id a-id})
             out  (cli/closed-cmd c {:json? true})]
-        (is (str/starts-with? out "["))
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":["))
         (is (str/includes? out "\"status\":\"closed\"")))))
 
   (testing "closed-cmd returns an empty-table (header only) when none closed"
@@ -1343,7 +1354,7 @@ Restart the daemon.
         (is (str/includes? out "Alpha task") "blocked Alpha appears")
         (is (not (str/includes? out "Beta task")) "Beta has no deps, not blocked"))))
 
-  (testing "blocked-cmd with :json? returns a bare JSON array"
+  (testing "blocked-cmd with :json? returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
             b (cli/create-cmd (ctx tmp) {:title "Beta"})
@@ -1351,7 +1362,10 @@ Restart the daemon.
             b-id (id-of-created b "beta")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
             out  (cli/blocked-cmd (ctx tmp) {:json? true})]
-        (is (str/starts-with? out "["))))))
+        (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":["))))))
 
 (deftest dep-cycle-cmd-test
   (testing "dep-cycle-cmd returns an empty vector when there are no cycles"
@@ -1456,12 +1470,14 @@ Restart the daemon.
         (is (not (str/includes? out "↑"))
             "no ↑ markers in --full mode"))))
 
-  (testing "dep-tree-cmd --json returns a bare JSON object"
+  (testing "dep-tree-cmd --json returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
             a-id (id-of-created a "alpha")
             out  (cli/dep-tree-cmd (ctx tmp) {:id a-id :json? true})]
         (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
         (is (str/includes? out (str "\"id\":\"" a-id "\""))))))
 
   (testing "dep-tree-cmd renders [missing] for an unknown root id"
@@ -1539,9 +1555,9 @@ Restart the daemon.
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (thrown-with-msg? Exception #"two or more"
-            (cli/link-cmd (ctx tmp) {:ids ["only-one"]})))
+                            (cli/link-cmd (ctx tmp) {:ids ["only-one"]})))
       (is (thrown-with-msg? Exception #"two or more"
-            (cli/link-cmd (ctx tmp) {:ids []})))))
+                            (cli/link-cmd (ctx tmp) {:ids []})))))
 
   (testing "link-cmd returns a vector of all saved paths (one per ticket)"
     (with-tmp tmp
@@ -1573,7 +1589,7 @@ Restart the daemon.
       (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
             a-id (id-of-created a "alpha")]
         (is (thrown-with-msg? Exception #"kno-ghost"
-              (cli/link-cmd (ctx tmp) {:ids [a-id "kno-ghost"]})))
+                              (cli/link-cmd (ctx tmp) {:ids [a-id "kno-ghost"]})))
         (is (not (contains? (:frontmatter (store/load-one tmp ".tickets" a-id))
                             :links))
             "all-or-nothing: a-id's :links must not be written when any target id fails to resolve")))))
@@ -1632,7 +1648,7 @@ Restart the daemon.
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (thrown-with-msg? Exception #"kno-ghost"
-            (cli/unlink-cmd (ctx tmp) {:from "kno-ghost" :to "kno-other"})))))
+                            (cli/unlink-cmd (ctx tmp) {:from "kno-ghost" :to "kno-other"})))))
 
   (testing "unlink-cmd returns a vector of saved paths"
     (with-tmp tmp
@@ -1650,7 +1666,7 @@ Restart the daemon.
     (with-tmp tmp
       (spit (str (fs/path tmp ".knot.edn")) "{:default-type \"task\"")  ;; missing }
       (is (thrown-with-msg? Exception #"\.knot\.edn at .* is not valid EDN"
-            (config/load-config tmp))))))
+                            (config/load-config tmp))))))
 
 (deftest add-note-cmd-test
   (testing "explicit :text appends a timestamped note under ## Notes"
@@ -1758,11 +1774,11 @@ Restart the daemon.
             id      (id-of-created created "t")
             before  (slurp created)]
         (is (thrown-with-msg? Exception #"editor crashed"
-              (cli/add-note-cmd (ctx tmp)
-                                {:id id
-                                 :stdin-tty? true
-                                 :editor-fn (fn [_]
-                                              (throw (ex-info "editor crashed" {})))})))
+                              (cli/add-note-cmd (ctx tmp)
+                                                {:id id
+                                                 :stdin-tty? true
+                                                 :editor-fn (fn [_]
+                                                              (throw (ex-info "editor crashed" {})))})))
         (is (= before (slurp created))
             "no file change when editor-fn throws"))))
 
@@ -1843,7 +1859,7 @@ Restart the daemon.
             id      (id-of-created created "alpha")
             ;; edit body to change title — slug must remain "alpha"
             _       (let [original (slurp created)]
-                       (spit created (str/replace original "# Alpha" "# Bravo")))
+                      (spit created (str/replace original "# Alpha" "# Bravo")))
             new-path (cli/edit-cmd (ctx tmp) {:id id :editor-fn (fn [_] nil)})]
         (is (= created new-path))
         (is (str/ends-with? new-path "--alpha.md")))))
@@ -1854,10 +1870,10 @@ Restart the daemon.
             id      (id-of-created created "t")
             before  (slurp created)]
         (is (thrown-with-msg? Exception #"editor crashed"
-              (cli/edit-cmd (ctx tmp)
-                            {:id id
-                             :editor-fn (fn [_]
-                                          (throw (ex-info "editor crashed" {})))})))
+                              (cli/edit-cmd (ctx tmp)
+                                            {:id id
+                                             :editor-fn (fn [_]
+                                                          (throw (ex-info "editor crashed" {})))})))
         (is (= before (slurp created))
             "no save runs when editor-fn throws")))))
 
@@ -2299,11 +2315,13 @@ Restart the daemon.
             "preamble references `knot init` so the agent can bootstrap")))))
 
 (deftest prime-cmd-json-test
-  (testing "with :json? true, prime-cmd emits a bare JSON object"
+  (testing "with :json? true, prime-cmd emits a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Ready ticket"})
       (let [out (cli/prime-cmd (prime-ctx tmp) {:json? true})]
         (is (str/starts-with? out "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
         (is (str/includes? out "\"in_progress\""))
         (is (str/includes? out "\"ready\""))
         (is (str/includes? out "\"ready_truncated\""))

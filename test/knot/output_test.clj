@@ -1,5 +1,6 @@
 (ns knot.output-test
-  (:require [clojure.string :as str]
+  (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.output :as output]))
 
@@ -350,7 +351,7 @@
           "defaults preserve the in_progress=yellow color"))))
 
 (deftest show-json-test
-  (testing "renders a bare JSON object (not wrapped in an envelope)"
+  (testing "renders a v0.3 success envelope wrapping the ticket"
     (let [ticket {:frontmatter {:id "kno-01abc"
                                 :title "Title"
                                 :status "open"
@@ -358,9 +359,12 @@
                                 :priority 2
                                 :external_refs ["JIRA-1"]}
                   :body "Body.\n"}
-          out (output/show-json ticket)]
+          out (output/show-json ticket)
+          parsed (json/parse-string out true)]
       (is (str/starts-with? out "{"))
-      (is (str/ends-with? (str/trimr out) "}"))))
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (map? (:data parsed)))))
   (testing "uses snake_case keys (e.g. external_refs preserved)"
     (let [ticket {:frontmatter {:id "kno-01abc"
                                 :external_refs ["JIRA-1" "JIRA-2"]}
@@ -429,12 +433,15 @@
       (is (not (str/includes? out "\"linked\""))))))
 
 (deftest ls-json-test
-  (testing "renders a bare JSON array (not an envelope)"
+  (testing "renders a v0.3 success envelope wrapping the ticket array"
     (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}
                    {:frontmatter {:id "b" :status "in_progress"} :body ""}]
-          out (output/ls-json tickets)]
-      (is (str/starts-with? out "["))
-      (is (str/ends-with? (str/trimr out) "]"))))
+          out (output/ls-json tickets)
+          parsed (json/parse-string out true)]
+      (is (str/starts-with? (str/trim out) "{"))
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (vector? (:data parsed)))))
   (testing "each entry is an object with the ticket's frontmatter fields"
     (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}
                    {:frontmatter {:id "b" :status "in_progress"} :body ""}]
@@ -447,8 +454,9 @@
     (let [tickets [{:frontmatter {:id "a" :external_refs ["JIRA-1"]} :body ""}]
           out (output/ls-json tickets)]
       (is (str/includes? out "\"external_refs\""))))
-  (testing "an empty list renders as []"
-    (is (= "[]" (str/trim (output/ls-json []))))))
+  (testing "an empty list renders as :data []"
+    (let [parsed (json/parse-string (output/ls-json []) true)]
+      (is (= [] (:data parsed))))))
 
 (deftest colorize-test
   (testing "with color? false, returns the text unchanged"
@@ -476,8 +484,8 @@
   (cond-> {:id id}
     missing?       (assoc :missing? true)
     (not missing?) (assoc :ticket {:frontmatter {:id id
-                                                  :title title
-                                                  :status "open"}
+                                                 :title title
+                                                 :status "open"}
                                    :body ""})
     seen-before?   (assoc :seen-before? true)
     children       (assoc :children children)))
@@ -554,14 +562,17 @@
       (is (str/includes? out "[missing]")))))
 
 (deftest dep-tree-json-test
-  (testing "root with no children: bare JSON object with id, title, status, deps:[]"
+  (testing "root with no children: envelope-wrapped object with id, title, status, deps:[]"
     (let [tree (node "kno-A" "Alpha")
-          out  (output/dep-tree-json tree)]
+          out  (output/dep-tree-json tree)
+          parsed (json/parse-string out true)]
       (is (str/starts-with? out "{"))
-      (is (str/includes? out "\"id\":\"kno-A\""))
-      (is (str/includes? out "\"title\":\"Alpha\""))
-      (is (str/includes? out "\"status\":\"open\""))
-      (is (str/includes? out "\"deps\":[]"))))
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= "kno-A" (get-in parsed [:data :id])))
+      (is (= "Alpha" (get-in parsed [:data :title])))
+      (is (= "open" (get-in parsed [:data :status])))
+      (is (= [] (get-in parsed [:data :deps])))))
 
   (testing "nested children appear under :deps as a JSON array"
     (let [tree (node "kno-A" "Alpha"
@@ -585,21 +596,22 @@
       (is (str/includes? out "\"seen_before\":true"))))
 
   (testing "exact JSON snapshot — pin the public contract"
-    ;; Locks the documented shape (issue-0005 lines 127-135): bare nested
+    ;; Locks the documented shape: v0.3 envelope wrapping a nested
     ;; object, snake_case `seen_before`, missing-as-leaf with no `deps`,
     ;; seen-before-as-leaf with no `deps`, normal leaves carry `deps:[]`.
     (let [tree (node "kno-A" "Alpha"
                      :children [(node "kno-G" nil :missing? true)
                                 (node "kno-D" "Delta" :seen-before? true)
                                 (node "kno-B" "Beta")])]
-      (is (= (str "{\"id\":\"kno-A\",\"title\":\"Alpha\",\"status\":\"open\","
+      (is (= (str "{\"schema_version\":1,\"ok\":true,\"data\":"
+                  "{\"id\":\"kno-A\",\"title\":\"Alpha\",\"status\":\"open\","
                   "\"deps\":["
                   "{\"id\":\"kno-G\",\"missing\":true},"
                   "{\"id\":\"kno-D\",\"title\":\"Delta\",\"status\":\"open\","
                   "\"seen_before\":true},"
                   "{\"id\":\"kno-B\",\"title\":\"Beta\",\"status\":\"open\","
                   "\"deps\":[]}"
-                  "]}")
+                  "]}}")
              (output/dep-tree-json tree))))))
 
 (defn- mk-prime-ticket
@@ -1080,10 +1092,13 @@
           "Ready section nudges the agent about recommending the top entry"))))
 
 (deftest prime-json-shape-test
-  (testing "renders a bare JSON object (no envelope)"
-    (let [out (output/prime-json sample-prime-data)]
+  (testing "renders a v0.3 success envelope wrapping the prime payload"
+    (let [out (output/prime-json sample-prime-data)
+          parsed (json/parse-string out true)]
       (is (str/starts-with? out "{"))
-      (is (str/ends-with? (str/trimr out) "}"))))
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (map? (:data parsed)))))
 
   (testing "uses snake_case top-level keys: project, in_progress, ready, ready_truncated, ready_remaining"
     (let [out (output/prime-json sample-prime-data)]
@@ -1107,8 +1122,8 @@
   (testing "ready_truncated reflects the input flag"
     (let [out  (output/prime-json sample-prime-data)
           out2 (output/prime-json (assoc sample-prime-data
-                                          :ready-truncated? true
-                                          :ready-remaining 5))]
+                                         :ready-truncated? true
+                                         :ready-remaining 5))]
       (is (str/includes? out  "\"ready_truncated\":false"))
       (is (str/includes? out2 "\"ready_truncated\":true"))
       (is (str/includes? out2 "\"ready_remaining\":5"))))
@@ -1125,18 +1140,19 @@
           "name field is omitted when no name is provided"))))
 
 (deftest prime-json-no-project-test
-  (testing "no-project case still emits a bare object with empty arrays and counts of 0"
+  (testing "no-project case emits an envelope with empty arrays and counts of 0"
     (let [data {:project {:found? false}
                 :in-progress []
                 :ready []
                 :ready-truncated? false
                 :ready-remaining 0}
-          out (output/prime-json data)]
-      (is (str/starts-with? out "{"))
-      (is (str/includes? out "\"in_progress\":[]"))
-      (is (str/includes? out "\"ready\":[]"))
-      (is (str/includes? out "\"ready_truncated\":false"))
-      (is (str/includes? out "\"ready_remaining\":0")))))
+          parsed (json/parse-string (output/prime-json data) true)]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= [] (get-in parsed [:data :in_progress])))
+      (is (= [] (get-in parsed [:data :ready])))
+      (is (= false (get-in parsed [:data :ready_truncated])))
+      (is (= 0 (get-in parsed [:data :ready_remaining]))))))
 
 ;; -----------------------------------------------------------------------
 ;; Title-from-frontmatter tests
@@ -1204,7 +1220,7 @@
 
   (testing "ticket missing :title in frontmatter still renders without crash"
     (let [tickets [{:frontmatter {:id "kno-2" :status "open" :priority 2
-                                   :mode "afk" :type "task" :assignee "x"}
+                                  :mode "afk" :type "task" :assignee "x"}
                     :body ""}]
           out (output/ls-table tickets {:color? false :tty? false})]
       (is (str/includes? out "kno-2")))))
@@ -1279,3 +1295,143 @@
                 :ready-remaining 0}
           out (output/prime-json data)]
       (is (str/includes? out "\"title\":\"Ready JSON FM\"")))))
+
+;; -----------------------------------------------------------------------
+;; v0.3 JSON envelope
+;;
+;; Every read-mode `--json` output is wrapped in
+;; `{schema_version: 1, ok: true, data: ...}` on success and
+;; `{schema_version: 1, ok: false, error: {code, message, candidates?}}`
+;; on failure. `warnings: []` is reserved for a later slice — we don't
+;; populate it here, but new keys must be tolerated by consumers.
+;; -----------------------------------------------------------------------
+
+(deftest envelope-success-test
+  (testing "envelope wraps any payload in {schema_version, ok:true, data}"
+    (let [parsed (json/parse-string (output/envelope-str {:hello "world"}) true)]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= {:hello "world"} (:data parsed)))
+      (is (not (contains? parsed :error))
+          "success envelope must not carry an :error key")))
+  (testing "data may be a vector"
+    (let [parsed (json/parse-string (output/envelope-str [1 2 3]) true)]
+      (is (= [1 2 3] (:data parsed)))))
+  (testing "data may be a string (e.g. nil-tolerant payloads)"
+    (let [parsed (json/parse-string (output/envelope-str nil) true)]
+      (is (= true (:ok parsed)))
+      (is (contains? parsed :data))
+      (is (nil? (:data parsed)))))
+  (testing "schema_version is currently 1"
+    (let [parsed (json/parse-string (output/envelope-str {}) true)]
+      (is (= 1 (:schema_version parsed))))))
+
+(deftest envelope-error-test
+  (testing "error envelope carries {schema_version, ok:false, error:{code, message}}"
+    (let [parsed (json/parse-string
+                  (output/error-envelope-str {:code "not_found"
+                                              :message "no ticket matching xyz"})
+                  true)]
+      (is (= 1 (:schema_version parsed)))
+      (is (= false (:ok parsed)))
+      (is (= "not_found" (get-in parsed [:error :code])))
+      (is (= "no ticket matching xyz" (get-in parsed [:error :message])))
+      (is (not (contains? parsed :data))
+          "error envelope must not carry a :data key")))
+  (testing "ambiguous_id error includes candidates array"
+    (let [parsed (json/parse-string
+                  (output/error-envelope-str
+                   {:code "ambiguous_id"
+                    :message "ambiguous id 01: kno-01a, kno-01b"
+                    :candidates ["kno-01a" "kno-01b"]})
+                  true)]
+      (is (= "ambiguous_id" (get-in parsed [:error :code])))
+      (is (= ["kno-01a" "kno-01b"] (get-in parsed [:error :candidates])))))
+  (testing "candidates is omitted when not provided"
+    (let [parsed (json/parse-string
+                  (output/error-envelope-str {:code "not_found"
+                                              :message "x"})
+                  true)]
+      (is (not (contains? (:error parsed) :candidates)))))
+  (testing "extra keys on error pass through unchanged so richer shapes can land later"
+    (let [parsed (json/parse-string
+                  (output/error-envelope-str {:code    "not_found"
+                                              :message "no ticket matching x"
+                                              :hint    "try a longer prefix"
+                                              :input   "x"})
+                  true)]
+      (is (= "try a longer prefix" (get-in parsed [:error :hint])))
+      (is (= "x" (get-in parsed [:error :input]))))))
+
+(defn- envelope-of
+  "Parse a JSON string as the v0.3 envelope and return the parsed map."
+  [s]
+  (json/parse-string s true))
+
+(deftest show-json-envelope-test
+  (testing "show-json wraps the ticket in the v0.3 envelope"
+    (let [ticket {:frontmatter {:id "kno-01abc" :status "open" :priority 2}
+                  :body "Body."}
+          parsed (envelope-of (output/show-json ticket))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= "kno-01abc" (get-in parsed [:data :id])))
+      (is (= "open"      (get-in parsed [:data :status])))
+      (is (= 2           (get-in parsed [:data :priority])))
+      (is (= "Body."     (get-in parsed [:data :body])))))
+  (testing "show-json with inverses places them inside :data alongside frontmatter"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [] :children [] :linked []}
+          parsed (envelope-of (output/show-json ticket inverses))]
+      (is (= true (:ok parsed)))
+      (is (= "kno-A" (get-in parsed [:data :id])))
+      (is (= [{:id "kno-B" :title "Beta" :status "open"}]
+             (get-in parsed [:data :blockers]))))))
+
+(deftest ls-json-envelope-test
+  (testing "ls-json wraps the ticket array in the v0.3 envelope"
+    (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}
+                   {:frontmatter {:id "b" :status "in_progress"} :body ""}]
+          parsed  (envelope-of (output/ls-json tickets))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (vector? (:data parsed)))
+      (is (= 2 (count (:data parsed))))
+      (is (= "a" (get-in parsed [:data 0 :id])))
+      (is (= "b" (get-in parsed [:data 1 :id])))))
+  (testing "empty list still emits a success envelope with :data []"
+    (let [parsed (envelope-of (output/ls-json []))]
+      (is (= true (:ok parsed)))
+      (is (= [] (:data parsed))))))
+
+(deftest dep-tree-json-envelope-test
+  (testing "dep-tree-json wraps the nested tree in the v0.3 envelope"
+    (let [tree {:id "kno-A"
+                :ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                         :body ""}
+                :children [{:id "kno-B"
+                            :ticket {:frontmatter {:id "kno-B" :title "Beta" :status "open"}
+                                     :body ""}
+                            :children []}]}
+          parsed (envelope-of (output/dep-tree-json tree))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= "kno-A" (get-in parsed [:data :id])))
+      (is (= "kno-B" (get-in parsed [:data :deps 0 :id]))))))
+
+(deftest prime-json-envelope-test
+  (testing "prime-json wraps the prime payload in the v0.3 envelope"
+    (let [data {:project {:found? true :prefix "kno"
+                          :name "knot" :live-count 1 :archive-count 0}
+                :in-progress []
+                :ready []
+                :ready-truncated? false
+                :ready-remaining 0}
+          parsed (envelope-of (output/prime-json data))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= "kno" (get-in parsed [:data :project :prefix])))
+      (is (= [] (get-in parsed [:data :ready])))
+      (is (= [] (get-in parsed [:data :in_progress])))
+      (is (= false (get-in parsed [:data :ready_truncated]))))))

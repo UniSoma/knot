@@ -4,6 +4,7 @@
    shell back into a `bb` task."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
@@ -116,6 +117,73 @@
         (is (= 1 exit))
         (is (str/includes? err "no ticket matching"))))))
 
+(deftest read-cmd-error-envelope-test
+  (testing "show --json on a missing id emits the v0.3 error envelope on stdout (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "show" "no-such-id" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "error envelope goes to stdout, not stderr — JSON consumers parse stdout")
+        (is (= 1 (:schema_version parsed)))
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code])))
+        (is (str/includes? (get-in parsed [:error :message]) "no-such-id"))
+        (is (not (contains? parsed :data))
+            "error envelope does not carry a :data key"))))
+
+  (testing "show --json on an ambiguous partial id emits ambiguous_id error envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc111111--a.md"))
+            "---\nid: kno-01abc111111\nstatus: open\n---\n\n# A\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--b.md"))
+            "---\nid: kno-01abc222222\nstatus: open\n---\n\n# B\n")
+      (let [{:keys [exit out err]} (run-knot tmp "show" "kno-01abc" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= 1 (:schema_version parsed)))
+        (is (= false (:ok parsed)))
+        (is (= "ambiguous_id" (get-in parsed [:error :code])))
+        (is (= ["kno-01abc111111" "kno-01abc222222"]
+               (get-in parsed [:error :candidates])))
+        (is (not (contains? parsed :data))))))
+
+  (testing "dep tree --json on an ambiguous partial id emits ambiguous_id error envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc111111--a.md"))
+            "---\nid: kno-01abc111111\nstatus: open\n---\n\n# A\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--b.md"))
+            "---\nid: kno-01abc222222\nstatus: open\n---\n\n# B\n")
+      (let [{:keys [exit out err]} (run-knot tmp "dep" "tree" "kno-01abc" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "ambiguous_id" (get-in parsed [:error :code])))
+        (is (= ["kno-01abc111111" "kno-01abc222222"]
+               (get-in parsed [:error :candidates]))))))
+
+  (testing "dep tree --json on an UNKNOWN root id intentionally returns ok:true with data.missing:true"
+    ;; Unlike `show`, `dep tree` is tolerant of unknown roots: it renders the
+    ;; root as a `[missing]` leaf so consumers can discover broken `:deps`
+    ;; refs *via* the parent that links to them. Pinning this here so the
+    ;; v0.3 contract asymmetry between show (`ok:false, not_found`) and
+    ;; dep tree (`ok:true, data.missing:true`) for the same input is
+    ;; deliberate, not accidental.
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "dep" "tree" "no-such-id" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (str/blank? err))
+        (is (= true (:ok parsed)))
+        (is (= true (get-in parsed [:data :missing])))
+        (is (= "no-such-id" (get-in parsed [:data :id])))))))
+
 (deftest ls-end-to-end-test
   (testing "ls renders a table with both ticket titles when piped"
     (with-tmp tmp
@@ -131,14 +199,17 @@
         (is (not (re-find #"\[" out))
             "no ANSI escape sequences should appear when stdout is piped"))))
 
-  (testing "ls --json emits a bare JSON array of objects"
+  (testing "ls --json emits a v0.3 success-envelope wrapping a JSON array"
     (with-tmp tmp
       (run-knot tmp "create" "Hello")
       (let [{:keys [exit out err]} (run-knot tmp "ls" "--json")]
         (is (zero? exit) (str "ls --json err=" err))
         (let [trimmed (str/trim out)]
-          (is (str/starts-with? trimmed "["))
-          (is (str/ends-with? trimmed "]"))
+          (is (str/starts-with? trimmed "{"))
+          (is (str/ends-with? trimmed "}"))
+          (is (str/includes? trimmed "\"schema_version\":1"))
+          (is (str/includes? trimmed "\"ok\":true"))
+          (is (str/includes? trimmed "\"data\":["))
           (is (str/includes? trimmed "\"status\":\"open\"")))))))
 
 (deftest list-end-to-end-test
@@ -154,18 +225,21 @@
         (is (str/includes? out "First ticket"))
         (is (str/includes? out "Second ticket")))))
 
-  (testing "knot list --json emits the same JSON shape as knot ls --json"
+  (testing "knot list --json emits the same envelope shape as knot ls --json"
     (with-tmp tmp
       (run-knot tmp "create" "Hello")
       (let [{:keys [exit out err]} (run-knot tmp "list" "--json")]
         (is (zero? exit) (str "list --json err=" err))
         (let [trimmed (str/trim out)]
-          (is (str/starts-with? trimmed "["))
-          (is (str/ends-with? trimmed "]"))
+          (is (str/starts-with? trimmed "{"))
+          (is (str/ends-with? trimmed "}"))
+          (is (str/includes? trimmed "\"schema_version\":1"))
+          (is (str/includes? trimmed "\"ok\":true"))
+          (is (str/includes? trimmed "\"data\":["))
           (is (str/includes? trimmed "\"status\":\"open\"")))))))
 
 (deftest show-json-end-to-end-test
-  (testing "show --json emits a bare JSON object with snake_case keys"
+  (testing "show --json emits a v0.3 success envelope wrapping the ticket"
     (with-tmp tmp
       (let [{:keys [out]} (run-knot tmp "create" "Hello"
                                     "--external-ref" "JIRA-1")
@@ -177,6 +251,8 @@
         (let [trimmed (str/trim out)]
           (is (str/starts-with? trimmed "{"))
           (is (str/ends-with? trimmed "}"))
+          (is (str/includes? trimmed "\"schema_version\":1"))
+          (is (str/includes? trimmed "\"ok\":true"))
           (is (str/includes? trimmed (str "\"id\":\"" id "\"")))
           (is (str/includes? trimmed "\"external_refs\""))
           (is (str/includes? trimmed "\"body\"")))))))
@@ -600,6 +676,8 @@
         (is (str/includes? (:out text) "Beta"))
         (is (zero? (:exit json)))
         (is (str/starts-with? (str/trim (:out json)) "{"))
+        (is (str/includes? (:out json) "\"schema_version\":1"))
+        (is (str/includes? (:out json) "\"ok\":true"))
         (is (str/includes? (:out json) (str "\"id\":\"" a-id "\"")))
         (is (str/includes? (:out json) (str "\"id\":\"" b-id "\"")))))))
 
@@ -665,7 +743,7 @@
       (run-knot tmp "create" "Afk open"  "--afk")
       (run-knot tmp "create" "Hitl open" "--hitl")
       (let [{:keys [exit out err]} (run-knot tmp "ls" "--status" "open"
-                                              "--mode" "afk")]
+                                             "--mode" "afk")]
         (is (zero? exit) (str "ls err=" err))
         (is (str/includes? out "Afk open"))
         (is (not (str/includes? out "Hitl open"))))))
@@ -739,12 +817,15 @@
         (is (str/includes? capped "Beta"))
         (is (not (str/includes? capped "Alpha"))))))
 
-  (testing "closed --json returns a bare JSON array"
+  (testing "closed --json returns a v0.3 success-envelope wrapping a JSON array"
     (with-tmp tmp
       (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
             _    (run-knot tmp "close" a-id)
             {:keys [out]} (run-knot tmp "closed" "--json")]
-        (is (str/starts-with? (str/trim out) "["))
+        (is (str/starts-with? (str/trim out) "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":["))
         (is (str/includes? out "\"status\":\"closed\"")))))
 
   (testing "closed and blocked reject filter flags they do not implement"
@@ -960,12 +1041,14 @@
             "open-but-not-started ticket should not trigger an In Progress section")
         (is (str/includes? out "Live ticket")))))
 
-  (testing "prime --json emits a bare object with the documented snake_case keys"
+  (testing "prime --json emits a v0.3 success envelope with documented snake_case keys"
     (with-tmp tmp
       (run-knot tmp "create" "Live ticket")
       (let [{:keys [exit out err]} (run-knot tmp "prime" "--json")]
         (is (zero? exit) (str "prime --json err=" err))
         (is (str/starts-with? (str/trim out) "{"))
+        (is (str/includes? out "\"schema_version\":1"))
+        (is (str/includes? out "\"ok\":true"))
         (is (str/includes? out "\"project\""))
         (is (str/includes? out "\"in_progress\""))
         (is (str/includes? out "\"ready\""))

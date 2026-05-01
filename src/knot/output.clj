@@ -127,6 +127,34 @@
          env-disables? (and (string? env) (not= env ""))]
      (and tty?* (not no-color?) (not env-disables?)))))
 
+(def schema-version
+  "v0.3 JSON envelope schema version. Bumped only on shape-incompatible
+   changes; new keys (e.g. a future `warnings` slot) are additive and
+   do not change this number."
+  1)
+
+(defn envelope-str
+  "Serialize a v0.3 JSON success envelope around `data`. The shape is
+   `{schema_version: 1, ok: true, data: <data>}`. `array-map` keeps the
+   key order stable for snapshot tests — only three keys, so it stays
+   an array-map below Clojure's transition threshold."
+  [data]
+  (json/generate-string
+   (array-map :schema_version schema-version
+              :ok             true
+              :data           data)))
+
+(defn error-envelope-str
+  "Serialize a v0.3 JSON error envelope. `error` is a map with `:code`,
+   `:message`, and an optional `:candidates` vector (used by
+   `ambiguous_id`). Extra keys on `error` pass through unchanged so
+   richer error shapes can land later without changing this helper."
+  [error]
+  (json/generate-string
+   (array-map :schema_version schema-version
+              :ok             false
+              :error          error)))
+
 (defn- jsonify-ticket
   "Project a `{:frontmatter ... :body ...}` map into the JSON shape used by
    `show --json` and `ls --json`. Keeps frontmatter keys at the top level
@@ -160,24 +188,24 @@
      :linked   (mapv jsonify-inverse-entry (:linked   inverses))}))
 
 (defn show-json
-  "Render a ticket map as a bare JSON object. Keys are snake_case; no
-   envelope is added around the object. With `inverses`, adds top-level
-   `blockers`, `blocking`, `children`, `linked` arrays whose entries are
-   `{id, title, status}` for resolved refs or `{id, missing:true}` for
-   broken ones."
+  "Render a ticket map wrapped in the v0.3 success envelope. The ticket
+   sits under `:data`; keys inside it are snake_case. With `inverses`,
+   adds `blockers`, `blocking`, `children`, `linked` arrays alongside the
+   frontmatter under `:data` — entries are `{id, title, status}` for
+   resolved refs or `{id, missing:true}` for broken ones."
   ([ticket]
-   (json/generate-string (jsonify-ticket ticket {:include-body? true})))
+   (envelope-str (jsonify-ticket ticket {:include-body? true})))
   ([ticket inverses]
-   (json/generate-string
+   (envelope-str
     (merge (jsonify-ticket ticket {:include-body? true})
            (inverses->json-fields inverses)))))
 
 (defn ls-json
-  "Render a sequence of ticket maps as a bare JSON array of objects.
-   Keys are snake_case; the body is omitted from each entry to keep
-   list output compact."
+  "Render a sequence of ticket maps wrapped in the v0.3 success envelope.
+   The ticket array sits under `:data`; keys inside each entry are
+   snake_case; the body is omitted to keep list output compact."
   [tickets]
-  (json/generate-string
+  (envelope-str
    (mapv #(jsonify-ticket % {:include-body? false}) tickets)))
 
 (defn colorize
@@ -322,13 +350,20 @@
     (assoc :deps (mapv jsonify-tree-node (or children [])))))
 
 (defn dep-tree-json
-  "Render a dep-tree node as a bare nested JSON object (no envelope).
-   Each node carries `id`; non-missing nodes also carry `title` and
-   `status`; non-leaf nodes carry a `deps` array of children. Missing
-   referents add `missing:true` and stop. Seen-before? nodes add
-   `seen_before:true` and stop."
+  "Render a dep-tree node wrapped in the v0.3 success envelope. The
+   nested tree sits under `:data`. Each node carries `id`; non-missing
+   nodes also carry `title` and `status`; non-leaf nodes carry a `deps`
+   array of children. Missing referents add `missing:true` and stop.
+   Seen-before? nodes add `seen_before:true` and stop.
+
+   Asymmetry note vs `show-json`: an unknown root id yields
+   `{ok:true, data:{id, missing:true}}` here, not a `not_found` error
+   envelope. Dep tree is intentionally tolerant of missing roots so
+   consumers can discover broken `:deps` refs *via* the parent that
+   links to them — the missing leaf is information, not error. JSON
+   consumers should branch on `data.missing` distinctly from `ok:false`."
   [tree]
-  (json/generate-string (jsonify-tree-node tree)))
+  (envelope-str (jsonify-tree-node tree)))
 
 (defn ls-table
   "Render `tickets` as a fixed-width text table with the columns
@@ -598,14 +633,14 @@ before issuing other Knot commands.")
          (not (str/blank? summary))) (assoc :summary summary)))
 
 (defn prime-json
-  "Render the actionable subset of prime data as a bare JSON object.
-   Keys are snake_case: `project`, `in_progress`, `ready`,
-   `ready_truncated`, `ready_remaining`, `recently_closed`. The
-   preamble and command cheatsheet are omitted — JSON consumers are
-   tools that know the schema by definition."
+  "Render the actionable subset of prime data wrapped in the v0.3 success
+   envelope. Inside `:data`, keys are snake_case: `project`,
+   `in_progress`, `ready`, `ready_truncated`, `ready_remaining`,
+   `recently_closed`. The preamble and command cheatsheet are omitted —
+   JSON consumers are tools that know the schema by definition."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
            recently-closed]}]
-  (json/generate-string
+  (envelope-str
    {:project          (jsonify-prime-project project)
     :in_progress      (mapv jsonify-prime-ticket in-progress)
     :ready            (mapv jsonify-prime-ticket ready)
