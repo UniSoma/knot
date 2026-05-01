@@ -1,4 +1,6 @@
-pre_start: "bbin install ."
+pre_start:
+  - "bbin install ."
+  - "bb nrepl-server 7888"
 
 mounts:
   - $HOME/.m2

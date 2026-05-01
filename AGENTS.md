@@ -1,14 +1,20 @@
-## Issue tracking
+# Knot — File-Based Issue Tracker
 
-This project tracks work with **knot** — markdown tickets under `.tickets/` (closed auto-archive to
-`.tickets/archive/`), config in `.knot.edn` at the repo root.
+A Babashka file-based ticket tracker, storing tickets as markdown with YAML frontmatter for AI-friendly, daemon-less workflows.
 
-For any ticket-shaped intent ("what's next", "track this", "show me <id>", "I'm done", "blocked on X", "any open
-bugs?"), use the `knot` skill — it's the canonical reference. The CLI keeps frontmatter, the dep graph, and the archive
-consistent, and resolves partial IDs across live + archive.
+## Hard rules (every task)
 
-**Never read or write `.tickets/` by hand.** No `Read`, `cat`, `grep`, `Write`, `Edit`, `sed`, or `mv` against files in
-there — use `knot show` / `knot list --json` / `knot create` / `knot add-note` / `knot close` instead. If a knot command
-behaves unexpectedly, surface the bug; don't bypass.
+- **No AI attribution in commit messages or trailers.** No "Generated with", `Co-Authored-By: Claude`, AI emojis, or similar.
+- **Map `.clj` files before reading them.** Run `clj-surgeon :op :ls :file <path>` first on any `.clj` file over ~500 lines, then `Read` only the line ranges you need. ~150× more token-efficient than blind reads. Full op reference: the `clj-surgeon` skill.
+- **Test before commit.** Run `bb test`. See [docs/agents/testing.md](docs/agents/testing.md).
+- **Lint before commit.** Run `clj-kondo --lint src test`. See [docs/agents/linting-and-formatting.md](docs/agents/linting-and-formatting.md).
 
-Hosted-tracker prefixes (`GH-`, `ENG-`, `LIN-`, `JIRA-`) point at *other* trackers — use the matching tool, not knot.
+## Where to look
+
+| Topic                    | Source                                                                           |
+|--------------------------|----------------------------------------------------------------------------------|
+| Git & commit conventions | [docs/agents/git-and-commits.md](docs/agents/git-and-commits.md)                 |
+| Running tests            | [docs/agents/testing.md](docs/agents/testing.md)                                 |
+| Linting & formatting     | [docs/agents/linting-and-formatting.md](docs/agents/linting-and-formatting.md)   |
+| Clojure REPL evaluation  | [docs/agents/clojure-repl-evaluation.md](docs/agents/clojure-repl-evaluation.md) |
+| Issue tracking (knot)    | [docs/agents/issue-tracking.md](docs/agents/issue-tracking.md)                   |

@@ -26,7 +26,6 @@ RUN curl -fsSL "https://github.com/clj-kondo/clj-kondo/releases/download/v${CLJ_
     clj-kondo --version
 
 # Clojure MCP and MCP Light
-RUN clojure -Ttools install-latest :lib io.github.bhauman/clojure-mcp :as mcp
 RUN bbin install https://github.com/bhauman/clojure-mcp-light.git --tag v0.2.2; \
     bbin install https://github.com/bhauman/clojure-mcp-light.git --tag v0.2.2 --as clj-nrepl-eval --main-opts '["-m" "clojure-mcp-light.nrepl-eval"]'; \
     bbin install https://github.com/bhauman/clojure-mcp-light.git --tag v0.2.2 --as clj-paren-repair --main-opts '["-m" "clojure-mcp-light.paren-repair"]' 
