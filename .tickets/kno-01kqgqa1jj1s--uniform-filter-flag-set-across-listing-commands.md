@@ -6,11 +6,13 @@ type: task
 priority: 2
 mode: afk
 created: '2026-05-01T02:53:56.178330647Z'
-updated: '2026-05-01T02:53:56.178330647Z'
+updated: '2026-05-01T03:11:18.577301504Z'
 tags:
 - v0.3
 - cli
 - needs-triage
+links:
+- kno-01kqe9ytd40z
 ---
 
 ## Description

@@ -6,11 +6,13 @@ type: bug
 priority: 2
 mode: afk
 created: '2026-05-01T02:54:10.333902682Z'
-updated: '2026-05-01T02:54:10.333902682Z'
+updated: '2026-05-01T03:11:18.171358321Z'
 tags:
 - v0.3
 - store
 - needs-triage
+links:
+- kno-01kqcvp72htb
 ---
 
 ## Description

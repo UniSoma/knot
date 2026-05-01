@@ -6,13 +6,15 @@ type: task
 priority: 4
 mode: hitl
 created: '2026-05-01T02:55:36.831466844Z'
-updated: '2026-05-01T02:57:44.862917297Z'
+updated: '2026-05-01T03:11:18.438838679Z'
 tags:
 - v0.3
 - cli
 - needs-triage
 deps:
 - kno-01kqgqc2ks70
+links:
+- kno-01kqe7aka8q9
 ---
 
 ## Description

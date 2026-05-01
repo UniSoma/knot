@@ -6,8 +6,12 @@ type: feature
 priority: 3
 mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
-updated: '2026-04-29T19:19:54.374266390Z'
+updated: '2026-05-01T03:11:26.695691072Z'
+links:
+- kno-01kqgqapwqvh
+- kno-01kqg37mssy3
 ---
+
 ## Description
 
 The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize the `:status` column per value, but `:type`, `:mode`, and `:priority` are mostly uniform — `:type` and `:mode` collapse to `[:faint]` regardless of value, and `:priority` only highlights `0`. Scanning a long list for, say, all bugs is harder than it should be.
@@ -35,3 +39,9 @@ The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize 
 2. Confirm the existing `color?`/`tty?`/`NO_COLOR` gating (around lines 118-128 and 313-336) covers the new entries — should be automatic since they flow through the same `color-codes-for` indirection.
 3. Update `output_test.clj` table-color tests if present; add coverage for the new mappings.
 4. Eyeball against a real terminal — ANSI palettes vary by theme; pick colors that read on both light and dark backgrounds.
+
+## Notes
+
+**2026-05-01T03:11:26.695691072Z**
+
+Design recommendation superseded — apply role-derivation pattern from kno-01kqg37mssy3 (status colors derived from :statuses / :active-status / :terminal-statuses, not from literal status names). Do not hardcode color literals keyed by canonical config values; that pattern has now been recognized as the recurring 'hardcoded-canonical-config-literals' bug source three times. Open question #1 (':type-colors' map in .knot.edn) becomes the right shape, possibly with role-based defaults for the canonical types/modes/priorities. See kno-01kqgqapwqvh for the broader audit.

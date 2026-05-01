@@ -6,12 +6,14 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-04-30T03:36:08.264863311Z'
-updated: '2026-04-30T03:36:08.264863311Z'
+updated: '2026-05-01T03:11:28.243419727Z'
 tags:
 - p3
 external_refs:
 - 0ffb999
 - 30e31c6
+links:
+- kno-01kqgqd3vzx6
 ---
 
 ## Description
@@ -44,3 +46,9 @@ Cleanup items deferred from the post-commit code review of 30e31c6
 
 Bundle as one small PR or skip if low value. None blocks anything;
 all surface from a clean code review.
+
+## Notes
+
+**2026-05-01T03:11:28.243419727Z**
+
+Items #1 (stale-flag asymmetry doc note) and #2 (rename cli/in-progress-tickets to cli/prime-in-progress-tickets) are conditional on kno-01kqgqd3vzx6 (decide whether prime in-progress nudge consolidates under knot check). If that decision consolidates the staleness logic under 'knot check', prime-in-progress-tickets stops decorating and both items become moot. Item #3 (extract shared skill-pointer constant) survives either way.

@@ -6,8 +6,12 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T14:53:31.601460483Z'
-updated: '2026-04-29T14:53:31.601460483Z'
+updated: '2026-05-01T03:11:18.232581707Z'
+links:
+- kno-01kqgqafcxvv
+- kno-01kqgqfwk4h1
 ---
+
 ## Description
 
 After enabling CI on a 3-OS matrix, the windows-latest job surfaced 14 test failures. This ticket tracks fixing them so we can drop continue-on-error from the workflow and treat Windows as a blocking platform.

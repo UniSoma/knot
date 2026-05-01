@@ -6,12 +6,14 @@ type: task
 priority: 1
 mode: afk
 created: '2026-05-01T02:53:50.004055763Z'
-updated: '2026-05-01T02:53:50.004055763Z'
+updated: '2026-05-01T03:11:18.506403192Z'
 tags:
 - v0.3
 - json
 - cli
 - needs-triage
+links:
+- kno-01kqe94cgmd2
 ---
 
 ## Description

@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-05-01T02:57:07.684531365Z'
-updated: '2026-05-01T02:57:50.439843379Z'
+updated: '2026-05-01T03:11:18.232581707Z'
 tags:
 - v0.3
 - release
@@ -21,6 +21,9 @@ deps:
 - kno-01kqgqa7wnep
 - kno-01kqgqegm782
 - kno-01kqgqf4aw4j
+links:
+- kno-01kqcpb0t5s7
+- kno-01kqcvp72htb
 ---
 
 ## Description
