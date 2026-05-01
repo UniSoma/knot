@@ -431,6 +431,147 @@
         (is (str/includes? (ex-message e) "kno-01abc111111"))
         (is (str/includes? (ex-message e) "kno-01abc222222"))))))
 
+(defn- seq-gen-id-fn
+  "Build a deterministic gen-id-fn from a seq of ids — pops the head on
+   each call. Throws when exhausted so test fixtures with too few ids
+   surface as failures rather than nil-id corruption."
+  [ids]
+  (let [a (atom (vec ids))]
+    (fn []
+      (let [[head & tail] @a]
+        (when (nil? head)
+          (throw (ex-info "test gen-id-fn exhausted" {:remaining 0})))
+        (reset! a (vec tail))
+        head))))
+
+(defn- mk-build-fn
+  "Build a build-fn that returns a fixed slug + a minimal ticket whose id
+   is set from the dispatched id. Status is stamped from the test."
+  [slug status]
+  (fn [id]
+    {:slug slug
+     :ticket {:frontmatter {:id id :status status}
+              :body ""}}))
+
+(deftest save-new-happy-path-test
+  (testing "save-new! writes the ticket to the live dir and returns the path"
+    (with-tmp tmp
+      (let [gen-id-fn (seq-gen-id-fn ["kno-fresh01"])
+            build-fn  (mk-build-fn "alpha" "open")
+            path      (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)]
+        (is (= path (str (fs/path tmp ".tickets" "kno-fresh01--alpha.md"))))
+        (is (fs/exists? path))
+        (let [fm (read-fm path)]
+          (is (= "kno-fresh01" (:id fm)))
+          (is (= "open" (:status fm)))
+          (is (= "2026-04-28T12:00:00Z" (:updated fm)))))))
+
+  (testing "save-new! with blank slug uses bare <id>.md"
+    (with-tmp tmp
+      (let [gen-id-fn (seq-gen-id-fn ["kno-bare01"])
+            build-fn  (mk-build-fn "" "open")
+            path      (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)]
+        (is (= path (str (fs/path tmp ".tickets" "kno-bare01.md")))))))
+
+  (testing "save-new! routes terminal-status tickets to archive/"
+    (with-tmp tmp
+      (let [gen-id-fn (seq-gen-id-fn ["kno-done01"])
+            build-fn  (mk-build-fn "fix" "closed")
+            path      (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)]
+        (is (str/includes? path (str (fs/path "archive" "kno-done01--fix.md"))))
+        (is (fs/exists? path))
+        (is (= "2026-04-28T12:00:00Z" (:closed (read-fm path)))))))
+
+  (testing "save-new! creates parent directories as needed"
+    (with-tmp tmp
+      (let [gen-id-fn (seq-gen-id-fn ["kno-mkd01"])
+            build-fn  (mk-build-fn "" "closed")]
+        (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)
+        (is (fs/directory? (fs/path tmp ".tickets" "archive")))))))
+
+(deftest save-new-collision-retry-test
+  (testing "save-new! retries past pre-existing files at the candidate path"
+    (with-tmp tmp
+      ;; Pre-stage a file at the path that the FIRST generated id would land on.
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [taken-path (str (fs/path tmp ".tickets" "kno-taken01--alpha.md"))]
+        (spit taken-path "preexisting content — must not be overwritten")
+        (let [gen-id-fn-state (atom 0)
+              gen-id-fn       (let [base (seq-gen-id-fn ["kno-taken01" "kno-fresh01"])]
+                                (fn []
+                                  (swap! gen-id-fn-state inc)
+                                  (base)))
+              build-fn        (mk-build-fn "alpha" "open")
+              path            (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)]
+          (is (= path (str (fs/path tmp ".tickets" "kno-fresh01--alpha.md"))))
+          (is (fs/exists? path))
+          (is (= 2 @gen-id-fn-state)
+              "gen-id-fn should be called once for the taken id, once for the fresh one")
+          (is (= "preexisting content — must not be overwritten"
+                 (slurp taken-path))
+              "pre-existing file at the collided path must be untouched")))))
+
+  (testing "save-new! retries past multiple consecutive collisions"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [taken-ids ["kno-t01" "kno-t02" "kno-t03"]
+            _         (doseq [id taken-ids]
+                        (spit (str (fs/path tmp ".tickets" (str id "--a.md"))) ""))
+            gen-id-fn (seq-gen-id-fn (concat taken-ids ["kno-fresh01"]))
+            build-fn  (mk-build-fn "a" "open")
+            path      (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)]
+        (is (str/ends-with? path "kno-fresh01--a.md"))
+        (is (fs/exists? path))))))
+
+(deftest save-new-exhaustion-test
+  (testing "save-new! throws :id-collision-exhausted after default max-retries=10"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [taken-ids (mapv #(str "kno-tk" %) (range 10))
+            _         (doseq [id taken-ids]
+                        (spit (str (fs/path tmp ".tickets" (str id "--a.md"))) ""))
+            gen-id-fn (seq-gen-id-fn taken-ids)
+            build-fn  (mk-build-fn "a" "open")
+            e         (try (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)
+                           nil
+                           (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e) "exhaustion must throw")
+        (let [data (ex-data e)]
+          (is (= :id-collision-exhausted (:kind data)))
+          (is (= 10 (:attempts data)))
+          (is (= "kno-tk9" (:last-id data))
+              "last-id should be the id from the final exhausted attempt")))))
+
+  (testing "save-new! honors a custom :max-retries"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [taken-ids ["kno-x01" "kno-x02" "kno-x03"]
+            _         (doseq [id taken-ids]
+                        (spit (str (fs/path tmp ".tickets" (str id "--a.md"))) ""))
+            gen-id-fn (seq-gen-id-fn taken-ids)
+            build-fn  (mk-build-fn "a" "open")
+            opts      (assoc save-opts :max-retries 3)
+            e         (try (store/save-new! tmp ".tickets" gen-id-fn build-fn opts)
+                           nil
+                           (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :id-collision-exhausted (:kind (ex-data e))))
+        (is (= 3 (:attempts (ex-data e))))))))
+
+(deftest save-new-atomic-create-test
+  (testing "save-new! does NOT overwrite an existing file at the candidate path"
+    ;; Layer B's atomicity guarantee: when CREATE_NEW catches a collision,
+    ;; the prior file's content stays intact (no partial writes, no truncate).
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [taken-path (str (fs/path tmp ".tickets" "kno-taken01--alpha.md"))
+            sentinel   "DO NOT OVERWRITE — load-bearing content"
+            _          (spit taken-path sentinel)
+            gen-id-fn  (seq-gen-id-fn ["kno-taken01" "kno-fresh01"])
+            build-fn   (mk-build-fn "alpha" "open")]
+        (store/save-new! tmp ".tickets" gen-id-fn build-fn save-opts)
+        (is (= sentinel (slurp taken-path))
+            "save-new! must never spit-overwrite an existing path; only CREATE_NEW")))))
+
 (deftest try-resolve-id-test
   (testing "unique match returns the canonical full id string"
     (with-tmp tmp

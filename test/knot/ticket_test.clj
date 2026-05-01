@@ -31,7 +31,59 @@
     (let [last-two #(subs % (- (count %) 2))
           randoms  (set (map last-two (repeatedly 50 #(ticket/generate-id "p"))))]
       (is (> (count randoms) 1)
-          "with 50 samples, the 2-char random suffix should produce more than one distinct value"))))
+          "with 50 samples, the 2-char random suffix should produce more than one distinct value")))
+  (testing "consecutive same-ms calls within a single process are collision-free"
+    ;; Burst 200 ids back-to-back; same-ms collisions used to flake at 5+.
+    (let [ids (vec (repeatedly 200 #(ticket/generate-id "p")))]
+      (is (= 200 (count (distinct ids)))
+          "monotonic factory must guarantee no intra-process same-ms collisions")
+      ;; Sortability holds even within the same ms (rand bumps preserve order).
+      (is (= ids (sort ids))
+          "same-ms ids must remain monotonically sortable"))))
+
+(deftest advance-id-state-test
+  (let [advance @#'ticket/advance-id-state]
+    (testing "nil last-state: emit fresh-rand at now-ms"
+      (let [[new-state id] (advance nil 1000 7 "kno")]
+        (is (= {:ts 1000 :rand 7} new-state))
+        (is (re-matches #"kno-[0-9a-z]{12}" id))))
+
+    (testing "now-ms > last.ts: emit fresh-rand at now-ms (random NOT carried)"
+      (let [last-state     {:ts 1000 :rand 42}
+            [new-state id] (advance last-state 2000 9 "kno")]
+        (is (= {:ts 2000 :rand 9} new-state))
+        (is (re-matches #"kno-[0-9a-z]{12}" id))))
+
+    (testing "same-ms call bumps rand by 1 — fresh-rand parameter is ignored"
+      (let [last-state {:ts 1000 :rand 5}
+            [new-state _] (advance last-state 1000 999 "kno")]
+        (is (= {:ts 1000 :rand 6} new-state)
+            "rand must increment from last.rand, NOT replace with fresh-rand")))
+
+    (testing "now-ms < last.ts (clock skew): treats as same-ms — bumps rand at last.ts"
+      ;; Clocks can go backwards (NTP, daylight savings on misconfigured hosts).
+      ;; Spec: "if now-ms ≤ last-ts, reuse last-ts and emit last-rand + 1".
+      (let [last-state {:ts 5000 :rand 5}
+            [new-state _] (advance last-state 1000 999 "kno")]
+        (is (= {:ts 5000 :rand 6} new-state)
+            "backward-clock case must reuse last.ts, not now-ms")))
+
+    (testing "rand overflow: same-ms with last.rand=1023 bumps ts by 1, resets rand to 0"
+      (let [last-state {:ts 1000 :rand 1023}
+            [new-state _] (advance last-state 1000 42 "kno")]
+        (is (= {:ts 1001 :rand 0} new-state))))
+
+    (testing "overflow when ts already > now-ms (drift accumulated): keeps bumping"
+      ;; Successive overflows under sustained same-ms burst — ts marches forward
+      ;; relative to wall clock until wall clock catches up.
+      (let [last-state {:ts 5000 :rand 1023}
+            [new-state _] (advance last-state 1000 0 "kno")]
+        (is (= {:ts 5001 :rand 0} new-state))))
+
+    (testing "id format encodes (ts, rand) as <prefix>-<10ts><2rand>, lowercase Crockford"
+      (let [[_ id] (advance nil 1 0 "kno")]
+        (is (= "kno-000000000100" id)
+            "ts=1, rand=0 → 10-char ts '0000000001' + 2-char rand '00'")))))
 
 (deftest parse-test
   (testing "parses a file into :frontmatter and :body"

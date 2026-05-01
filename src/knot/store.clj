@@ -6,7 +6,10 @@
             [clojure.string :as str]
             [flatland.ordered.map :as om]
             [knot.ticket :as ticket])
-  (:import (java.time Instant)))
+  (:import (java.nio.file FileAlreadyExistsException Files OpenOption
+                          Path StandardOpenOption)
+           (java.nio.charset StandardCharsets)
+           (java.time Instant)))
 
 (def ^:private archive-subdir "archive")
 
@@ -148,6 +151,69 @@
             :when (not= p target)]
       (fs/delete-if-exists p))
     target))
+
+(def ^:private create-new-options
+  "OpenOption[] for `Files/write`. `CREATE_NEW` makes the open atomic
+   and exclusive (POSIX `O_CREAT|O_EXCL`) so a racing writer at the
+   same path observes `FileAlreadyExistsException`."
+  (into-array OpenOption [StandardOpenOption/CREATE_NEW
+                          StandardOpenOption/WRITE]))
+
+(defn save-new!
+  "Atomically create a new ticket on disk. Per attempt: call `(gen-id-fn)`
+   to mint a fresh id, call `(build-fn id)` to assemble
+   `{:slug s :ticket {:frontmatter ... :body ...}}`, route to live or
+   archive based on the ticket's status (matching `save!`), stamp
+   `:updated` and `:closed`, then write via
+   `java.nio.file.Files/write` with `CREATE_NEW` — the open-side is
+   atomic (POSIX `O_CREAT|O_EXCL`), so two writers racing on the same
+   path see exactly one success and one `FileAlreadyExistsException`.
+
+   On filesystem-level collision the call regenerates a fresh id and
+   retries, bounded at `:max-retries` (default 10) attempts. On
+   exhaustion throws `ex-info` with
+   `{:kind :id-collision-exhausted :attempts <n> :last-id <id>}`.
+
+   Caveat: `CREATE_NEW` only catches collisions at the *exact target
+   path*. Cross-process races where two processes mint the same id but
+   build different slugs (different titles) produce two on-disk files
+   with the same id; `resolve-id` will then surface the duplicate as
+   ambiguous. Same property as `save!`; not regressed by this fn.
+
+   Returns the written path on success. `opts` is
+   `{:now <iso-string?> :terminal-statuses <set?> :max-retries <int?>}`."
+  [project-root tickets-dir gen-id-fn build-fn
+   {:keys [now terminal-statuses max-retries]
+    :or   {max-retries 10}}]
+  (let [now* (or now (now-iso))]
+    (loop [attempts 0
+           last-id  nil]
+      (if (>= attempts max-retries)
+        (throw (ex-info "id collision retry exhausted"
+                        {:kind     :id-collision-exhausted
+                         :attempts attempts
+                         :last-id  last-id}))
+        (let [id        (gen-id-fn)
+              {:keys [slug ticket]} (build-fn id)
+              new-st    (get-in ticket [:frontmatter :status])
+              target    (if (terminal? terminal-statuses new-st)
+                          (archive-path project-root tickets-dir id slug)
+                          (ticket-path project-root tickets-dir id slug))
+              ;; Fresh ticket → no prior status to compare against.
+              fm*       (stamp-timestamps (:frontmatter ticket) new-st nil now* terminal-statuses)
+              ticket*   (assoc ticket :frontmatter fm*)
+              rendered  (.getBytes ^String (ticket/render ticket*)
+                                   StandardCharsets/UTF_8)
+              target-path ^Path (fs/path target)]
+          (fs/create-dirs (fs/parent target-path))
+          (let [result (try
+                         (Files/write target-path rendered create-new-options)
+                         target
+                         (catch FileAlreadyExistsException _
+                           ::collision))]
+            (if (= ::collision result)
+              (recur (inc attempts) id)
+              result)))))))
 
 (defn load-one
   "Load and parse the ticket whose filename starts with `<id>` from either

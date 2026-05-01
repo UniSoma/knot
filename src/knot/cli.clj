@@ -92,34 +92,39 @@
            (when-not (:now ctx) {:now (now-iso)}))))
 
 (defn create-cmd
-  "Create a new ticket from `opts` and write it via `knot.store/save!`.
+  "Create a new ticket from `opts` and write it via `knot.store/save-new!`.
    Returns the saved path. `ctx` carries `:project-root`, `:prefix`, and
    optional overrides for defaults (`:tickets-dir`, `:default-type`, etc.).
-   `opts` is the parsed argument map, e.g. `{:title \"Fix login\" :priority 0}`."
+   `opts` is the parsed argument map, e.g. `{:title \"Fix login\" :priority 0}`.
+   The id is regenerated on filesystem-level collision (via `save-new!`)
+   so concurrent same-ms creates can never silently overwrite each other."
   [ctx opts]
   (let [{:keys [project-root prefix tickets-dir terminal-statuses
                 default-type default-priority default-mode now assignee]}
         (resolve-ctx ctx)
         title    (:title opts)
-        id       (ticket/generate-id prefix)
         slug     (ticket/derive-slug title)
-        fm       (build-frontmatter
-                  {:id           id
-                   :title        title
-                   :status       "open"
-                   :type         (or (:type opts) default-type)
-                   :priority     (or (:priority opts) default-priority)
-                   :mode         (or (:mode opts) default-mode)
-                   :created      now
-                   :updated      now
-                   :assignee     (or (:assignee opts) assignee)
-                   :tags         (:tags opts)
-                   :parent       (:parent opts)
-                   :external-ref (:external-ref opts)})
         body     (build-body opts)
-        ticket   {:frontmatter fm :body body}]
-    (store/save! project-root tickets-dir id slug ticket
-                 {:now now :terminal-statuses terminal-statuses})))
+        gen-id   #(ticket/generate-id prefix)
+        build-fn (fn [id]
+                   {:slug   slug
+                    :ticket {:frontmatter
+                             (build-frontmatter
+                              {:id           id
+                               :title        title
+                               :status       "open"
+                               :type         (or (:type opts) default-type)
+                               :priority     (or (:priority opts) default-priority)
+                               :mode         (or (:mode opts) default-mode)
+                               :created      now
+                               :updated      now
+                               :assignee     (or (:assignee opts) assignee)
+                               :tags         (:tags opts)
+                               :parent       (:parent opts)
+                               :external-ref (:external-ref opts)})
+                             :body body}})]
+    (store/save-new! project-root tickets-dir gen-id build-fn
+                     {:now now :terminal-statuses terminal-statuses})))
 
 (defn- warn!
   "Emit a single line to stderr."

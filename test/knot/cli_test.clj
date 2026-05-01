@@ -1899,16 +1899,6 @@ Restart the daemon.
    (cond-> (assoc (ctx tmp) :project-found? true)
      project-name (assoc :project-name project-name))))
 
-(defn- create-spaced!
-  "Like `cli/create-cmd`, but sleeps 2ms after the call so consecutive
-   ids land in distinct milliseconds. The ULID timestamp prefix changes
-   per millisecond, so spacing eliminates the ~1/1024 same-ms id
-   collision rate that flakes high-volume tests."
-  [c opts]
-  (let [path (cli/create-cmd c opts)]
-    (Thread/sleep 2)
-    path))
-
 (deftest prime-cmd-text-shape-test
   (testing "prime-cmd emits Project + Ready + Commands when a project is found and tickets exist"
     (with-tmp tmp
@@ -2017,7 +2007,7 @@ Restart the daemon.
     (with-tmp tmp
       (let [c (ctx tmp)]
         (dotimes [n 22]
-          (create-spaced! c {:title (str "Ticket-" n)}))
+          (cli/create-cmd c {:title (str "Ticket-" n)}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {})
               start (str/index-of out "## Ready")
               end   (str/index-of out "## Commands")
@@ -2040,7 +2030,7 @@ Restart the daemon.
     (with-tmp tmp
       (let [c (ctx tmp)]
         (dotimes [n 5]
-          (create-spaced! c {:title (str "Ticket-" n)}))
+          (cli/create-cmd c {:title (str "Ticket-" n)}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {:limit 2})
               start (str/index-of out "## Ready")
               end   (str/index-of out "## Commands")
@@ -2055,8 +2045,8 @@ Restart the daemon.
   (testing "--mode afk filters BEFORE --limit truncation"
     (with-tmp tmp
       (let [c (ctx tmp)]
-        (dotimes [n 3] (create-spaced! c {:title (str "Hitl-" n) :mode "hitl"}))
-        (dotimes [n 4] (create-spaced! c {:title (str "Afk-" n)  :mode "afk"}))
+        (dotimes [n 3] (cli/create-cmd c {:title (str "Hitl-" n) :mode "hitl"}))
+        (dotimes [n 4] (cli/create-cmd c {:title (str "Afk-" n)  :mode "afk"}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {:mode "afk" :limit 2})
               start (str/index-of out "## Ready")
               end   (str/index-of out "## Commands")

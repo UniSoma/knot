@@ -29,17 +29,59 @@
   [millis]
   (encode-base32 millis timestamp-chars))
 
-(defn- random-suffix
-  "Generate `random-chars` (2) lowercase Crockford-base32 random chars."
-  []
-  (let [alphabet-len (count crockford-alphabet)]
-    (apply str (repeatedly random-chars
-                           #(.charAt crockford-alphabet (rand-int alphabet-len))))))
+(def ^:private random-space
+  "Number of distinct values representable in `random-chars` (2) chars of
+   Crockford base32 — 32^2 = 1024."
+  (long (Math/pow 32 random-chars)))
+
+(defn- format-id
+  "Format `[ts rand]` as `<prefix>-<10ts><2rand>` in lowercase Crockford."
+  [prefix ts rand-val]
+  (str prefix "-" (encode-timestamp ts) (encode-base32 rand-val random-chars)))
+
+(defn- advance-id-state
+  "Pure ULID-monotonic state transition. Given the prior `state`
+   (`{:ts <ms> :rand <0..1023>}` or nil), the current `now-ms`, an
+   externally-supplied `fresh-rand` in `[0, 1024)`, and a `prefix`,
+   return `[new-state id]`.
+
+   Rules (matches the standard ULID monotonic spec):
+     - nil state, or `now-ms > last.ts`: emit `(now-ms, fresh-rand)`.
+     - `now-ms ≤ last.ts` (same-ms or backward clock skew): reuse
+       `last.ts`, emit `last.rand + 1`. Ignores `fresh-rand`.
+     - On rand-space overflow (`last.rand = 1023`), bump ts by 1 and
+       reset rand to 0.
+
+   Pure: takes randomness as input; no clock or atom access."
+  [state now-ms fresh-rand prefix]
+  (let [{:keys [ts rand]} state
+        [ts* rand*] (cond
+                      (nil? state)     [now-ms fresh-rand]
+                      (> now-ms ts)    [now-ms fresh-rand]
+                      (< (inc rand) random-space) [ts (inc rand)]
+                      :else            [(inc ts) 0])]
+    [{:ts ts* :rand rand*} (format-id prefix ts* rand*)]))
+
+(defonce ^:private id-state
+  ;; Holds the last `(ts, rand)` emitted by `generate-id`. `defonce` keeps
+  ;; state stable across REPL reloads so the monotonic invariant survives
+  ;; recompilation.
+  (atom nil))
 
 (defn generate-id
-  "Generate a new ticket id of the form `<prefix>-<10 timestamp + 2 random>`."
+  "Generate a new ticket id of the form `<prefix>-<10 timestamp + 2 random>`.
+   Within a single process the factory is monotonic (ULID spec): same-ms
+   bursts are deterministically collision-free by incrementing the random
+   tail rather than redrawing it."
   [prefix]
-  (str prefix "-" (encode-timestamp (System/currentTimeMillis)) (random-suffix)))
+  (let [now   (System/currentTimeMillis)
+        fresh (rand-int random-space)
+        ;; advance-id-state is pure, so running it inside swap! is safe
+        ;; even when CAS retries.
+        {:keys [ts rand]} (swap! id-state
+                                 (fn [s]
+                                   (first (advance-id-state s now fresh prefix))))]
+    (format-id prefix ts rand)))
 
 (def ^:private fence "---")
 (def ^:private fence-open "---\n")
