@@ -134,15 +134,22 @@
   1)
 
 (defn envelope-str
-  "Serialize a v0.3 JSON success envelope around `data`. The shape is
-   `{schema_version: 1, ok: true, data: <data>}`. `array-map` keeps the
-   key order stable for snapshot tests — only three keys, so it stays
-   an array-map below Clojure's transition threshold."
-  [data]
-  (json/generate-string
-   (array-map :schema_version schema-version
-              :ok             true
-              :data           data)))
+  "Serialize a v0.3 JSON envelope around `data`. Default shape is
+   `{schema_version: 1, ok: true, data: <data>}`.
+
+   With `{:ok? false}`, emits the same shape but with `ok: false` —
+   reserved for commands like `knot check` whose `ok` flag mirrors a
+   health verdict and so may coexist with a `data` slot. (The
+   error-only envelope produced by `error-envelope-str` does NOT carry
+   `:data`; this 2-arity extension is the only path to `ok:false +
+   data`.) `array-map` keeps the key order stable for snapshot tests."
+  ([data]
+   (envelope-str data nil))
+  ([data {:keys [ok?] :or {ok? true}}]
+   (json/generate-string
+    (array-map :schema_version schema-version
+               :ok             ok?
+               :data           data))))
 
 (defn error-envelope-str
   "Serialize a v0.3 JSON error envelope. `error` is a map with `:code`,

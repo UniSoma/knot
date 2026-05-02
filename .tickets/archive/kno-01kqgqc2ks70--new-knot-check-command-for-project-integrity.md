@@ -1,12 +1,13 @@
 ---
 id: kno-01kqgqc2ks70
 title: New knot check command for project integrity validation
-status: open
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-01T02:55:02.777819341Z'
-updated: '2026-05-02T15:00:49.201444200Z'
+updated: '2026-05-02T17:10:29.598160307Z'
+closed: '2026-05-02T17:10:29.598160307Z'
 tags:
 - v0.3
 - cli
@@ -198,3 +199,9 @@ Line numbers are pre-implementation references — re-verify before deleting in 
 - [ ] `config/validate!` refactored to extract `active-status-issue` predicate without changing throwing behavior
 - [ ] Tests cover at least one positive case per check code; integration tests cover all three exit codes and both JSON envelope shapes
 - [ ] CHANGELOG covers the new command, the `dep cycle` removal (BREAKING), and the envelope-contract extension
+
+## Notes
+
+**2026-05-02T17:10:29.598160307Z**
+
+Implemented new `knot check [<id>...]` command for project-integrity validation, on the v0.3 envelope. Slice 1: knot.check skeleton with run returning {:issues [] :scanned {…}}; first global check wraps query/project-cycles. Slice 2: per-ticket validators landed one-test-one-validator — invalid_status, invalid_type, invalid_mode (shared check-enum factory); invalid_priority (integer 0..4); missing_required_field (id/title/status, blank-as-missing, :path locator when id is the missing field); terminal_outside_archive (bidirectional — terminal-outside and non-terminal-inside both surface); unknown_id (deps/links/parent, owned by holder, value names the missing target); frontmatter_parse_error (loader-fed list, :ids=[], :path locator). Slice 3: extracted config/active-status-issue as a non-throwing predicate (:code :invalid_active_status :message s); validate! still throws via the same predicate (no public behavior change); knot.check wires it as a global error issue. Slice 4: filter-issues with OR-within / AND-across semantics, validate-filter-spec with closed severity enum + open code enum (returns {:error msg} on bad severity), :ids-filter that narrows the per-ticket tier (globals always run on the full set), and a total sort key (severity-desc → code-asc → first-id-asc → message-asc). Slice 5: knot.check/scan tolerant per-file loader (parse failures isolated, :scanned counts files attempted by glob including failures, :archived? boolean tagged at load time); cli/check-cmd returning {:exit :stdout :stderr} so main can route channels; output/envelope-str extended to a 2-arity {:ok? false} form so ok:false coexists with :data; main/check-handler with exit 0/1/2 (cannot-scan emits a JSON error envelope under --json, stderr message otherwise — matches arg-parsing-stays-on-stderr precedent); help registry entry under :project group; check-cmd unit tests + 4 end-to-end integration tests covering exit 0/1/2 and both JSON envelope shapes. Slice 6: hard-removed knot dep cycle — deleted cli/dep-cycle-cmd, main/dep-cycle-handler, the cycle case in dep-handler, the :dep/cycle help registry entry, dep-cycle-cmd-test, dep-cycle-end-to-end-test; updated registry-parity expected-cmd-keys; knot dep cycle now falls through to the unknown-dep-subcommand error path (knot dep: <from> and <to> ids are required, exit 1). Slice 7: CHANGELOG entries — Added knot check, BREAKING removal of knot dep cycle (with the dep_cycle scope shift from non-terminal-only to whole-project explicitly noted), envelope-contract extension. Verification: bb test → 233 tests, 1984 assertions, 0 failures (added 24 new check_test, 6 cli_test cases, 4 integration_test cases, 1 config_test case); clj-kondo baseline unchanged (4 errors / 5 warnings, all pre-existing tmp macro false positives + ticket.clj id-suffix-chars unused-private warning); live knot check on this repo prints knot check: ok — scanned: live=20 archive=26 and emits a clean ok:true envelope with --json. dep_cycle scope shift is intentional and called out in CHANGELOG: cycles among archived tickets are now real data-integrity issues that surface, since reopening them would invalidate the graph.

@@ -240,6 +240,33 @@
                           :default-mode      "afk"})
       (is (nil? (load-throws tmp))))))
 
+(deftest active-status-issue-test
+  (testing "valid active-status -> nil"
+    (let [merged {:statuses          ["open" "in_progress" "closed"]
+                  :terminal-statuses #{"closed"}
+                  :active-status     "in_progress"}]
+      (is (nil? (config/active-status-issue merged)))))
+
+  (testing "active-status not in :statuses -> issue map with :code and :message"
+    (let [merged {:statuses          ["open" "active" "closed"]
+                  :terminal-statuses #{"closed"}
+                  :active-status     "in_progress"}
+          issue  (config/active-status-issue merged)]
+      (is (some? issue))
+      (is (= :invalid_active_status (:code issue)))
+      (is (string? (:message issue)))
+      (is (str/includes? (:message issue) "active-status"))
+      (is (str/includes? (:message issue) "in_progress"))))
+
+  (testing "active-status in :terminal-statuses -> issue map"
+    (let [merged {:statuses          ["open" "in_progress" "closed"]
+                  :terminal-statuses #{"closed"}
+                  :active-status     "closed"}
+          issue  (config/active-status-issue merged)]
+      (is (some? issue))
+      (is (= :invalid_active_status (:code issue)))
+      (is (str/includes? (:message issue) "terminal")))))
+
 (defn- canon [p] (str (fs/canonicalize p)))
 
 (deftest discover-test

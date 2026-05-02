@@ -4,6 +4,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [flatland.ordered.map :as om]
+            [knot.check :as check]
             [knot.config :as config]
             [knot.git :as git]
             [knot.output :as output]
@@ -500,17 +501,141 @@
       (output/dep-tree-json tree)
       (output/dep-tree-text tree))))
 
-(defn dep-cycle-cmd
-  "Project-wide DFS scan for cycles in the deps graph, restricted to
-   non-terminal tickets (so cycles that exist only among archived
-   tickets don't generate noise). Returns a vector of cycle paths;
-   each path is a vector of ids that begins and ends at the same id.
-   Empty when no cycles. Caller decides exit code and stderr output."
-  [ctx _opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
-        all  (store/load-all project-root tickets-dir)
-        live (query/non-terminal all terminal-statuses)]
-    (vec (query/project-cycles live))))
+(defn- jsonify-issue
+  "Project an issue map into the JSON-friendly shape: stringify
+   `:severity`, `:code`, `:field`; pass through everything else verbatim
+   (so future closed-set additions remain forward-compat)."
+  [issue]
+  (cond-> issue
+    (:severity issue) (update :severity name)
+    (:code     issue) (update :code     name)
+    (:field    issue) (update :field    name)))
+
+(defn- jsonify-result
+  "Build the `data` body of the check envelope: sorted issues + scanned counts."
+  [{:keys [issues scanned]}]
+  (array-map :issues  (mapv jsonify-issue issues)
+             :scanned scanned))
+
+(def ^:private check-columns
+  "Canonical column order for the human-readable `knot check` table."
+  [{:key :severity :header "SEVERITY"}
+   {:key :code     :header "CODE"}
+   {:key :ids      :header "IDS"}
+   {:key :message  :header "MESSAGE"}])
+
+(defn- issue-cell
+  "Render one issue cell. `:ids` is comma-joined (`-` for path-only).
+   `:path`/`:field`/`:value` are folded into the message rather than
+   getting their own columns — keeps the table narrow."
+  [issue {:keys [key]}]
+  (case key
+    :severity (name (:severity issue))
+    :code     (name (:code     issue))
+    :ids      (if (seq (:ids issue))
+                (str/join "," (:ids issue))
+                "-")
+    :message  (let [{:keys [message path field value]} issue
+                    parts (cond-> [message]
+                            field (conj (str "field=" (name field)
+                                             " value=" (pr-str value)))
+                            path  (conj (str "path=" path)))]
+                (str/join " | " parts))))
+
+(defn- check-table-text
+  "Render the `knot check` issues table. Columns: SEVERITY CODE IDS MESSAGE.
+   When there are no issues, returns an empty string — the caller decides
+   whether to add a footer line."
+  [issues]
+  (if (empty? issues)
+    ""
+    (let [rows         (mapv (fn [issue]
+                               (mapv #(issue-cell issue %) check-columns))
+                             issues)
+          header-row   (mapv :header check-columns)
+          all-rows     (cons header-row rows)
+          col-count    (count check-columns)
+          col-widths   (mapv (fn [i] (apply max 0 (map #(count (nth % i))
+                                                       all-rows)))
+                             (range col-count))
+          pad          (fn [w s] (str s (apply str (repeat (- w (count s)) \space))))
+          fmt-row      (fn [row]
+                         (str/join "  " (map (fn [w cell] (pad w cell))
+                                             col-widths row)))]
+      (str/join "\n" (map fmt-row all-rows)))))
+
+(defn- summary-footer
+  "One-line footer summarizing the run: counts of errors/warnings + scanned."
+  [issues {:keys [live archive]}]
+  (let [errs   (count (filter #(= :error   (:severity %)) issues))
+        warns  (count (filter #(= :warning (:severity %)) issues))
+        total  (+ errs warns)
+        suffix (str " — scanned: live=" live " archive=" archive)]
+    (if (zero? total)
+      (str "knot check: ok" suffix)
+      (str total " issues (" errs " errors, " warns " warnings)" suffix))))
+
+(defn- ->severity-set
+  "Coerce CLI input into a set of severity keywords. Accepts a set, a
+   sequential of strings/keywords, or nil."
+  [v]
+  (cond
+    (nil? v) nil
+    (set? v)
+    (when (seq v) (set (map #(if (keyword? %) % (keyword %)) v)))
+    (sequential? v)
+    (when (seq v) (set (map #(if (keyword? %) % (keyword %)) v)))
+    :else nil))
+
+(defn- ->code-set
+  "Like ->severity-set but for codes; same coercion."
+  [v]
+  (->severity-set v))
+
+(defn check-cmd
+  "Run `knot check`. `opts` may include:
+     :json?    — emit a JSON envelope on stdout instead of the table
+     :severity — set/seq of severity values (keyword or string) to keep
+     :code     — set/seq of code values (keyword or string) to keep
+     :ids      — vector of full ids; narrows the per-ticket tier only
+
+   Returns `{:exit n :stdout s :stderr s}`. `nil` for stdout/stderr means
+   no output on that channel. `:exit` is 0 (clean filtered view) / 1
+   (errors in filtered view) / 2 (invalid filter spec). Globals always
+   run on the full ticket set; the id list only narrows the per-ticket
+   tier. The `--severity` enum is closed (rejects unknown); `--code` is
+   open (silently passes through; matches nothing if unrecognized)."
+  [ctx {:keys [json? severity code ids]}]
+  (let [resolved (resolve-ctx ctx)
+        {:keys [project-root tickets-dir]} resolved
+        spec     {:severity (->severity-set severity)
+                  :code     (->code-set     code)}]
+    (if-let [bad (check/validate-filter-spec spec)]
+      (if json?
+        {:exit   2
+         :stdout (output/error-envelope-str
+                  {:code    "invalid_argument"
+                   :message (:error bad)})
+         :stderr nil}
+        {:exit 2 :stdout nil :stderr (str "knot check: " (:error bad))})
+      (let [{:keys [tickets parse-errors scanned]} (check/scan project-root tickets-dir)
+            result    (check/run {:tickets      tickets
+                                  :parse-errors parse-errors
+                                  :config       resolved
+                                  :scanned      scanned
+                                  :ids-filter   (when (seq ids) (set ids))})
+            filtered  (check/filter-issues (:issues result) spec)
+            has-err?  (some #(= :error (:severity %)) filtered)
+            view      {:issues filtered :scanned scanned}]
+        {:exit   (if has-err? 1 0)
+         :stderr nil
+         :stdout (if json?
+                   (output/envelope-str (jsonify-result view) {:ok? (not has-err?)})
+                   (let [table (check-table-text filtered)
+                         foot  (summary-footer filtered scanned)]
+                     (if (str/blank? table)
+                       foot
+                       (str table "\n" foot))))}))))
 
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`

@@ -1,5 +1,6 @@
 (ns knot.cli-test
   (:require [babashka.fs :as fs]
+            [cheshire.core :as cheshire]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.cli :as cli]
@@ -1367,43 +1368,23 @@ Restart the daemon.
         (is (str/includes? out "\"ok\":true"))
         (is (str/includes? out "\"data\":["))))))
 
-(deftest dep-cycle-cmd-test
-  (testing "dep-cycle-cmd returns an empty vector when there are no cycles"
+(deftest check-cmd-clean-test
+  (testing "check-cmd on a clean project returns exit 0 with an ok footer"
     (with-tmp tmp
-      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
-            b (cli/create-cmd (ctx tmp) {:title "Beta"})
-            a-id (id-of-created a "alpha")
-            b-id (id-of-created b "beta")
-            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})]
-        (is (empty? (cli/dep-cycle-cmd (ctx tmp) {}))))))
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (let [{:keys [exit stdout stderr]} (cli/check-cmd (ctx tmp) {})]
+        (is (zero? exit))
+        (is (str/blank? stderr))
+        (is (str/includes? stdout "ok"))
+        (is (str/includes? stdout "scanned"))
+        (is (str/includes? stdout "live=1"))
+        (is (str/includes? stdout "archive=0"))))))
 
-  (testing "dep-cycle-cmd surfaces a pre-existing cycle introduced by hand-edit"
-    ;; create two tickets, dep one on the other normally, then hand-edit
-    ;; the second ticket's frontmatter to add a back-edge — bypassing
-    ;; the cycle check that `dep-cmd` would have done at insert time.
+(deftest check-cmd-errors-test
+  (testing "check-cmd with a hand-edited dep cycle returns exit 1 and a row per issue"
     (with-tmp tmp
-      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
-            b (cli/create-cmd (ctx tmp) {:title "Beta"})
-            a-id (id-of-created a "alpha")
-            b-id (id-of-created b "beta")
-            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
-            ;; bypass cycle check by writing through store directly
-            b-loaded (store/load-one tmp ".tickets" b-id)
-            _ (store/save! tmp ".tickets" b-id nil
-                           (assoc b-loaded :frontmatter
-                                  (assoc (:frontmatter b-loaded) :deps [a-id]))
-                           {:now "2026-04-28T11:00:00Z"
-                            :terminal-statuses #{"closed"}})
-            cycles (cli/dep-cycle-cmd (ctx tmp) {})]
-        (is (= 1 (count cycles)))
-        (let [c (set (first cycles))]
-          (is (contains? c a-id))
-          (is (contains? c b-id))))))
-
-  (testing "dep-cycle-cmd ignores closed tickets (cycles among archived only do not count)"
-    (with-tmp tmp
-      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
-            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+      (let [a    (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b    (cli/create-cmd (ctx tmp) {:title "Beta"})
             a-id (id-of-created a "alpha")
             b-id (id-of-created b "beta")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
@@ -1413,10 +1394,96 @@ Restart the daemon.
                                   (assoc (:frontmatter b-loaded) :deps [a-id]))
                            {:now "2026-04-28T11:00:00Z"
                             :terminal-statuses #{"closed"}})
-            ;; close both — the cycle is now wholly within archived tickets
-            _ (cli/close-cmd (ctx tmp) {:id a-id})
-            _ (cli/close-cmd (ctx tmp) {:id b-id})]
-        (is (empty? (cli/dep-cycle-cmd (ctx tmp) {})))))))
+            {:keys [exit stdout stderr]} (cli/check-cmd (ctx tmp) {})]
+        (is (= 1 exit))
+        (is (str/blank? stderr))
+        (is (str/includes? stdout "dep_cycle"))
+        (is (str/includes? stdout "SEVERITY"))
+        (is (str/includes? stdout "CODE"))))))
+
+(deftest check-cmd-json-clean-test
+  (testing "check-cmd --json on a clean project: ok:true envelope, exit 0"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (let [{:keys [exit stdout stderr]} (cli/check-cmd (ctx tmp) {:json? true})
+            parsed (cheshire.core/parse-string stdout true)]
+        (is (zero? exit))
+        (is (str/blank? stderr))
+        (is (= 1   (:schema_version parsed)))
+        (is (true? (:ok parsed)))
+        (is (= [] (get-in parsed [:data :issues])))
+        (is (= {:live 1 :archive 0} (get-in parsed [:data :scanned])))))))
+
+(deftest check-cmd-json-errors-test
+  (testing "check-cmd --json with errors: ok:false coexists with :data, exit 1"
+    (with-tmp tmp
+      (let [a    (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b    (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            b-loaded (store/load-one tmp ".tickets" b-id)
+            _ (store/save! tmp ".tickets" b-id nil
+                           (assoc b-loaded :frontmatter
+                                  (assoc (:frontmatter b-loaded) :deps [a-id]))
+                           {:now "2026-04-28T11:00:00Z"
+                            :terminal-statuses #{"closed"}})
+            {:keys [exit stdout]} (cli/check-cmd (ctx tmp) {:json? true})
+            parsed (cheshire.core/parse-string stdout true)]
+        (is (= 1   exit))
+        (is (false? (:ok parsed)))
+        (is (vector? (get-in parsed [:data :issues])))
+        (is (some #(= "dep_cycle" (:code %)) (get-in parsed [:data :issues])))
+        (is (not (contains? parsed :error)) ":error slot reserved for cannot-scan")))))
+
+(deftest check-cmd-unknown-severity-test
+  (testing "check-cmd rejects unknown --severity values, exit 2 with stderr (no JSON)"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (let [{:keys [exit stdout stderr]}
+            (cli/check-cmd (ctx tmp) {:severity #{:loud}})]
+        (is (= 2 exit))
+        (is (str/blank? stdout))
+        (is (str/includes? stderr "severity"))
+        (is (str/includes? stderr "loud")))))
+
+  (testing "check-cmd --json + unknown severity: error envelope on stdout (no data), exit 2"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (let [{:keys [exit stdout stderr]}
+            (cli/check-cmd (ctx tmp) {:severity #{:loud} :json? true})
+            parsed (cheshire.core/parse-string stdout true)]
+        (is (= 2 exit))
+        (is (str/blank? stderr))
+        (is (false? (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (not (contains? parsed :data)))))))
+
+(deftest check-cmd-filter-test
+  (testing "--code filter narrows issues; exit code reflects filtered view (grep semantics)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            b-loaded (store/load-one tmp ".tickets" b-id)
+            _ (store/save! tmp ".tickets" b-id nil
+                           (assoc b-loaded :frontmatter
+                                  (assoc (:frontmatter b-loaded)
+                                         :deps  [a-id]
+                                         :links ["ghost"]))
+                           {:now "2026-04-28T11:00:00Z"
+                            :terminal-statuses #{"closed"}})
+            {full-exit :exit}                  (cli/check-cmd (ctx tmp) {})
+            {filt-exit :exit filt-out :stdout} (cli/check-cmd (ctx tmp)
+                                                              {:code #{:does_not_exist}
+                                                               :json? true})
+            parsed (cheshire.core/parse-string filt-out true)]
+        (is (= 1 full-exit) "errors present without filter -> exit 1")
+        (is (= 0 filt-exit) "filter matches nothing -> exit 0 (clean view)")
+        (is (true? (:ok parsed)))
+        (is (= [] (get-in parsed [:data :issues])))))))
 
 (deftest dep-tree-cmd-test
   (testing "dep-tree-cmd renders the root id and its deps"

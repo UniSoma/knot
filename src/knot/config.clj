@@ -70,6 +70,23 @@
        (seq v)
        (every? non-blank-string? v)))
 
+(defn active-status-issue
+  "Pure predicate: returns nil when `:active-status` is a valid choice
+   given `:statuses` and `:terminal-statuses` in the merged config; else
+   returns `{:code :invalid_active_status :message <s>}` describing the
+   violation. Used by `validate!` (which throws) and by `knot.check`
+   (which surfaces it as a global integrity issue)."
+  [{:keys [statuses terminal-statuses active-status]}]
+  (when-not (and (non-blank-string? active-status)
+                 ((set statuses) active-status)
+                 (not (contains? terminal-statuses active-status)))
+    {:code    :invalid_active_status
+     :message (str ".knot.edn :active-status " (pr-str active-status)
+                   " must be one of :statuses " (pr-str (vec statuses))
+                   " and not in :terminal-statuses "
+                   (pr-str terminal-statuses)
+                   " — set :active-status explicitly when customizing :statuses")}))
+
 (defn validate!
   "Throw with a clear message when any value in `merged` (defaults + user
    overrides) violates the schema. Returns `merged` unchanged on success."
@@ -93,18 +110,11 @@
                    (every? (set statuses) terminal-statuses))
       (throw (ex-info (str ".knot.edn :terminal-statuses must be a set of "
                            "strings, all present in :statuses") {})))
-    (when-not (and (non-blank-string? active-status)
-                   ((set statuses) active-status)
-                   (not (contains? terminal-statuses active-status)))
-      (throw (ex-info
-              (str ".knot.edn :active-status " (pr-str active-status)
-                   " must be one of :statuses " (pr-str (vec statuses))
-                   " and not in :terminal-statuses "
-                   (pr-str terminal-statuses)
-                   " — set :active-status explicitly when customizing :statuses")
-              {:active-status     active-status
-               :statuses          statuses
-               :terminal-statuses terminal-statuses})))
+    (when-let [issue (active-status-issue merged)]
+      (throw (ex-info (:message issue)
+                      {:active-status     active-status
+                       :statuses          statuses
+                       :terminal-statuses terminal-statuses})))
     (when-not (list-of-non-blank-strings? types)
       (throw (ex-info ".knot.edn :types must be a non-empty list of strings" {})))
     (when-not ((set types) default-type)

@@ -96,9 +96,9 @@
 
 (defn- subcommands-block
   "Render a SUBCOMMANDS section for parent entries. `sub-keys` is a vector
-   of registry keys (e.g. `[:dep/tree :dep/cycle]`); each is resolved
-   against `registry` to pick up its display name and description.
-   Returns nil when there are no subcommands or no registry to resolve."
+   of registry keys (e.g. `[:dep/tree]`); each is resolved against
+   `registry` to pick up its display name and description. Returns nil
+   when there are no subcommands or no registry to resolve."
   [color? registry sub-keys]
   (when (and (seq sub-keys) registry)
     (let [resolved (for [k sub-keys
@@ -245,7 +245,7 @@
     :description "Add <to> to <from>'s :deps (cycle-checked)."
     :args        [{:name "from" :required true} {:name "to" :required true}]
     :flags       []
-    :subcommands [:dep/tree :dep/cycle]
+    :subcommands [:dep/tree]
     :examples    [{:cmd "knot dep kno-01abc kno-01def"
                    :note "Make kno-01abc depend on kno-01def."}]
     :exit-codes  [{:code 0 :when "edge saved"}
@@ -260,16 +260,6 @@
                    :desc "Expand duplicate subtrees instead of marking them seen."}]
     :examples    [{:cmd "knot dep tree kno-01abc"
                    :note "Show what blocks kno-01abc."}]}
-
-   :dep/cycle
-   {:group       :graph
-    :description "Scan open tickets for dep cycles."
-    :args        []
-    :flags       []
-    :examples    [{:cmd "knot dep cycle"
-                   :note "Exit 0 if clean, 1 listing each cycle to stderr."}]
-    :exit-codes  [{:code 0 :when "no cycles found"}
-                  {:code 1 :when "one or more cycles printed to stderr"}]}
 
    :undep
    {:group       :graph
@@ -354,7 +344,29 @@
     :args        [{:name "id" :required true}]
     :flags       []
     :examples    [{:cmd "knot edit kno-01abc"
-                   :note "Edit the ticket's frontmatter and body."}]}})
+                   :note "Edit the ticket's frontmatter and body."}]}
+
+   :check
+   {:group       :project
+    :description "Validate project integrity (cycles, schema, dangling refs)."
+    :args        [{:name "id" :variadic true}]
+    :flags       [{:name :json     :coerce :boolean
+                   :desc "Emit a JSON envelope instead of a text table."}
+                  {:name :no-color :coerce :boolean
+                   :desc "Force plain output (no ANSI)."}
+                  {:name :severity :coerce []
+                   :desc "Filter by severity (error|warning, repeatable)."}
+                  {:name :code     :coerce []
+                   :desc "Filter by issue code (repeatable; unknown codes ok)."}]
+    :examples    [{:cmd "knot check"
+                   :note "Validate every ticket and config; exit 0/1/2."}
+                  {:cmd "knot check kno-01abc kno-01def --json"
+                   :note "Run per-ticket checks against just these ids; print JSON."}
+                  {:cmd "knot check --code dep_cycle"
+                   :note "Show only dep_cycle issues."}]
+    :exit-codes  [{:code 0 :when "no errors in the filtered view"}
+                  {:code 1 :when "one or more errors in the filtered view"}
+                  {:code 2 :when "unable to scan (config invalid, no project root)"}]}})
 
 (def ^:private group-order
   "Canonical group order and display headers. The renderer walks this
@@ -369,7 +381,7 @@
   "Top-level command order for `top-level-help-text`. Subcommand keys
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
-  [:init :prime
+  [:init :prime :check
    :create :start :status :close :reopen
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed
@@ -395,17 +407,17 @@
                       :when (and entry (= group-kw (:group entry)))]
                   {:k k :entry entry})
         rows    (mapcat
-                  (fn [{:keys [k entry]}]
-                    (cons {:label  (cmd-line-label (key->cmd-name k) (:args entry))
-                           :desc   (:description entry)
-                           :indent 2}
-                          (for [sk (:subcommands entry)
-                                :let [sentry (get registry sk)]
-                                :when sentry]
-                            {:label  (cmd-line-label (key->cmd-name sk) (:args sentry))
-                             :desc   (:description sentry)
-                             :indent 4})))
-                  entries)
+                 (fn [{:keys [k entry]}]
+                   (cons {:label  (cmd-line-label (key->cmd-name k) (:args entry))
+                          :desc   (:description entry)
+                          :indent 2}
+                         (for [sk (:subcommands entry)
+                               :let [sentry (get registry sk)]
+                               :when sentry]
+                           {:label  (cmd-line-label (key->cmd-name sk) (:args sentry))
+                            :desc   (:description sentry)
+                            :indent 4})))
+                 entries)
         max-w   (apply max 0 (map #(+ (:indent %) (count (:label %))) rows))]
     (for [{:keys [label desc indent]} rows
           :let [pad (apply str (repeat (- max-w (count label) indent) \space))]]

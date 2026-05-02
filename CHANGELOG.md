@@ -14,8 +14,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New `knot check [<id>...]` command validates project integrity and
+  surfaces issues. With no ids, scans every ticket (live + archive) and
+  config; with ids, narrows the per-ticket tier to those (globals always
+  run on the full set). Initial check codes: `dep_cycle`, `unknown_id`
+  (dangling `:deps`/`:links`/`:parent`), `invalid_status`,
+  `invalid_type`, `invalid_mode`, `invalid_priority` (outside 0..4),
+  `terminal_outside_archive` (bidirectional), `missing_required_field`,
+  `frontmatter_parse_error`, `invalid_active_status`. Filter flags
+  `--severity error|warning` and `--code <code>` are repeatable; OR
+  within a flag, AND across flags; unknown severity is rejected at parse
+  time, unknown code is silently accepted (open enum). Filters apply
+  *before* the exit-code decision (grep semantics: exit reflects the
+  filtered view). Exit codes: 0 clean, 1 errors found, 2 unable to scan
+  (no project root, invalid `.knot.edn`). Issues sort severity desc →
+  code asc → first-id asc → message asc, identical in JSON and text.
+
 ### Changed (BREAKING)
 
+- `knot dep cycle` is **removed**; its role is subsumed by `knot check
+  --code dep_cycle`. The semantic shift: `dep cycle` previously scanned
+  only non-terminal tickets, while `knot check` scans the whole project
+  (live + archive). Cycles among archived tickets now surface as issues
+  — they are real data-integrity problems if a ticket is later reopened.
+- The v0.3 envelope contract is **extended**: `knot check --json` is the
+  first command where `ok` mirrors a *health verdict*, so `ok: false`
+  may now coexist with a `data` slot when errors are present
+  (`{schema_version: 1, ok: false, data: {issues: [...], scanned:
+  {...}}}`). The earlier rule (`ok: false` ↔ `error` slot, no `data`)
+  still holds for the cannot-scan case (exit 2). Argument-parse errors
+  for `knot check` stay on stderr with exit 2 in both modes — matches
+  the arg-parsing-stays-on-stderr policy.
 - All `--json` read commands now wrap their output in a tagged envelope
   `{schema_version: 1, ok: true, data: <payload>}` instead of returning a
   bare object/array. `knot list/ready/blocked/closed --json` change from

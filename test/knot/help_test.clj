@@ -90,15 +90,15 @@
   (testing "non-required positionals render as [<name>]"
     (is (= "knot add-note <id> [<text>]"
            (help/synopsis "add-note" {:args [{:name "id"   :required true}
-                                              {:name "text"}]
-                                       :flags []}))))
+                                             {:name "text"}]
+                                      :flags []}))))
 
   (testing "variadic positional renders as [<name>...]"
     (is (= "knot link <a> <b> [<rest>...]"
            (help/synopsis "link" {:args [{:name "a"    :required true}
-                                          {:name "b"    :required true}
-                                          {:name "rest" :variadic true}]
-                                   :flags []}))))
+                                         {:name "b"    :required true}
+                                         {:name "rest" :variadic true}]
+                                  :flags []}))))
 
   (testing "any flag presence appends [flags]"
     (is (= "knot ls [flags]"
@@ -107,7 +107,7 @@
   (testing "two-token command name (subcommand) is preserved"
     (is (= "knot dep tree <id> [flags]"
            (help/synopsis "dep tree" {:args  [{:name "id" :required true}]
-                                       :flags [{:name :json :coerce :boolean}]})))))
+                                      :flags [{:name :json :coerce :boolean}]})))))
 
 (deftest command-help-text-usage-test
   (testing "renders a USAGE header followed by the indented synopsis"
@@ -316,11 +316,11 @@
 
 (def ^:private expected-cmd-keys
   "Every command name dispatched from `knot.main/-main`'s top-level case
-   plus the two `dep` subcommands. The registry must cover all of these."
-  #{:init :prime
+   plus the `dep` subcommand. The registry must cover all of these."
+  #{:init :prime :check
     :create :show :list
     :status :start :close :reopen
-    :dep :dep/tree :dep/cycle :undep
+    :dep :dep/tree :undep
     :link :unlink
     :ready :blocked :closed
     :add-note :edit})

@@ -109,6 +109,45 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command"))))))
 
+(deftest check-end-to-end-test
+  (testing "check on a clean project: exit 0, ok footer on stdout"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (let [{:keys [exit out err]} (run-knot tmp "check")]
+        (is (zero? exit) (str "check err=" err))
+        (is (str/blank? err))
+        (is (str/includes? out "ok")))))
+
+  (testing "check --json on a clean project: ok:true envelope, exit 0"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (let [{:keys [exit out err]} (run-knot tmp "check" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (str/blank? err))
+        (is (true? (:ok parsed)))
+        (is (= [] (get-in parsed [:data :issues])))
+        (is (map? (get-in parsed [:data :scanned]))))))
+
+  (testing "check exit 2 when run outside a project (cannot scan)"
+    (with-tmp tmp
+      ;; tmp has no .knot.edn and no .tickets/ — nothing to scan
+      (let [{:keys [exit out err]} (run-knot tmp "check")]
+        (is (= 2 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "knot check:")))))
+
+  (testing "check --json exit 2 emits an error envelope on stdout"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "check" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 2 exit))
+        (is (str/blank? err))
+        (is (false? (:ok parsed)))
+        (is (some? (get-in parsed [:error :code])))
+        (is (not (contains? parsed :data))
+            "cannot-scan envelope omits :data")))))
+
 (deftest show-missing-id-test
   (testing "show on a missing id exits non-zero with a stderr message"
     (with-tmp tmp
@@ -681,18 +720,11 @@
         (is (str/includes? (:out json) (str "\"id\":\"" a-id "\"")))
         (is (str/includes? (:out json) (str "\"id\":\"" b-id "\"")))))))
 
-(deftest dep-cycle-end-to-end-test
-  (testing "dep cycle exits 0 with no cycles"
-    (with-tmp tmp
-      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
-            b-id (id-from-create-out (:out (run-knot tmp "create" "Beta")) "beta")
-            _    (run-knot tmp "dep" a-id b-id)
-            {:keys [exit]} (run-knot tmp "dep" "cycle")]
-        (is (zero? exit) "no cycles → exit 0"))))
-
-  (testing "dep cycle on a hand-edited cycle: exit 1, stderr names both ids with arrows"
+(deftest check-detects-hand-edited-cycle-test
+  (testing "knot check on a hand-edited cycle: exit 1, dep_cycle row in stdout"
     ;; The CLI rejects cycle-creating `dep` adds, so the only way to land
-    ;; one is to bypass it by editing the file directly.
+    ;; one is to bypass it by editing the file directly. `knot check`
+    ;; subsumes the role formerly held by `knot dep cycle`.
     (with-tmp tmp
       (let [a-out  (run-knot tmp "create" "Alpha")
             b-out  (run-knot tmp "create" "Beta")
@@ -700,16 +732,14 @@
             b-id   (id-from-create-out (:out b-out) "beta")
             _      (run-knot tmp "dep" a-id b-id)
             b-path (str/trim (:out b-out))
-            ;; inject `deps: [a-id]` immediately after Beta's opening fence
             [before after] (str/split (slurp b-path) #"---\n" 2)
             _ (spit b-path (str before "---\ndeps:\n  - " a-id "\n" after))
-            {:keys [exit out err]} (run-knot tmp "dep" "cycle")]
-        (is (= 1 exit) "cycle present → exit 1")
-        (is (str/blank? out) "no data on stdout for cycle scan")
-        (is (str/includes? err "knot dep cycle:") "stderr framing prefix")
-        (is (str/includes? err "→") "stderr uses arrow joiner")
-        (is (str/includes? err a-id))
-        (is (str/includes? err b-id))))))
+            {:keys [exit out err]} (run-knot tmp "check")]
+        (is (= 1 exit) "cycle present -> exit 1")
+        (is (str/blank? err) "issues land on stdout, not stderr")
+        (is (str/includes? out "dep_cycle"))
+        (is (str/includes? out a-id))
+        (is (str/includes? out b-id))))))
 
 (deftest ready-blocked-end-to-end-test
   (testing "ready surfaces unblocked tickets; blocked surfaces tickets with open deps"

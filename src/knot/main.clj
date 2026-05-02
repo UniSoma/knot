@@ -284,22 +284,12 @@
             (emit-ambiguous-envelope! e data)
             (throw e)))))))
 
-(defn- dep-cycle-handler [_argv]
-  (let [cycles (cli/dep-cycle-cmd (discover-ctx) {})]
-    (if (empty? cycles)
-      (System/exit 0)
-      (do (binding [*out* *err*]
-            (doseq [c cycles]
-              (println (str "knot dep cycle: " (str/join " → " c)))))
-          (System/exit 1)))))
-
 (defn- dep-handler
-  "Route `knot dep ...`. `dep tree <id>` and `dep cycle` are nested;
-   otherwise it's the edge form `dep <from> <to>`."
+  "Route `knot dep ...`. `dep tree <id>` is nested; otherwise it's the
+   edge form `dep <from> <to>`."
   [argv]
   (case (first argv)
-    "tree"  (dep-tree-handler (rest argv))
-    "cycle" (dep-cycle-handler (rest argv))
+    "tree" (dep-tree-handler (rest argv))
     (edge-handler "dep" cli/dep-cmd argv)))
 
 (defn- list-handler
@@ -450,6 +440,68 @@
         (println-out (str path))
         (die (str "knot edit: no ticket matching " id))))))
 
+(defn- emit-check-result!
+  "Apply a `cli/check-cmd` result map to stdout/stderr and exit with its
+   `:exit` code. `:stdout`/`:stderr` may each be nil to skip that channel."
+  [{:keys [exit stdout stderr]}]
+  (when (some? stdout) (println-out stdout))
+  (when (some? stderr)
+    (binding [*out* *err*] (println stderr)))
+  (System/exit exit))
+
+(defn- check-cannot-scan!
+  "Emit the cannot-scan exit-2 envelope (json) or stderr message and exit 2.
+   Used when project discovery fails or `.knot.edn` is invalid."
+  [json? code message]
+  (if json?
+    (do (println-out (output/error-envelope-str
+                      {:code code :message message}))
+        (System/exit 2))
+    (do (binding [*out* *err*]
+          (println (str "knot check: " message)))
+        (System/exit 2))))
+
+(defn- check-handler
+  "Run `knot check`. Discovers the project (exit 2 on cannot-scan) and
+   delegates to `cli/check-cmd`, which returns `{:exit :stdout :stderr}`.
+   Argument-parse errors land on stderr with exit 2 (per the
+   arg-parsing-stays-on-stderr policy from the JSON-envelope ticket)."
+  [argv]
+  (let [parsed (try
+                 (bcli/parse-args argv (spec :check))
+                 (catch Exception e e))]
+    (if (instance? Exception parsed)
+      (check-cannot-scan! false "invalid_argument" (.getMessage ^Exception parsed))
+      (let [{:keys [opts args]} parsed
+            json?      (boolean (:json opts))
+            cwd        (str (fs/cwd))
+            discovered (try (config/discover cwd)
+                            (catch Exception e e))]
+        (cond
+          (instance? Exception discovered)
+          (check-cannot-scan! json? "config_invalid"
+                              (.getMessage ^Exception discovered))
+
+          (nil? discovered)
+          (check-cannot-scan! json? "no_project"
+                              (str "no project found at or above " cwd))
+
+          :else
+          (let [project-root (:project-root discovered)
+                cfg          (:config discovered)
+                ctx          (merge cfg
+                                    {:project-root   project-root
+                                     :prefix         (or (:prefix cfg)
+                                                         (ticket/derive-prefix
+                                                          (str (fs/file-name project-root))))
+                                     :project-found? true})]
+            (emit-check-result!
+             (cli/check-cmd ctx
+                            {:json?    json?
+                             :severity (:severity opts)
+                             :code     (:code opts)
+                             :ids      (vec args)}))))))))
+
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
@@ -548,6 +600,7 @@
       (case cmd
         "init"   (init-handler rest-argv)
         "prime"  (prime-handler rest-argv)
+        "check"  (check-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
         ("list" "ls") (ls-handler rest-argv)
