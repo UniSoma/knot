@@ -111,18 +111,21 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 
 When the user's question targets a *subset* — a type, mode, tag, status,
 or assignee — pass the matching filter rather than running bare `list` /
-`ready` / `blocked` / `closed` and scanning the columns. All four reads
-accept the same filter flags (each repeatable):
+`ready` / `blocked` / `closed` / `prime` and scanning the columns. All
+five listing commands accept the same six-flag set (each repeatable):
 
 ```
 --type <type>      --mode <afk|hitl>    --tag <tag>
---status <status>  --assignee <user>
+--status <status>  --assignee <user>    --limit <n>
 ```
 
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
-afk --tag p0`. Visual filtering is error-prone (titles wrap, columns
-shift, archived tickets are absent) and harder for the user to verify.
-Reach for bare `list` only when the user actually wants the full picture.
+afk --tag p0`, `knot blocked --mode afk`, `knot closed --type bug --limit 5`.
+On `prime`, filters apply across **all** sections (in_progress + ready +
+recently_closed) — `knot prime --assignee me` shows only your tickets
+everywhere. Visual filtering is error-prone (titles wrap, columns shift,
+archived tickets are absent) and harder for the user to verify. Reach for
+bare `list` only when the user actually wants the full picture.
 
 When the user gives a partial id (`01kqa9`), pass it through verbatim —
 knot resolves it across live + archive. If it's ambiguous, knot prints
@@ -370,7 +373,7 @@ remote id like `GH-482`, `ENG-1234`), use the tool they named.
 ```
 init / prime                           project setup, agent context primer
 list (alias ls) / show                 read live; show one
-ready / blocked / closed               backlog views (--limit, terminal status)
+ready / blocked / closed               backlog views (--limit + full filter set)
 check                                  project-integrity scan (cycles, dangling
                                        refs, schema, archive placement)
 create                                 new ticket (-t -p -a --tags --afk --hitl

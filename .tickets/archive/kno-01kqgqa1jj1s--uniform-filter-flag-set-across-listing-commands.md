@@ -1,12 +1,13 @@
 ---
 id: kno-01kqgqa1jj1s
 title: Uniform filter flag set across listing commands and prime
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-01T02:53:56.178330647Z'
-updated: '2026-05-01T03:11:18.577301504Z'
+updated: '2026-05-02T20:17:21.273320815Z'
+closed: '2026-05-02T20:17:21.273320815Z'
 tags:
 - v0.3
 - cli
@@ -35,3 +36,9 @@ Empty filter results are valid empty arrays, not errors. No contradictory-filter
 - [ ] Empty result is a valid empty array, not an error
 - [ ] Help text reflects the unified flag set on every command
 - [ ] Tests cover the new flag combinations on each command
+
+## Notes
+
+**2026-05-02T20:17:21.273320815Z**
+
+Uniform six-flag filter set (--status --assignee --tag --type --mode --limit) across all five listing commands. list gains --limit; blocked and closed gain all five filter flags; prime gains --status --assignee --tag --type with filters applied to in_progress + ready + recently_closed. apply-limit moved before ls-cmd in cli.clj. Rejection test removed; 20 new tests (9 unit, 11 integration). CHANGELOG updated; SKILL.md synced. 261 tests / 2244 assertions / 0 failures; lint baseline unchanged.

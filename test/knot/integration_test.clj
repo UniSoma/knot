@@ -859,18 +859,94 @@
         (is (str/includes? out "\"data\":["))
         (is (str/includes? out "\"status\":\"closed\"")))))
 
-  (testing "closed and blocked reject filter flags they do not implement"
-    ;; closed/blocked share the narrow list-spec (no filter keys). A user
-    ;; who types `--mode afk` should get a clear failure, not a silent
-    ;; no-op that returns the unfiltered list.
+  (testing "closed --mode filters by mode"
     (with-tmp tmp
-      (doseq [cmd ["closed" "blocked"]
-              flag ["--mode" "--status" "--assignee" "--tag" "--type"]]
-        (let [{:keys [exit err]} (run-knot tmp cmd flag "x")]
-          (is (= 1 exit)
-              (str cmd " " flag " should exit non-zero"))
-          (is (str/includes? err "Unknown option")
-              (str cmd " " flag " should name the unknown option in stderr")))))))
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Afk ticket" "--afk")) "afk-ticket")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Hitl ticket" "--hitl")) "hitl-ticket")
+            _ (run-knot tmp "close" a-id)
+            _ (run-knot tmp "close" b-id)
+            {:keys [exit out err]} (run-knot tmp "closed" "--mode" "afk")]
+        (is (zero? exit) (str "closed --mode err=" err))
+        (is (str/includes? out "Afk ticket"))
+        (is (not (str/includes? out "Hitl ticket"))
+            "hitl-mode closed ticket filtered out by --mode afk"))))
+
+  (testing "closed --type filters by type"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "A bug" "-t" "bug")) "a-bug")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "A task" "-t" "task")) "a-task")
+            _ (run-knot tmp "close" a-id)
+            _ (run-knot tmp "close" b-id)
+            {:keys [exit out err]} (run-knot tmp "closed" "--type" "bug")]
+        (is (zero? exit) (str "closed --type err=" err))
+        (is (str/includes? out "A bug"))
+        (is (not (str/includes? out "A task"))
+            "task-type closed ticket filtered out by --type bug")))))
+
+(deftest blocked-filter-flags-end-to-end-test
+  (testing "blocked --mode filters by mode"
+    (with-tmp tmp
+      (let [dep-id  (id-from-create-out (:out (run-knot tmp "create" "Dep")) "dep")
+            afk-id  (id-from-create-out (:out (run-knot tmp "create" "Afk blocked" "--afk")) "afk-blocked")
+            hitl-id (id-from-create-out (:out (run-knot tmp "create" "Hitl blocked" "--hitl")) "hitl-blocked")
+            _ (run-knot tmp "dep" afk-id dep-id)
+            _ (run-knot tmp "dep" hitl-id dep-id)
+            {:keys [exit out err]} (run-knot tmp "blocked" "--mode" "afk")]
+        (is (zero? exit) (str "blocked --mode err=" err))
+        (is (str/includes? out "Afk blocked"))
+        (is (not (str/includes? out "Hitl blocked"))
+            "hitl-mode blocked ticket filtered out by --mode afk"))))
+
+  (testing "blocked --type filters by type"
+    (with-tmp tmp
+      (let [dep-id  (id-from-create-out (:out (run-knot tmp "create" "Dep")) "dep")
+            bug-id  (id-from-create-out (:out (run-knot tmp "create" "A bug" "-t" "bug")) "a-bug")
+            task-id (id-from-create-out (:out (run-knot tmp "create" "A task" "-t" "task")) "a-task")
+            _ (run-knot tmp "dep" bug-id dep-id)
+            _ (run-knot tmp "dep" task-id dep-id)
+            {:keys [exit out err]} (run-knot tmp "blocked" "--type" "bug")]
+        (is (zero? exit) (str "blocked --type err=" err))
+        (is (str/includes? out "A bug"))
+        (is (not (str/includes? out "A task"))
+            "task-type blocked ticket filtered out by --type bug")))))
+
+(deftest ls-limit-end-to-end-test
+  (testing "list --limit caps the row count"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (run-knot tmp "create" "Beta")
+      (run-knot tmp "create" "Gamma")
+      (let [{:keys [exit out err]} (run-knot tmp "list" "--limit" "2")
+            ;; Count title-hits rather than id-row prefix — the project prefix
+            ;; is derived from the temp dir name, not "kno-".
+            title-hits (count (filter #(str/includes? out %) ["Alpha" "Beta" "Gamma"]))]
+        (is (zero? exit) (str "list --limit err=" err))
+        (is (= 2 title-hits) "--limit 2 shows exactly 2 of the 3 tickets")))))
+
+(deftest prime-filter-all-sections-end-to-end-test
+  (testing "prime --type filters in_progress section"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "A bug" "-t" "bug")) "a-bug")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "A task" "-t" "task")) "a-task")
+            _ (run-knot tmp "start" a-id)
+            _ (run-knot tmp "start" b-id)
+            {:keys [exit out err]} (run-knot tmp "prime" "--type" "bug")]
+        (is (zero? exit) (str "prime --type err=" err))
+        (is (str/includes? out "A bug") "bug ticket surfaces in output")
+        (is (not (str/includes? out "A task"))
+            "task-type ticket filtered out of in_progress section"))))
+
+  (testing "prime --type filters recently_closed section"
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "A bug" "-t" "bug")) "a-bug")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "A task" "-t" "task")) "a-task")
+            _ (run-knot tmp "close" a-id)
+            _ (run-knot tmp "close" b-id)
+            {:keys [exit out err]} (run-knot tmp "prime" "--type" "bug")]
+        (is (zero? exit) (str "prime --type recently_closed err=" err))
+        (is (str/includes? out "A bug") "bug ticket surfaces in recently_closed")
+        (is (not (str/includes? out "A task"))
+            "task-type ticket filtered out of recently_closed section")))))
 
 (deftest link-unlink-end-to-end-test
   (testing "link writes symmetric :links to both files"

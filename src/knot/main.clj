@@ -240,7 +240,8 @@
                                 {:json?  json?
                                  :tty?   tty?
                                  :color? color?})
-                   tty? (assoc :width (output/terminal-width)))
+                   (:limit opts) (assoc :limit (:limit opts))
+                   tty?          (assoc :width (output/terminal-width)))
         out      (cli/ls-cmd (discover-ctx) ls-opts)]
     (println-out out)))
 
@@ -676,11 +677,13 @@
    so the command stays safe to wire into a global SessionStart hook."
   [argv]
   (let [out (try
-              (let [{:keys [opts]} (bcli/parse-args argv (spec :prime))]
+              (let [{:keys [opts]} (bcli/parse-args argv (spec :prime))
+                    filter-opts  (dissoc (filter-opts-from-cli opts) :mode)]
                 (cli/prime-cmd (discover-ctx)
-                               {:json? (boolean (:json opts))
-                                :mode  (:mode opts)
-                                :limit (:limit opts)}))
+                               (merge filter-opts
+                                      {:json? (boolean (:json opts))
+                                       :mode  (:mode opts)
+                                       :limit (:limit opts)})))
               (catch Exception _
                 ;; Argument-parsing or unexpected failure: degrade to a
                 ;; no-project primer rather than exit non-zero. SessionStart

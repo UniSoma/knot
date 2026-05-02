@@ -634,6 +634,19 @@
                   (when (seq v) [k v]))))
         [:status :assignee :tag :type :mode]))
 
+(defn- apply-limit
+  "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
+   means no limit — return `xs` unchanged. Any other value (including 0
+   and negatives) throws: `--limit 0` silently meaning 'no limit' surprised
+   users coming from CLIs where 0 means 'zero results'."
+  [xs n]
+  (cond
+    (nil? n)                    xs
+    (and (integer? n) (pos? n)) (vec (take n xs))
+    :else
+    (throw (ex-info (str "--limit must be a positive integer; got " n)
+                    {:limit n}))))
+
 (defn- ls-table-opts
   "Build the `output/ls-table` options map from CLI `opts` plus the
    resolved-ctx status fields (`:statuses`, `:terminal-statuses`,
@@ -653,7 +666,8 @@
    Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
    set of strings) compose via `query/filter-tickets`. An explicit
    `:status` set replaces the default non-terminal filter — so
-   `--status closed` surfaces archived tickets."
+   `--status closed` surfaces archived tickets. `:limit` truncates after
+   filtering."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
         {:keys [project-root tickets-dir terminal-statuses]} resolved
@@ -662,10 +676,11 @@
         base     (if (contains? criteria :status)
                    all
                    (query/non-terminal all terminal-statuses))
-        visible  (query/filter-tickets base criteria)]
+        visible  (query/filter-tickets base criteria)
+        result   (apply-limit visible (:limit opts))]
     (if (:json? opts)
-      (output/ls-json visible)
-      (output/ls-table visible (ls-table-opts resolved opts)))))
+      (output/ls-json result)
+      (output/ls-table result (ls-table-opts resolved opts)))))
 
 (defn- tree-tickets
   "Walk a dep-tree node and return the unique full tickets it contains, in
@@ -774,19 +789,6 @@
                        foot
                        (str table "\n" foot))))}))))
 
-(defn- apply-limit
-  "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
-   means no limit — return `xs` unchanged. Any other value (including 0
-   and negatives) throws: `--limit 0` silently meaning 'no limit' surprised
-   users coming from CLIs where 0 means 'zero results'."
-  [xs n]
-  (cond
-    (nil? n)                    xs
-    (and (integer? n) (pos? n)) (vec (take n xs))
-    :else
-    (throw (ex-info (str "--limit must be a positive integer; got " n)
-                    {:limit n}))))
-
 (defn ready-cmd
   "List tickets that are non-terminal AND whose `:deps` are all in
    terminal status. With `:json? true`, returns a bare JSON array.
@@ -828,15 +830,19 @@
 
 (defn closed-cmd
   "List terminal-status (closed) tickets, sorted by `:closed` descending —
-   newest first. Optional `:limit` truncates after the sort. With
+   newest first. Optional `:limit` truncates after filter+sort. With
    `:json? true`, returns a bare JSON array; otherwise a rendered text
-   table. Tickets missing a `:closed` stamp sort last."
+   table. Tickets missing a `:closed` stamp sort last.
+
+   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
+   set of strings) compose via `query/filter-tickets`, applied before sort."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
         {:keys [project-root tickets-dir terminal-statuses]} resolved
         all      (store/load-all project-root tickets-dir)
         terminal (filter (partial closed? terminal-statuses) all)
-        sorted   (sort by-closed-desc terminal)
+        filtered (query/filter-tickets terminal (filter-criteria opts))
+        sorted   (sort by-closed-desc filtered)
         result   (apply-limit sorted (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
@@ -845,12 +851,18 @@
 (defn blocked-cmd
   "List non-terminal tickets that have at least one non-terminal `:deps`
    entry (or a missing referent). With `:json? true`, returns a bare
-   JSON array. Otherwise returns the rendered text table."
+   JSON array. Otherwise returns the rendered text table.
+
+   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
+   set of strings) compose via `query/filter-tickets`, applied after
+   computing the blocked set. `:limit` truncates after filtering."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
         {:keys [project-root tickets-dir terminal-statuses]} resolved
-        all     (store/load-all project-root tickets-dir)
-        result  (query/blocked all terminal-statuses)]
+        all      (store/load-all project-root tickets-dir)
+        blocked* (query/blocked all terminal-statuses)
+        filtered (query/filter-tickets blocked* (filter-criteria opts))
+        result   (apply-limit filtered (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table result (ls-table-opts resolved opts)))))
@@ -939,15 +951,19 @@
    `ctx` carries the usual project context plus `:project-found?` (set
    when the walk-up discovery hit a `.knot.edn`/`.tickets/` marker) and
    an optional `:project-name`.
-   `opts` supports `:mode` (filter ready section to that mode), `:limit`
+   `opts` supports `:mode` (scalar string — filters all sections), `:limit`
    (override the default ready cap of 20; non-positive values fall back
-   to the default), and `:json?` (emit the actionable bare-object
-   payload instead of markdown).
+   to the default), `:json?` (emit the actionable bare-object payload
+   instead of markdown), and the standard filter set `:status`,
+   `:assignee`, `:tag`, `:type` (each a set of strings from
+   `filter-opts-from-cli`).
 
-   The ready section is filtered by `:mode` BEFORE the cap is applied,
-   so `--mode afk --limit 5` yields up to 5 afk-mode ready tickets, not
-   5 from the unfiltered set."
-  [ctx {:keys [json? mode limit]}]
+   Filters apply uniformly across all three sections (in_progress, ready,
+   recently_closed). For ready, filters apply BEFORE the cap, so
+   `--mode afk --limit 5` yields up to 5 afk-mode ready tickets. The
+   recently_closed section is filtered before the compact projection so
+   the full ticket fields are available for matching."
+  [ctx {:keys [json? mode limit status assignee tag type]}]
   (if-not (:project-found? ctx)
     (let [data {:project          {:found? false}
                 :in-progress      []
@@ -963,16 +979,27 @@
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
-          in-progress* (in-progress-tickets all active-status now)
+          ;; Unified criteria map — mode is a scalar here (backward compat
+          ;; with existing callers), converted to a set for filter-tickets.
+          criteria     (cond-> {}
+                         (some? mode)     (assoc :mode     #{mode})
+                         (seq status)     (assoc :status   status)
+                         (seq assignee)   (assoc :assignee assignee)
+                         (seq tag)        (assoc :tag      tag)
+                         (seq type)       (assoc :type     type))
+          in-progress* (query/filter-tickets
+                        (in-progress-tickets all active-status now)
+                        criteria)
           ready*       (query/ready all terminal-statuses)
-          mode-filter  (when mode {:mode #{mode}})
-          ready-filtered (query/filter-tickets ready* (or mode-filter {}))
+          ready-filtered (query/filter-tickets ready* criteria)
           cap          (prime-cap limit)
           ready-shown  (vec (take cap ready-filtered))
           ready-total  (count ready-filtered)
           truncated?   (> ready-total cap)
           remaining    (if truncated? (- ready-total cap) 0)
-          recently-closed* (recently-closed-tickets all terminal-statuses)
+          recently-closed* (recently-closed-tickets
+                            (query/filter-tickets all criteria)
+                            terminal-statuses)
           data         {:project          {:found?        true
                                            :prefix        prefix
                                            :name          project-name

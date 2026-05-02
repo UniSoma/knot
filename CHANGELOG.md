@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Uniform six-flag filter set across all listing commands. `list` gains
+  `--limit`; `blocked` and `closed` gain `--status`, `--assignee`,
+  `--tag`, `--type`, `--mode`; `prime` gains `--status`, `--assignee`,
+  `--tag`, `--type`. On `prime`, filters apply across **all** sections
+  (in_progress + ready + recently_closed) — e.g. `knot prime --assignee
+  me` shows only your tickets in every section. Empty filter results are
+  valid empty arrays, not errors.
+
 - New `knot update <id>` command for non-interactive ticket writes.
   Frontmatter flags (`--title`, `--type`, `--priority`, `--mode`,
   `--assignee`, `--parent`, `--tags`, `--external-ref`) set field

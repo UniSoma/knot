@@ -3017,3 +3017,175 @@ Restart the daemon.
       (let [out (cli/dep-tree-cmd (ctx tmp) {:id "aaaa"})]
         (is (str/includes? out "kno-aaaa11111111"))
         (is (str/includes? out "kno-bbbb22222222"))))))
+
+(deftest ls-cmd-limit-test
+  (testing "ls-cmd with :limit caps the result count"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (cli/create-cmd (ctx tmp) {:title "Beta"})
+      (cli/create-cmd (ctx tmp) {:title "Gamma"})
+      (let [out  (cli/ls-cmd (ctx tmp) {:tty? false :color? false :limit 2})
+            rows (->> (str/split-lines out)
+                      (filter #(str/starts-with? % "kno-")))]
+        (is (= 2 (count rows)) "exactly 2 rows with :limit 2"))))
+
+  (testing "ls-cmd without :limit returns all tickets"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (cli/create-cmd (ctx tmp) {:title "Beta"})
+      (cli/create-cmd (ctx tmp) {:title "Gamma"})
+      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+        (is (str/includes? out "Alpha"))
+        (is (str/includes? out "Beta"))
+        (is (str/includes? out "Gamma"))))))
+
+(deftest blocked-cmd-filter-test
+  (testing "blocked-cmd with :mode filters by mode"
+    (with-tmp tmp
+      (let [a       (cli/create-cmd (ctx tmp) {:title "Afk blocked"  :mode "afk"})
+            b       (cli/create-cmd (ctx tmp) {:title "Hitl blocked" :mode "hitl"})
+            blocker (cli/create-cmd (ctx tmp) {:title "Blocker"})
+            a-id       (id-of-created a       "afk-blocked")
+            b-id       (id-of-created b       "hitl-blocked")
+            blocker-id (id-of-created blocker "blocker")
+            _ (cli/dep-cmd (ctx tmp) {:from a-id :to blocker-id})
+            _ (cli/dep-cmd (ctx tmp) {:from b-id :to blocker-id})
+            out (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :mode #{"afk"}})]
+        (is (str/includes? out "Afk blocked"))
+        (is (not (str/includes? out "Hitl blocked"))
+            "hitl-mode blocked ticket filtered out"))))
+
+  (testing "blocked-cmd with :type filters by type"
+    (with-tmp tmp
+      (let [a   (cli/create-cmd (ctx tmp) {:title "Bug blocked"  :type "bug"})
+            b   (cli/create-cmd (ctx tmp) {:title "Task blocked" :type "task"})
+            dep (cli/create-cmd (ctx tmp) {:title "Common dep"})
+            a-id   (id-of-created a   "bug-blocked")
+            b-id   (id-of-created b   "task-blocked")
+            dep-id (id-of-created dep "common-dep")
+            _ (cli/dep-cmd (ctx tmp) {:from a-id :to dep-id})
+            _ (cli/dep-cmd (ctx tmp) {:from b-id :to dep-id})
+            out (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :type #{"bug"}})]
+        (is (str/includes? out "Bug blocked"))
+        (is (not (str/includes? out "Task blocked"))
+            "task-type blocked ticket filtered out"))))
+
+  (testing "blocked-cmd with :limit caps result count"
+    (with-tmp tmp
+      (let [dep (cli/create-cmd (ctx tmp) {:title "Common dep"})
+            a   (cli/create-cmd (ctx tmp) {:title "Blocked A"})
+            b   (cli/create-cmd (ctx tmp) {:title "Blocked B"})
+            c   (cli/create-cmd (ctx tmp) {:title "Blocked C"})
+            dep-id (id-of-created dep "common-dep")
+            a-id   (id-of-created a   "blocked-a")
+            b-id   (id-of-created b   "blocked-b")
+            c-id   (id-of-created c   "blocked-c")
+            _ (cli/dep-cmd (ctx tmp) {:from a-id :to dep-id})
+            _ (cli/dep-cmd (ctx tmp) {:from b-id :to dep-id})
+            _ (cli/dep-cmd (ctx tmp) {:from c-id :to dep-id})
+            out  (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :limit 2})
+            rows (->> (str/split-lines out)
+                      (filter #(str/starts-with? % "kno-")))]
+        (is (= 2 (count rows)) ":limit 2 returns exactly 2 blocked tickets")))))
+
+(deftest closed-cmd-filter-test
+  (testing "closed-cmd with :mode filters by mode"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Afk closed"  :mode "afk"})
+            b (cli/create-cmd c {:title "Hitl closed" :mode "hitl"})
+            a-id (id-of-created a "afk-closed")
+            b-id (id-of-created b "hitl-closed")
+            _ (cli/close-cmd c {:id a-id})
+            _ (cli/close-cmd c {:id b-id})
+            out (cli/closed-cmd c {:tty? false :color? false :mode #{"afk"}})]
+        (is (str/includes? out "Afk closed"))
+        (is (not (str/includes? out "Hitl closed"))
+            "hitl-mode closed ticket filtered out"))))
+
+  (testing "closed-cmd with :type filters by type"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Bug done"  :type "bug"})
+            b (cli/create-cmd c {:title "Task done" :type "task"})
+            a-id (id-of-created a "bug-done")
+            b-id (id-of-created b "task-done")
+            _ (cli/close-cmd c {:id a-id})
+            _ (cli/close-cmd c {:id b-id})
+            out (cli/closed-cmd c {:tty? false :color? false :type #{"bug"}})]
+        (is (str/includes? out "Bug done"))
+        (is (not (str/includes? out "Task done"))
+            "task-type closed ticket filtered out"))))
+
+  (testing "closed-cmd filters apply before sort and limit"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd (assoc c :now "2026-04-28T10:00:00Z")
+                              {:title "Bug A" :type "bug"})
+            b (cli/create-cmd (assoc c :now "2026-04-28T11:00:00Z")
+                              {:title "Task B" :type "task"})
+            d (cli/create-cmd (assoc c :now "2026-04-28T12:00:00Z")
+                              {:title "Bug C" :type "bug"})
+            a-id (id-of-created a "bug-a")
+            b-id (id-of-created b "task-b")
+            d-id (id-of-created d "bug-c")
+            _ (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id a-id})
+            _ (cli/close-cmd (assoc c :now "2026-04-28T14:00:00Z") {:id b-id})
+            _ (cli/close-cmd (assoc c :now "2026-04-28T15:00:00Z") {:id d-id})
+            out (cli/closed-cmd c {:tty? false :color? false :type #{"bug"} :limit 1})]
+        (is (str/includes? out "Bug C") "most-recently closed bug retained")
+        (is (not (str/includes? out "Bug A")) "second-newest bug dropped by limit")
+        (is (not (str/includes? out "Task B")) "task-type excluded by filter")))))
+
+(deftest prime-cmd-filter-all-sections-test
+  (testing "prime :type filter applies to in_progress section"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Bug in progress"  :type "bug"})
+            b (cli/create-cmd c {:title "Task in progress" :type "task"})
+            a-id (id-of-created a "bug-in-progress")
+            b-id (id-of-created b "task-in-progress")
+            _ (cli/start-cmd c {:id a-id})
+            _ (cli/start-cmd c {:id b-id})
+            out     (cli/prime-cmd (prime-ctx tmp) {:type #{"bug"}})
+            ip-start (str/index-of out "## In Progress")
+            rd-start (str/index-of out "## Ready")
+            section  (subs out ip-start rd-start)]
+        (is (str/includes? section "Bug in progress"))
+        (is (not (str/includes? section "Task in progress"))
+            "task-type in-progress ticket filtered from In Progress section"))))
+
+  (testing "prime :type filter applies to recently_closed section"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Bug done"  :type "bug"})
+            b (cli/create-cmd c {:title "Task done" :type "task"})
+            a-id (id-of-created a "bug-done")
+            b-id (id-of-created b "task-done")
+            _ (cli/close-cmd c {:id a-id})
+            _ (cli/close-cmd c {:id b-id})
+            out      (cli/prime-cmd (prime-ctx tmp) {:type #{"bug"}})
+            rc-start (str/index-of out "## Recently Closed")
+            cm-start (str/index-of out "## Commands")
+            section  (subs out rc-start cm-start)]
+        (is (some? rc-start) "Recently Closed section present")
+        (is (str/includes? section "Bug done"))
+        (is (not (str/includes? section "Task done"))
+            "task-type closed ticket filtered from Recently Closed section"))))
+
+  (testing "prime :mode filter applies to in_progress section (not just ready)"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            a (cli/create-cmd c {:title "Afk active"  :mode "afk"})
+            b (cli/create-cmd c {:title "Hitl active" :mode "hitl"})
+            a-id (id-of-created a "afk-active")
+            b-id (id-of-created b "hitl-active")
+            _ (cli/start-cmd c {:id a-id})
+            _ (cli/start-cmd c {:id b-id})
+            out     (cli/prime-cmd (prime-ctx tmp) {:mode "afk"})
+            ip-start (str/index-of out "## In Progress")
+            rd-start (str/index-of out "## Ready")
+            section  (subs out ip-start rd-start)]
+        (is (str/includes? section "Afk active"))
+        (is (not (str/includes? section "Hitl active"))
+            "hitl-mode in-progress ticket filtered from In Progress under --mode afk")))))

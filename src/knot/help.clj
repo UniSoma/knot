@@ -158,11 +158,17 @@
     :args        []
     :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit JSON instead of markdown."}
-                  {:name :mode :desc "Filter primer ticket sections by mode (afk|hitl)."}
+                  {:name :mode :desc "Filter all primer sections by mode (afk|hitl)."}
                   {:name :limit :coerce :long
-                   :desc "Cap the number of ready-section tickets shown."}]
+                   :desc "Cap the number of ready-section tickets shown."}
+                  {:name :status   :coerce [] :desc "Filter all sections by status (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter all sections by assignee (repeatable)."}
+                  {:name :tag      :coerce [] :desc "Filter all sections by tag (repeatable)."}
+                  {:name :type     :coerce [] :desc "Filter all sections by type (repeatable)."}]
     :examples    [{:cmd "knot prime"
-                   :note "Print the markdown primer for the current project."}]
+                   :note "Print the markdown primer for the current project."}
+                  {:cmd "knot prime --type bug --mode afk"
+                   :note "Show only afk-mode bug tickets across all primer sections."}]
     :exit-codes  [{:code 0 :when "always (degrades to a no-project preamble)"}]}
 
    :create
@@ -201,6 +207,7 @@
     :args        []
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
@@ -313,9 +320,16 @@
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
-                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}]
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}
+                  {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
+                  {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
     :examples    [{:cmd "knot blocked"
-                   :note "Show tickets currently blocked by an open dep."}]}
+                   :note "Show tickets currently blocked by an open dep."}
+                  {:cmd "knot blocked --mode afk"
+                   :note "Show afk-mode blocked tickets."}]}
 
    :closed
    {:group       :listing
@@ -324,9 +338,16 @@
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
-                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}]
+                  {:name :limit    :coerce :long    :desc "Cap the number of rows."}
+                  {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
+                  {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
     :examples    [{:cmd "knot closed --limit 10"
-                   :note "Show the ten most-recently-closed tickets."}]}
+                   :note "Show the ten most-recently-closed tickets."}
+                  {:cmd "knot closed --type bug"
+                   :note "Show closed bug tickets."}]}
 
    :add-note
    {:group       :notes
