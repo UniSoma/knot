@@ -1275,3 +1275,174 @@
         (is (zero? exit) (str "init err=" err))
         (is (= before (slurp (str settings)))
             "init must not touch .claude/settings.json")))))
+
+(defn- id-of [out slug-pat]
+  (->> (str/trim out)
+       fs/file-name
+       str
+       (re-matches (re-pattern (str "(.+)--" slug-pat "\\.md")))
+       second))
+
+(deftest mutating-json-end-to-end-test
+  (testing "create --json emits a v0.3 envelope wrapping the new ticket"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Hello world" "--json")]
+        (is (zero? exit) (str "create --json err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= 1 (:schema_version parsed)))
+          (is (= true (:ok parsed)))
+          (is (= "Hello world" (get-in parsed [:data :title])))
+          (is (= "open" (get-in parsed [:data :status])))
+          (is (str/starts-with? (get-in parsed [:data :id]) "kno-"))))))
+
+  (testing "start --json emits the post-mutation ticket envelope"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Task")
+            id (id-of out "task")
+            {:keys [exit out err]} (run-knot tmp "start" id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "start --json err=" err))
+        (is (= true (:ok parsed)))
+        (is (= "in_progress" (get-in parsed [:data :status])))
+        (is (not (contains? parsed :meta))
+            "start emits no :meta — never a terminal transition"))))
+
+  (testing "close --json populates meta.archived_to"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Closing task")
+            id (id-of out "closing-task")
+            {:keys [exit out err]} (run-knot tmp "close" id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "close --json err=" err))
+        (is (= true (:ok parsed)))
+        (is (= "closed" (get-in parsed [:data :status])))
+        (is (str/includes? (get-in parsed [:meta :archived_to]) "/archive/")
+            "close --json's :meta.archived_to points at the archive dir"))))
+
+  (testing "close --json --summary embeds the note in :data.body"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Closing task")
+            id (id-of out "closing-task")
+            {:keys [exit out]} (run-knot tmp "close" id "--summary" "Shipped." "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (str/includes? (get-in parsed [:data :body]) "Shipped.")))))
+
+  (testing "reopen --json reverses close cleanly"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Reopen me")
+            id (id-of out "reopen-me")
+            _  (run-knot tmp "close" id)
+            {:keys [exit out]} (run-knot tmp "reopen" id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (= "open" (get-in parsed [:data :status])))
+        (is (not (contains? parsed :meta))))))
+
+  (testing "status --json on a missing id emits not_found envelope (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "status" "kno-ghost" "open" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "json error envelope goes to stdout, not stderr")
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code]))))))
+
+  (testing "dep --json emits the from ticket post-mutation"
+    (with-tmp tmp
+      (let [{from-out :out} (run-knot tmp "create" "From")
+            {to-out :out}   (run-knot tmp "create" "To")
+            from-id (id-of from-out "from")
+            to-id   (id-of to-out "to")
+            {:keys [exit out]} (run-knot tmp "dep" from-id to-id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (= from-id (get-in parsed [:data :id])))
+        (is (= [to-id] (get-in parsed [:data :deps]))))))
+
+  (testing "dep --json on a cycle emits a cycle error envelope (exit 1)"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "A")
+            {b-out :out} (run-knot tmp "create" "B")
+            a-id (id-of a-out "a")
+            b-id (id-of b-out "b")
+            _    (run-knot tmp "dep" a-id b-id)
+            {:keys [exit out err]}
+            (run-knot tmp "dep" b-id a-id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "cycle" (get-in parsed [:error :code])))
+        (is (vector? (get-in parsed [:error :cycle]))))))
+
+  (testing "undep --json emits the from ticket with the dep removed"
+    (with-tmp tmp
+      (let [{from-out :out} (run-knot tmp "create" "From")
+            {to-out :out}   (run-knot tmp "create" "To")
+            from-id (id-of from-out "from")
+            to-id   (id-of to-out "to")
+            _       (run-knot tmp "dep" from-id to-id)
+            {:keys [exit out]} (run-knot tmp "undep" from-id to-id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (not (contains? (:data parsed) :deps))
+            "removing the last dep drops :deps in the envelope"))))
+
+  (testing "link --json emits an array of post-mutation tickets (no body)"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Alpha")
+            {b-out :out} (run-knot tmp "create" "Beta")
+            a-id (id-of a-out "alpha")
+            b-id (id-of b-out "beta")
+            {:keys [exit out]} (run-knot tmp "link" a-id b-id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (vector? (:data parsed)))
+        (is (= 2 (count (:data parsed))))
+        (is (= #{a-id b-id} (set (map :id (:data parsed)))))
+        (is (not (contains? (get-in parsed [:data 0]) :body))
+            "list-style envelope excludes :body"))))
+
+  (testing "unlink --json emits an array of post-mutation tickets"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Alpha")
+            {b-out :out} (run-knot tmp "create" "Beta")
+            a-id (id-of a-out "alpha")
+            b-id (id-of b-out "beta")
+            _    (run-knot tmp "link" a-id b-id)
+            {:keys [exit out]} (run-knot tmp "unlink" a-id b-id "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (= 2 (count (:data parsed)))))))
+
+  (testing "add-note --json emits the post-mutation ticket including the note"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Noted")
+            id (id-of out "noted")
+            {:keys [exit out]} (run-knot tmp "add-note" id "first note" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (str/includes? (get-in parsed [:data :body]) "first note")))))
+
+  (testing "add-note --json on a missing id emits not_found envelope (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "add-note" "kno-ghost" "x" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code])))))))

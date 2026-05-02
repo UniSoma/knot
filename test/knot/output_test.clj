@@ -1324,7 +1324,30 @@
       (is (nil? (:data parsed)))))
   (testing "schema_version is currently 1"
     (let [parsed (json/parse-string (output/envelope-str {}) true)]
-      (is (= 1 (:schema_version parsed))))))
+      (is (= 1 (:schema_version parsed)))))
+  (testing "with :meta in opts, the envelope includes a top-level :meta slot after :data"
+    (let [out    (output/envelope-str {:id "kno-01abc"}
+                                      {:meta {:archived_to ".tickets/archive/kno-01abc.md"}})
+          parsed (json/parse-string out true)]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= {:id "kno-01abc"} (:data parsed)))
+      (is (= ".tickets/archive/kno-01abc.md" (get-in parsed [:meta :archived_to])))
+      ;; key order: schema_version, ok, data, meta — :meta lands after :data
+      (is (str/index-of out "\"data\"") "data key present")
+      (is (< (str/index-of out "\"data\"") (str/index-of out "\"meta\""))
+          "meta key serializes after data")))
+  (testing "without :meta, the envelope omits the meta slot"
+    (let [out    (output/envelope-str {:id "kno-01abc"})
+          parsed (json/parse-string out true)]
+      (is (not (contains? parsed :meta))
+          "no :meta key when none provided")))
+  (testing ":meta combines with :ok? false"
+    (let [out    (output/envelope-str {:scanned 5}
+                                      {:ok? false :meta {:hint "try again"}})
+          parsed (json/parse-string out true)]
+      (is (= false (:ok parsed)))
+      (is (= "try again" (get-in parsed [:meta :hint]))))))
 
 (deftest envelope-error-test
   (testing "error envelope carries {schema_version, ok:false, error:{code, message}}"
@@ -1388,6 +1411,46 @@
       (is (= "kno-A" (get-in parsed [:data :id])))
       (is (= [{:id "kno-B" :title "Beta" :status "open"}]
              (get-in parsed [:data :blockers]))))))
+
+(deftest touched-ticket-json-test
+  (testing "touched-ticket-json wraps a single post-mutation ticket in the v0.3 envelope, body included"
+    (let [ticket {:frontmatter {:id "kno-01abc" :status "in_progress" :priority 2}
+                  :body         "Body."}
+          parsed (envelope-of (output/touched-ticket-json ticket))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (= "kno-01abc"     (get-in parsed [:data :id])))
+      (is (= "in_progress"   (get-in parsed [:data :status])))
+      (is (= "Body."         (get-in parsed [:data :body])))
+      (is (not (contains? parsed :meta))
+          "no :meta when none is supplied")))
+  (testing "touched-ticket-json with :meta places archive_to in the top-level :meta slot"
+    (let [ticket {:frontmatter {:id "kno-01abc" :status "closed"} :body ""}
+          parsed (envelope-of
+                  (output/touched-ticket-json
+                   ticket
+                   {:meta {:archived_to ".tickets/archive/kno-01abc.md"}}))]
+      (is (= "closed" (get-in parsed [:data :status])))
+      (is (= ".tickets/archive/kno-01abc.md"
+             (get-in parsed [:meta :archived_to]))))))
+
+(deftest touched-tickets-json-test
+  (testing "touched-tickets-json wraps an array of post-mutation tickets, body excluded"
+    (let [tickets [{:frontmatter {:id "kno-A" :status "open"} :body "Body A."}
+                   {:frontmatter {:id "kno-B" :status "open"} :body "Body B."}]
+          parsed  (envelope-of (output/touched-tickets-json tickets))]
+      (is (= 1 (:schema_version parsed)))
+      (is (= true (:ok parsed)))
+      (is (vector? (:data parsed)))
+      (is (= 2 (count (:data parsed))))
+      (is (= "kno-A" (get-in parsed [:data 0 :id])))
+      (is (= "kno-B" (get-in parsed [:data 1 :id])))
+      (is (not (contains? (get-in parsed [:data 0]) :body))
+          "body excluded for compactness, like ls --json")))
+  (testing "empty array still emits an envelope with :data []"
+    (let [parsed (envelope-of (output/touched-tickets-json []))]
+      (is (= true (:ok parsed)))
+      (is (= [] (:data parsed))))))
 
 (deftest ls-json-envelope-test
   (testing "ls-json wraps the ticket array in the v0.3 envelope"

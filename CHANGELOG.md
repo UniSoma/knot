@@ -73,6 +73,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   positional args) continue to die on stderr with exit 1 — these are
   CLI-usage errors, not data conditions, and stay outside the JSON
   envelope contract.
+- `--json` flag now extends to every mutating command:
+  `create`, `start`, `status`, `close`, `reopen`, `dep`, `undep`,
+  `link`, `unlink`, `add-note`. Eliminates the read-after-write
+  round-trip for agents — the envelope's `data` is the touched ticket.
+  Lifecycle commands and `add-note` emit the post-mutation ticket
+  (single object, body included). `dep`/`undep` emit the `from` ticket
+  with the updated `:deps`. `link`/`unlink` emit an array of every
+  touched ticket (body excluded, ls-shape). `init` and `edit` are
+  excluded — `init` is project setup (no ticket), `edit` opens
+  `$EDITOR` (interactive only).
+- `close --json` and `status <id> <terminal-status> --json` populate a
+  top-level `:meta {:archived_to <path>}` slot in the envelope so
+  callers do not have to infer archive routing. The envelope grows
+  one slot: `{schema_version, ok, data, meta}` — `:meta` is omitted
+  when none applies (every non-terminal mutation).
+- Error envelopes extend the read-side contract to writes: missing
+  ids emit `{ok:false, error:{code:"not_found", message}}` on stdout
+  (exit 1). Partial-id ambiguity emits `code: "ambiguous_id"` with a
+  `candidates` array. `dep --json` cycle rejection emits `code:
+  "cycle"` with the offending path under `error.cycle`.
 
 ## [0.2.0] - 2026-04-30
 

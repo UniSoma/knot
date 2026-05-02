@@ -178,6 +178,7 @@
                   {:name :mode        :desc "Mode (afk|hitl)."}
                   {:name :afk  :coerce :boolean :desc "Shortcut for --mode afk."}
                   {:name :hitl :coerce :boolean :desc "Shortcut for --mode hitl."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}
                   {:name :description :alias :d :body? true :desc "Body content for the Description section."}
                   {:name :design      :body? true :desc "Body content for the Design section."}
                   {:name :acceptance  :body? true :desc "Body content for the Acceptance Criteria section."}]
@@ -212,7 +213,8 @@
    {:group       :lifecycle
     :description "Transition a ticket to a new status."
     :args        [{:name "id" :required true} {:name "new-status" :required true}]
-    :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}]
+    :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
                    :note "Move a ticket into in_progress."}]}
 
@@ -220,7 +222,7 @@
    {:group       :lifecycle
     :description "Transition a ticket to the project's active status (default: in_progress)."
     :args        [{:name "id" :required true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot start kno-01abc"
                    :note "Mark a ticket as active (in_progress by default)."}]}
 
@@ -228,7 +230,8 @@
    {:group       :lifecycle
     :description "Transition a ticket to the first terminal status."
     :args        [{:name "id" :required true}]
-    :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}]
+    :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
                    :note "Close with a summary."}]}
 
@@ -236,7 +239,7 @@
    {:group       :lifecycle
     :description "Transition a ticket back to open."
     :args        [{:name "id" :required true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot reopen kno-01abc"
                    :note "Reopen a closed ticket."}]}
 
@@ -244,7 +247,7 @@
    {:group       :graph
     :description "Add <to> to <from>'s :deps (cycle-checked)."
     :args        [{:name "from" :required true} {:name "to" :required true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the from ticket post-mutation) instead of the saved path."}]
     :subcommands [:dep/tree]
     :examples    [{:cmd "knot dep kno-01abc kno-01def"
                    :note "Make kno-01abc depend on kno-01def."}]
@@ -265,7 +268,7 @@
    {:group       :graph
     :description "Remove <to> from <from>'s :deps."
     :args        [{:name "from" :required true} {:name "to" :required true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the from ticket post-mutation) instead of the saved path."}]
     :examples    [{:cmd "knot undep kno-01abc kno-01def"
                    :note "Drop the edge from kno-01abc to kno-01def."}]}
 
@@ -275,7 +278,7 @@
     :args        [{:name "a" :required true}
                   {:name "b" :required true}
                   {:name "rest" :variadic true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (array of touched tickets) instead of saved paths."}]
     :examples    [{:cmd "knot link kno-01abc kno-01def kno-01ghi"
                    :note "Link three tickets pairwise."}]}
 
@@ -283,7 +286,7 @@
    {:group       :graph
     :description "Remove the symmetric link between two ids."
     :args        [{:name "from" :required true} {:name "to" :required true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (array of touched tickets) instead of saved paths."}]
     :examples    [{:cmd "knot unlink kno-01abc kno-01def"
                    :note "Drop the link between two tickets."}]}
 
@@ -330,7 +333,7 @@
     :description "Append a timestamped note (text arg, stdin, or editor)."
     :args        [{:name "id" :required true}
                   {:name "text" :variadic true}]
-    :flags       []
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}]
     :examples    [{:cmd "knot add-note kno-01abc \"Tested locally\""
                    :note "Append a one-line note."}
                   {:cmd "knot add-note kno-01abc"

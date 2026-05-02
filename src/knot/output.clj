@@ -142,14 +142,21 @@
    health verdict and so may coexist with a `data` slot. (The
    error-only envelope produced by `error-envelope-str` does NOT carry
    `:data`; this 2-arity extension is the only path to `ok:false +
-   data`.) `array-map` keeps the key order stable for snapshot tests."
+   data`.)
+
+   With `{:meta {...}}`, the envelope appends a top-level `:meta` slot
+   after `:data` carrying operation metadata (e.g. `{:archived_to ...}`
+   from `close --json`). Omitted when `:meta` is nil/absent.
+
+   `array-map` keeps the key order stable for snapshot tests."
   ([data]
    (envelope-str data nil))
-  ([data {:keys [ok?] :or {ok? true}}]
+  ([data {:keys [ok? meta] :or {ok? true}}]
    (json/generate-string
-    (array-map :schema_version schema-version
-               :ok             ok?
-               :data           data))))
+    (cond-> (array-map :schema_version schema-version
+                       :ok             ok?
+                       :data           data)
+      (some? meta) (assoc :meta meta)))))
 
 (defn error-envelope-str
   "Serialize a v0.3 JSON error envelope. `error` is a map with `:code`,
@@ -211,6 +218,27 @@
   "Render a sequence of ticket maps wrapped in the v0.3 success envelope.
    The ticket array sits under `:data`; keys inside each entry are
    snake_case; the body is omitted to keep list output compact."
+  [tickets]
+  (envelope-str
+   (mapv #(jsonify-ticket % {:include-body? false}) tickets)))
+
+(defn touched-ticket-json
+  "Render a v0.3 success envelope around a single post-mutation ticket
+   for `--json` on a mutating command. The ticket sits under `:data`
+   with full frontmatter + body (snake_case keys). When `:meta` is
+   supplied in `opts`, the envelope adds a top-level `:meta` slot for
+   operation metadata (e.g. `{:archived_to \"...\"}` from `close`)."
+  ([ticket]
+   (touched-ticket-json ticket nil))
+  ([ticket {:keys [meta]}]
+   (envelope-str (jsonify-ticket ticket {:include-body? true})
+                 (when meta {:meta meta}))))
+
+(defn touched-tickets-json
+  "Render a v0.3 success envelope around an array of post-mutation
+   tickets for `--json` on multi-target mutating commands (`link`,
+   `unlink`). Body is excluded per entry — same shape as `ls --json`'s
+   `:data` — to keep aggregate output compact."
   [tickets]
   (envelope-str
    (mapv #(jsonify-ticket % {:include-body? false}) tickets)))

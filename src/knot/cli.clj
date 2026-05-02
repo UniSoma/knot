@@ -98,7 +98,10 @@
    optional overrides for defaults (`:tickets-dir`, `:default-type`, etc.).
    `opts` is the parsed argument map, e.g. `{:title \"Fix login\" :priority 0}`.
    The id is regenerated on filesystem-level collision (via `save-new!`)
-   so concurrent same-ms creates can never silently overwrite each other."
+   so concurrent same-ms creates can never silently overwrite each other.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the new ticket under `:data` instead of the saved path."
   [ctx opts]
   (let [{:keys [project-root prefix tickets-dir terminal-statuses
                 default-type default-priority default-mode now assignee]}
@@ -123,9 +126,16 @@
                                :tags         (:tags opts)
                                :parent       (:parent opts)
                                :external-ref (:external-ref opts)})
-                             :body body}})]
-    (store/save-new! project-root tickets-dir gen-id build-fn
-                     {:now now :terminal-statuses terminal-statuses})))
+                             :body body}})
+        saved    (store/save-new! project-root tickets-dir gen-id build-fn
+                                  {:now now :terminal-statuses terminal-statuses})]
+    (if (:json? opts)
+      (let [filename (str (fs/file-name saved))
+            id       (or (second (re-matches #"(.+?)(?:--.+)?\.md" filename))
+                         filename)]
+        (output/touched-ticket-json
+         (store/load-one project-root tickets-dir id)))
+      saved)))
 
 (defn- warn!
   "Emit a single line to stderr."
@@ -193,8 +203,15 @@
    target status must be in `:terminal-statuses` — non-terminal targets
    throw before any file is written. A non-blank summary is appended as
    a timestamped note under `## Notes` via `ticket/append-note`, sharing
-   the same writer path as `add-note-cmd`."
-  [ctx {:keys [id status summary]}]
+   the same writer path as `add-note-cmd`.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the post-mutation ticket under `:data` instead of the saved
+   path. When the new status is in `:terminal-statuses`, the envelope
+   adds `:meta {:archived_to <path>}` so callers do not have to infer
+   archive routing. Returns nil when no ticket matches (json mode does
+   not change the not-found contract; the handler emits the envelope)."
+  [ctx {:keys [id status summary json?]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
     (when (and (some? summary)
@@ -210,9 +227,16 @@
                                           now
                                           (str/trim summary))
                       (:body loaded))
-            ticket  (assoc loaded :frontmatter new-fm :body body*)]
-        (store/save! project-root tickets-dir full-id nil ticket
-                     {:now now :terminal-statuses terminal-statuses})))))
+            ticket  (assoc loaded :frontmatter new-fm :body body*)
+            saved   (store/save! project-root tickets-dir full-id nil ticket
+                                 {:now now :terminal-statuses terminal-statuses})]
+        (if json?
+          (let [post            (store/load-one project-root tickets-dir full-id)
+                terminal-target? (contains? (or terminal-statuses #{}) status)
+                meta-opt        (when terminal-target?
+                                  {:meta {:archived_to (str saved)}})]
+            (output/touched-ticket-json post meta-opt))
+          saved)))))
 
 (defn start-cmd
   "Sugar for `status-cmd`: transition `(:id opts)` to the project's
@@ -251,8 +275,12 @@
    in verbatim — broken refs are tolerated and surface as `[missing]`
    markers at render time. Idempotent on the deps list. Runs cycle
    detection on the would-be graph before persisting; throws `ex-info`
-   with `:cycle` data when the edge would close a cycle."
-  [ctx {:keys [from to]}]
+   with `:cycle` data when the edge would close a cycle.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the post-mutation `from` ticket under `:data` instead of
+   the saved path."
+  [ctx {:keys [from to json?]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
     (when-let [loaded (resolve-or-nil project-root tickets-dir from)]
@@ -269,9 +297,13 @@
                               {:cycle cycle})))))
         (let [new-deps (if already? existing-deps (conj existing-deps to-id))
               new-fm   (assoc (:frontmatter loaded) :deps new-deps)
-              ticket*  (assoc loaded :frontmatter new-fm)]
-          (store/save! project-root tickets-dir from-id nil ticket*
-                       {:now now :terminal-statuses terminal-statuses}))))))
+              ticket*  (assoc loaded :frontmatter new-fm)
+              saved    (store/save! project-root tickets-dir from-id nil ticket*
+                                    {:now now :terminal-statuses terminal-statuses})]
+          (if json?
+            (output/touched-ticket-json
+             (store/load-one project-root tickets-dir from-id))
+            saved))))))
 
 (defn undep-cmd
   "Remove `(:to opts)` from the `:deps` array of the ticket whose id is
@@ -280,8 +312,11 @@
    Idempotent: removing a non-present dep is a no-op (still bumps
    `:updated`). When the resulting deps array is empty, the `:deps` key
    is dropped from frontmatter so the on-disk file stays clean. Returns
-   the saved path, or nil when `from` does not exist."
-  [ctx {:keys [from to]}]
+   the saved path, or nil when `from` does not exist.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the post-mutation `from` ticket under `:data` instead."
+  [ctx {:keys [from to json?]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
     (when-let [loaded (resolve-or-nil project-root tickets-dir from)]
@@ -292,9 +327,13 @@
             new-fm   (if (empty? kept)
                        (dissoc (:frontmatter loaded) :deps)
                        (assoc (:frontmatter loaded) :deps kept))
-            ticket*  (assoc loaded :frontmatter new-fm)]
-        (store/save! project-root tickets-dir from-id nil ticket*
-                     {:now now :terminal-statuses terminal-statuses})))))
+            ticket*  (assoc loaded :frontmatter new-fm)
+            saved    (store/save! project-root tickets-dir from-id nil ticket*
+                                  {:now now :terminal-statuses terminal-statuses})]
+        (if json?
+          (output/touched-ticket-json
+           (store/load-one project-root tickets-dir from-id))
+          saved)))))
 
 (defn- add-link
   "Add `other` to `ticket`'s `:links`, idempotent. Returns the updated
@@ -312,8 +351,12 @@
    with message `\"ticket not found: <input>\"`; an ambiguous partial
    propagates `:ambiguous`. Idempotent on each side — re-linking is a
    no-op (no duplicate entries). Returns a vector of the saved paths,
-   one per modified ticket, in the resolved-id order."
-  [ctx {:keys [ids]}]
+   one per modified ticket, in the resolved-id order.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the array of post-mutation tickets under `:data` (body
+   excluded, ls-shape) instead of the path vector."
+  [ctx {:keys [ids json?]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)
         ids* (vec ids)]
@@ -329,12 +372,16 @@
                             t      (reduce add-link (get acc id) others)]
                         (assoc acc id t)))
                     loaded
-                    full-ids)]
-      (mapv (fn [id]
-              (store/save! project-root tickets-dir id nil
-                           (get updated id)
-                           {:now now :terminal-statuses terminal-statuses}))
-            full-ids))))
+                    full-ids)
+          paths    (mapv (fn [id]
+                           (store/save! project-root tickets-dir id nil
+                                        (get updated id)
+                                        {:now now :terminal-statuses terminal-statuses}))
+                         full-ids)]
+      (if json?
+        (output/touched-tickets-json
+         (mapv #(store/load-one project-root tickets-dir %) full-ids))
+        paths))))
 
 (defn- remove-link
   "Remove `other` from `ticket`'s `:links`. When the resulting list is
@@ -353,8 +400,12 @@
    propagates as ex-info); `to` is resolved softly so a previously-broken
    link can still be undone by typing it verbatim. Idempotent: removing
    a non-present link is a clean no-op (still bumps `:updated`). Returns
-   a vector of saved paths (1 when only `from` exists, 2 when both exist)."
-  [ctx {:keys [from to]}]
+   a vector of saved paths (1 when only `from` exists, 2 when both exist).
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the array of post-mutation tickets under `:data` (body
+   excluded, ls-shape) — 1 entry when only `from` exists, 2 when both."
+  [ctx {:keys [from to json?]}]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)
         save-opts  {:now now :terminal-statuses terminal-statuses}
@@ -364,13 +415,18 @@
         to-t       (store/load-one project-root tickets-dir to-id)
         from-saved (store/save! project-root tickets-dir from-id nil
                                 (remove-link from-t to-id)
-                                save-opts)]
-    (if to-t
-      [from-saved
-       (store/save! project-root tickets-dir to-id nil
-                    (remove-link to-t from-id)
-                    save-opts)]
-      [from-saved])))
+                                save-opts)
+        paths      (if to-t
+                     [from-saved
+                      (store/save! project-root tickets-dir to-id nil
+                                   (remove-link to-t from-id)
+                                   save-opts)]
+                     [from-saved])]
+    (if json?
+      (let [touched-ids (if to-t [from-id to-id] [from-id])]
+        (output/touched-tickets-json
+         (mapv #(store/load-one project-root tickets-dir %) touched-ids)))
+      paths)))
 
 (defn- resolve-note-content
   "Resolve the note content string from the layered input options:
@@ -389,7 +445,13 @@
    reads stdin (when `:stdin-tty?` is false) via `(:stdin-reader-fn)`;
    otherwise opens the editor via `(:editor-fn ctx-line)`. Empty/blank
    content is a no-op: no file change, returns nil. Missing id returns
-   nil; ambiguous id throws. On success returns the saved path."
+   nil; ambiguous id throws. On success returns the saved path.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the post-mutation ticket (including the appended note)
+   under `:data` instead of the saved path. Empty-content cancellation
+   and missing-id paths still return nil — the handler emits the
+   appropriate envelope."
   [ctx opts]
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
@@ -400,9 +462,13 @@
         (when-not (str/blank? content)
           (let [trimmed (str/trim content)
                 body*   (ticket/append-note (:body loaded) now trimmed)
-                ticket* (assoc loaded :body body*)]
-            (store/save! project-root tickets-dir full-id nil ticket*
-                         {:now now :terminal-statuses terminal-statuses})))))))
+                ticket* (assoc loaded :body body*)
+                saved   (store/save! project-root tickets-dir full-id nil ticket*
+                                     {:now now :terminal-statuses terminal-statuses})]
+            (if (:json? opts)
+              (output/touched-ticket-json
+               (store/load-one project-root tickets-dir full-id))
+              saved)))))))
 
 (defn edit-cmd
   "Open the ticket file for `(:id opts)` (full or partial) in the editor

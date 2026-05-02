@@ -119,6 +119,22 @@
         (is (= ["id" "title" "status" "type" "priority" "mode" "created" "updated"]
                (vec (take 8 first-keys))))))))
 
+(deftest create-cmd-json-test
+  (testing "create-cmd with :json? returns a v0.3 success-envelope JSON string for the new ticket"
+    (with-tmp tmp
+      (let [out    (cli/create-cmd (ctx tmp) {:title "Fix login bug" :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (string? (get-in parsed [:data :id])))
+        (is (str/starts-with? (get-in parsed [:data :id]) "kno-"))
+        (is (= "Fix login bug" (get-in parsed [:data :title])))
+        (is (= "open" (get-in parsed [:data :status])))
+        (is (contains? (:data parsed) :body)
+            "single-ticket envelope includes the body")
+        (is (not (contains? parsed :meta))
+            "create emits no :meta slot")))))
+
 (deftest create-cmd-title-in-frontmatter-test
   (testing "title is written into frontmatter (not just into the body H1)"
     (with-tmp tmp
@@ -652,6 +668,41 @@
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/status-cmd (ctx tmp) {:id "nope-xx" :status "open"}))))))
 
+(deftest status-cmd-json-test
+  (testing "status-cmd with :json? returns a v0.3 success-envelope JSON string"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/status-cmd (ctx tmp) {:id id :status "in_progress" :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (string? out))
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (= "in_progress" (get-in parsed [:data :status])))
+        (is (contains? (:data parsed) :body)
+            "single-ticket envelope includes the body")
+        (is (not (contains? parsed :meta))
+            "non-terminal transition emits no :meta slot"))))
+
+  (testing "status-cmd transition to terminal status sets meta.archived_to"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/status-cmd (ctx tmp) {:id id :status "closed" :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= "closed" (get-in parsed [:data :status])))
+        (is (string? (get-in parsed [:meta :archived_to])))
+        (is (str/includes? (get-in parsed [:meta :archived_to]) "/archive/")
+            "meta.archived_to points at the archive subdirectory"))))
+
+  (testing "status-cmd with :json? returns nil when no ticket matches"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/status-cmd (ctx tmp) {:id "nope-xx" :status "open" :json? true}))
+          "json? does not change the not-found contract; the handler emits the envelope"))))
+
 (deftest start-cmd-test
   (testing "start-cmd transitions a ticket to in_progress"
     (with-tmp tmp
@@ -673,6 +724,19 @@
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "active" (get-in loaded [:frontmatter :status]))
             "start-cmd reads :active-status from ctx, not the literal in_progress")))))
+
+(deftest start-cmd-json-test
+  (testing "start-cmd with :json? threads through to the JSON envelope"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/start-cmd (ctx tmp) {:id id :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (= "in_progress" (get-in parsed [:data :status])))
+        (is (not (contains? parsed :meta))
+            "start never transitions to terminal — no :archived_to")))))
 
 (deftest close-cmd-test
   (testing "close-cmd transitions to the first terminal status from :statuses"
@@ -698,6 +762,31 @@
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "done" (get-in loaded [:frontmatter :status])))))))
 
+(deftest close-cmd-json-test
+  (testing "close-cmd with :json? returns an envelope with meta.archived_to"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/close-cmd (ctx tmp) {:id id :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (= "closed" (get-in parsed [:data :status])))
+        (is (str/includes? (get-in parsed [:meta :archived_to]) "/archive/")
+            "close emits meta.archived_to pointing at the archive dir")
+        (is (some? (get-in parsed [:data :closed]))
+            "post-mutation ticket has :closed timestamp populated"))))
+
+  (testing "close-cmd --summary --json includes the summary note in :data.body"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/close-cmd (ctx tmp) {:id id :summary "Shipped." :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (str/includes? (get-in parsed [:data :body]) "Shipped.")
+            "summary note is appended in the body of the JSON envelope")))))
+
 (deftest reopen-cmd-test
   (testing "reopen-cmd transitions a closed ticket to open and clears :closed"
     (with-tmp tmp
@@ -714,6 +803,21 @@
             "reopen should clear :closed entirely")
         (is (not (str/includes? new-path "/archive/"))
             "reopened file should live in the live directory again")))))
+
+(deftest reopen-cmd-json-test
+  (testing "reopen-cmd with :json? returns an envelope with status=open and no :archived_to"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp) {:id id})
+            out     (cli/reopen-cmd (ctx tmp) {:id id :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= "open" (get-in parsed [:data :status])))
+        (is (not (contains? (:data parsed) :closed))
+            "reopened ticket has no :closed in the JSON envelope")
+        (is (not (contains? parsed :meta))
+            "reopen never targets terminal — no :archived_to")))))
 
 (deftest summary-on-close-test
   (testing "close --summary appends a closure note under ## Notes and closes"
@@ -991,6 +1095,33 @@
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/dep-cmd (ctx tmp) {:from "kno-nope" :to "kno-other"}))))))
 
+(deftest dep-cmd-json-test
+  (testing "dep-cmd with :json? returns the from ticket post-mutation, with updated :deps"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            out       (cli/dep-cmd (ctx tmp) {:from from-id :to to-id :json? true})
+            parsed    (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= from-id (get-in parsed [:data :id])))
+        (is (= [to-id] (get-in parsed [:data :deps]))
+            "data is the from ticket with the new :deps array"))))
+
+  (testing "dep-cmd with :json? on idempotent re-add still returns the from ticket"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            out       (cli/dep-cmd (ctx tmp) {:from from-id :to to-id :json? true})
+            parsed    (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= [to-id] (get-in parsed [:data :deps]))
+            "no duplicate entry on re-add")))))
+
 (deftest undep-cmd-test
   (testing "undep-cmd removes the dep entry"
     (with-tmp tmp
@@ -1031,6 +1162,37 @@
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/undep-cmd (ctx tmp) {:from "kno-nope" :to "kno-other"}))))))
+
+(deftest undep-cmd-json-test
+  (testing "undep-cmd with :json? returns the from ticket post-mutation"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            b-path    (cli/create-cmd (ctx tmp) {:title "B"})
+            c-path    (cli/create-cmd (ctx tmp) {:title "C"})
+            from-id   (id-of-created from-path "from")
+            b-id      (id-of-created b-path "b")
+            c-id      (id-of-created c-path "c")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to b-id})
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to c-id})
+            out       (cli/undep-cmd (ctx tmp) {:from from-id :to b-id :json? true})
+            parsed    (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= from-id (get-in parsed [:data :id])))
+        (is (= [c-id] (get-in parsed [:data :deps]))
+            "data is the from ticket with the dep removed"))))
+
+  (testing "undep-cmd with :json? on the last dep drops the :deps key entirely"
+    (with-tmp tmp
+      (let [from-path (cli/create-cmd (ctx tmp) {:title "From"})
+            to-path   (cli/create-cmd (ctx tmp) {:title "To"})
+            from-id   (id-of-created from-path "from")
+            to-id     (id-of-created to-path "to")
+            _         (cli/dep-cmd (ctx tmp) {:from from-id :to to-id})
+            out       (cli/undep-cmd (ctx tmp) {:from from-id :to to-id :json? true})
+            parsed    (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (not (contains? (:data parsed) :deps))
+            "removing the last dep drops :deps from the JSON envelope")))))
 
 (deftest ready-cmd-test
   (testing "ready-cmd lists open tickets with all-terminal deps"
@@ -1649,6 +1811,28 @@ Restart the daemon.
         (is (= [b-id c-id] (vec (get-in la [:frontmatter :links])))
             "subsequent links append; no reorder"))))
 
+  (testing "link-cmd with :json? returns an array of post-mutation tickets"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            c (cli/create-cmd (ctx tmp) {:title "Gamma"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            c-id (id-of-created c "gamma")
+            out  (cli/link-cmd (ctx tmp) {:ids [a-id b-id c-id] :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (vector? (:data parsed)))
+        (is (= 3 (count (:data parsed))))
+        (is (= #{a-id b-id c-id}
+               (set (map :id (:data parsed))))
+            "data array contains every touched ticket")
+        (is (not (contains? (get-in parsed [:data 0]) :body))
+            "body excluded from list-style envelope")
+        (let [a-entry (first (filter #(= a-id (:id %)) (:data parsed)))]
+          (is (= #{b-id c-id} (set (:links a-entry)))
+              "each entry shows its post-mutation :links")))))
+
   (testing "link-cmd raises a clear error when an id does not resolve"
     (with-tmp tmp
       (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
@@ -1725,6 +1909,41 @@ Restart the daemon.
             paths (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id})]
         (is (vector? paths))
         (is (= 2 (count paths)))))))
+
+(deftest unlink-cmd-json-test
+  (testing "unlink-cmd with :json? returns array of post-mutation tickets (both touched)"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            out  (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (vector? (:data parsed)))
+        (is (= 2 (count (:data parsed))))
+        (is (= #{a-id b-id} (set (map :id (:data parsed)))))
+        (let [a-entry (first (filter #(= a-id (:id %)) (:data parsed)))]
+          (is (not (contains? a-entry :links))
+              "removed last link drops :links from envelope")))))
+
+  (testing "unlink-cmd with :json? returns just the from ticket when to does not exist"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            b (cli/create-cmd (ctx tmp) {:title "Beta"})
+            a-id (id-of-created a "alpha")
+            b-id (id-of-created b "beta")
+            _    (cli/link-cmd (ctx tmp) {:ids [a-id b-id]})
+            ;; Delete b's file so only a survives
+            b-path (store/find-existing-path tmp ".tickets" b-id)
+            _      (fs/delete b-path)
+            out    (cli/unlink-cmd (ctx tmp) {:from a-id :to b-id :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= 1 (count (:data parsed)))
+            "data is a 1-element array when :to does not resolve")
+        (is (= a-id (get-in parsed [:data 0 :id])))))))
 
 (deftest load-config-malformed-edn-test
   (testing "malformed EDN error includes the file path for context"
@@ -1875,6 +2094,33 @@ Restart the daemon.
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/add-note-cmd (ctx tmp) {:id "kno-nope" :text "x"}))))))
+
+(deftest add-note-cmd-json-test
+  (testing "add-note-cmd with :json? returns the post-mutation ticket including the appended note"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-01T10:00:00Z")
+            out     (cli/add-note-cmd later {:id id :text "first note" :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (str/includes? (get-in parsed [:data :body]) "first note")
+            "appended note appears in :data.body")
+        (is (str/includes? (get-in parsed [:data :body]) "**2026-05-01T10:00:00Z**")))))
+
+  (testing "add-note-cmd with :json? on empty content remains a no-op (returns nil)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            result  (cli/add-note-cmd (ctx tmp) {:id id :text "" :json? true})]
+        (is (nil? result)
+            "empty content cancellation does not emit an envelope; the handler decides"))))
+
+  (testing "add-note-cmd with :json? returns nil when id is missing"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/add-note-cmd (ctx tmp) {:id "kno-nope" :text "x" :json? true}))))))
 
 (deftest edit-cmd-test
   (testing "invokes the editor-fn with the ticket file path"

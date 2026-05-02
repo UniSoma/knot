@@ -113,45 +113,6 @@
          (remove str/blank?)
          vec)))
 
-(defn- create-handler [argv]
-  (let [{:keys [body-opts argv]} (extract-body-flags argv)
-        {:keys [opts args]}      (bcli/parse-args argv (spec :create))
-        title (first args)]
-    (when (or (nil? title) (str/blank? title))
-      (die "knot create: a title is required"))
-    (let [resolved-mode (resolve-mode opts)
-          opts          (cond-> (-> opts
-                                    (merge body-opts)
-                                    (dissoc :afk :hitl)
-                                    (assoc :title title))
-                          (:tags opts)        (assoc :tags (split-tags (:tags opts)))
-                          (some? resolved-mode) (assoc :mode resolved-mode))
-          path          (cli/create-cmd (discover-ctx) opts)]
-      (println (str path)))))
-
-(defn- ->set
-  "Coerce an opt value to a non-empty set, or nil. babashka.cli with
-   `:coerce []` always returns a vector even for a single occurrence; a
-   bare string is also tolerated. Empty inputs become nil so the cli
-   primitive treats the dimension as unfiltered."
-  [v]
-  (cond
-    (nil? v)        nil
-    (string? v)     #{v}
-    (sequential? v) (when (seq v) (set v))
-    :else           nil))
-
-(defn- filter-opts-from-cli
-  "Project the parsed CLI `opts` map onto the keyword-set shape that
-   `cli/ls-cmd` and `cli/ready-cmd` expect for `query/filter-tickets`."
-  [opts]
-  (reduce (fn [acc k]
-            (if-let [s (->set (get opts k))]
-              (assoc acc k s)
-              acc))
-          {}
-          [:status :assignee :tag :type :mode]))
-
 (defn- println-out
   "Print a string to stdout. Adds a trailing newline only when `s` does
    not already end in one — keeps `>/dev/null` clean and ensures the
@@ -180,6 +141,55 @@
                  :message    (.getMessage e)
                  :candidates (:candidates data)}))
   (System/exit 1))
+
+(defn- emit-error-envelope!
+  "Print a v0.3 error envelope to stdout and exit 1. `error` is the map
+   passed straight to `output/error-envelope-str` (must include `:code`
+   and `:message`; extra keys pass through unchanged)."
+  [error]
+  (println-out (output/error-envelope-str error))
+  (System/exit 1))
+
+(defn- create-handler [argv]
+  (let [{:keys [body-opts argv]} (extract-body-flags argv)
+        {:keys [opts args]}      (bcli/parse-args argv (spec :create))
+        title (first args)
+        json? (boolean (:json opts))]
+    (when (or (nil? title) (str/blank? title))
+      (die "knot create: a title is required"))
+    (let [resolved-mode (resolve-mode opts)
+          opts          (cond-> (-> opts
+                                    (merge body-opts)
+                                    (dissoc :afk :hitl)
+                                    (assoc :title title)
+                                    (assoc :json? json?))
+                          (:tags opts)        (assoc :tags (split-tags (:tags opts)))
+                          (some? resolved-mode) (assoc :mode resolved-mode))
+          out           (cli/create-cmd (discover-ctx) opts)]
+      (println-out (str out)))))
+
+(defn- ->set
+  "Coerce an opt value to a non-empty set, or nil. babashka.cli with
+   `:coerce []` always returns a vector even for a single occurrence; a
+   bare string is also tolerated. Empty inputs become nil so the cli
+   primitive treats the dimension as unfiltered."
+  [v]
+  (cond
+    (nil? v)        nil
+    (string? v)     #{v}
+    (sequential? v) (when (seq v) (set v))
+    :else           nil))
+
+(defn- filter-opts-from-cli
+  "Project the parsed CLI `opts` map onto the keyword-set shape that
+   `cli/ls-cmd` and `cli/ready-cmd` expect for `query/filter-tickets`."
+  [opts]
+  (reduce (fn [acc k]
+            (if-let [s (->set (get opts k))]
+              (assoc acc k s)
+              acc))
+          {}
+          [:status :assignee :tag :type :mode]))
 
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
@@ -226,11 +236,14 @@
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
    consumed (1 for start/close/reopen, 2 for status). `cmd-name` is
-   used in error messages. The handler prints the new path on stdout.
-   `--summary <text>` is threaded through; the cli layer rejects it on
-   transitions to non-terminal statuses."
+   used in error messages. The handler prints the new path on stdout
+   (or a JSON envelope under `--json`). `--summary <text>` is threaded
+   through; the cli layer rejects it on transitions to non-terminal
+   statuses. Under `--json`, not-found and ambiguous-id failures route
+   to the v0.3 error envelope; arg-parsing errors stay on stderr."
   [cmd-name cmd-key arg-count transition-fn argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))
+        json? (boolean (:json opts))]
     (when (< (count args) arg-count)
       (die (str "knot " cmd-name ": "
                 (case arg-count
@@ -240,31 +253,57 @@
           base  (if (= arg-count 2)
                   {:id id :status (second args)}
                   {:id id})
-          opts* (cond-> base
-                  (contains? opts :summary) (assoc :summary (:summary opts)))
-          path  (transition-fn (discover-ctx) opts*)]
-      (if path
-        (println-out (str path))
-        (die (str "knot " cmd-name ": no ticket matching " id))))))
+          opts* (cond-> (assoc base :json? json?)
+                  (contains? opts :summary) (assoc :summary (:summary opts)))]
+      (try
+        (let [out (transition-fn (discover-ctx) opts*)]
+          (cond
+            out   (println-out (str out))
+            json? (emit-not-found-envelope! id)
+            :else (die (str "knot " cmd-name ": no ticket matching " id))))
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (cond
+              (and json? (= :ambiguous (:kind data)))
+              (emit-ambiguous-envelope! e data)
+
+              json?
+              (emit-error-envelope! {:code    "invalid_argument"
+                                     :message (.getMessage e)})
+
+              :else (throw e))))))))
 
 (defn- edge-handler
   "Run `dep` or `undep`: `knot <cmd> <from> <to>`. On cycle rejection
    (only possible for `dep`), prints the offending path to stderr and
-   exits 1."
-  [cmd-name edge-fn argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+   exits 1 — or emits a `cycle` error envelope under `--json`."
+  [cmd-name cmd-key edge-fn argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))
+        json?               (boolean (:json opts))]
     (when (< (count args) 2)
       (die (str "knot " cmd-name ": <from> and <to> ids are required")))
     (let [[from to] args]
       (try
-        (let [path (edge-fn (discover-ctx) {:from from :to to})]
-          (if path
-            (println-out (str path))
-            (die (str "knot " cmd-name ": no ticket matching " from))))
-        (catch Exception e
-          (if (:cycle (ex-data e))
-            (die (str "knot " cmd-name ": " (.getMessage e)))
-            (throw e)))))))
+        (let [out (edge-fn (discover-ctx) {:from from :to to :json? json?})]
+          (cond
+            out   (println-out (str out))
+            json? (emit-not-found-envelope! from)
+            :else (die (str "knot " cmd-name ": no ticket matching " from))))
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (cond
+              (and json? (= :ambiguous (:kind data)))
+              (emit-ambiguous-envelope! e data)
+
+              (and json? (:cycle data))
+              (emit-error-envelope! {:code    "cycle"
+                                     :message (.getMessage e)
+                                     :cycle   (:cycle data)})
+
+              (:cycle data)
+              (die (str "knot " cmd-name ": " (.getMessage e)))
+
+              :else (throw e))))))))
 
 (defn- dep-tree-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :dep/tree))
@@ -290,7 +329,7 @@
   [argv]
   (case (first argv)
     "tree" (dep-tree-handler (rest argv))
-    (edge-handler "dep" cli/dep-cmd argv)))
+    (edge-handler "dep" :dep cli/dep-cmd argv)))
 
 (defn- list-handler
   "Run a non-mutating list command that shares the `ls`-like output
@@ -319,28 +358,69 @@
 (defn- link-handler
   "Run `knot link <a> <b> [<c> ...]`: requires at least two ids; writes
    symmetric `:links` across every pair. Prints each saved path on its
-   own stdout line."
+   own stdout line, or a single JSON envelope under `--json`. Note the
+   intentional asymmetry: the non-json path keeps the existing stderr
+   `die` message for ambiguous/not-found, while `--json` upgrades those
+   to the structured error envelope on stdout."
   [argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :link))
+        json?               (boolean (:json opts))]
     (when (< (count args) 2)
       (die "knot link: two or more ticket ids are required"))
     (try
-      (doseq [path (cli/link-cmd (discover-ctx) {:ids (vec args)})]
-        (println-out (str path)))
+      (let [out (cli/link-cmd (discover-ctx) {:ids (vec args) :json? json?})]
+        (if json?
+          (println-out (str out))
+          (doseq [path out]
+            (println-out (str path)))))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (cond
+            (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
+
+            (and json? (= :not-found (:kind data)))
+            (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
+
+            json?
+            (emit-error-envelope! {:code "invalid_argument" :message (.getMessage e)})
+
+            :else (die (str "knot link: " (or (.getMessage e) (.toString e)))))))
       (catch Exception e
         (die (str "knot link: " (or (.getMessage e) (.toString e))))))))
 
 (defn- unlink-handler
   "Run `knot unlink <from> <to>`: removes the symmetric link between the
-   two ids. Prints each saved path on its own stdout line."
+   two ids. Prints each saved path on its own stdout line, or a single
+   JSON envelope under `--json`. Same asymmetry as `link-handler`:
+   `--json` upgrades ambiguous/not-found to structured envelopes; the
+   non-json path keeps the existing stderr `die` message."
   [argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :unlink))
+        json?               (boolean (:json opts))]
     (when (< (count args) 2)
       (die "knot unlink: <from> and <to> ids are required"))
     (try
-      (doseq [path (cli/unlink-cmd (discover-ctx)
-                                   {:from (first args) :to (second args)})]
-        (println-out (str path)))
+      (let [out (cli/unlink-cmd (discover-ctx)
+                                {:from (first args) :to (second args)
+                                 :json? json?})]
+        (if json?
+          (println-out (str out))
+          (doseq [path out]
+            (println-out (str path)))))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (cond
+            (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
+
+            (and json? (= :not-found (:kind data)))
+            (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
+
+            json?
+            (emit-error-envelope! {:code "invalid_argument" :message (.getMessage e)})
+
+            :else (die (str "knot unlink: " (or (.getMessage e) (.toString e)))))))
       (catch Exception e
         (die (str "knot unlink: " (or (.getMessage e) (.toString e))))))))
 
@@ -387,12 +467,15 @@
 
 (defn- add-note-handler
   "Handle `knot add-note <id> [text]`. Layered input: text arg wins;
-   else stdin if not a TTY; else editor."
+   else stdin if not a TTY; else editor. With `--json`, emits a v0.3
+   envelope for the post-mutation ticket on success or an error
+   envelope (`not_found`, `ambiguous_id`) on resolver failure."
   [argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})
-        id   (first args)
-        text (when (>= (count args) 2)
-               (str/join " " (rest args)))]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :add-note))
+        json? (boolean (:json opts))
+        id    (first args)
+        text  (when (>= (count args) 2)
+                (str/join " " (rest args)))]
     (when (or (nil? id) (str/blank? id))
       (die "knot add-note: an id is required"))
     ;; (System/console) returns nil when *either* stdin or stdout is
@@ -403,29 +486,43 @@
     ;; which cleanly cancels. A precise stdin-isatty probe needs JNI or
     ;; a shell-out and is parked.
     (let [ctx  (discover-ctx)
-          tty? (some? (System/console))
-          path (cli/add-note-cmd
-                ctx
-                {:id              id
-                 :text            text
-                 :stdin-tty?      tty?
-                 :stdin-reader-fn (fn [] (slurp *in*))
-                 :editor-fn       (editor-fn-for-note)})]
-      (if path
-        (println-out (str path))
-        ;; nil from add-note-cmd is either "id missing" or "empty content
-        ;; cancelled". Disambiguate by running the same resolver. Partial
-        ;; ids must round-trip here too so an empty-content cancel on
-        ;; `knot add-note 01abc` doesn't get misread as a missing id.
-        (if (try
-              (store/resolve-id (:project-root ctx) (:tickets-dir ctx) id)
-              true
-              (catch clojure.lang.ExceptionInfo e
-                (if (= :not-found (:kind (ex-data e)))
-                  false
-                  (throw e))))
-          (System/exit 0)
-          (die (str "knot add-note: no ticket matching " id)))))))
+          tty? (some? (System/console))]
+      (try
+        (let [out (cli/add-note-cmd
+                   ctx
+                   {:id              id
+                    :text            text
+                    :json?           json?
+                    :stdin-tty?      tty?
+                    :stdin-reader-fn (fn [] (slurp *in*))
+                    :editor-fn       (editor-fn-for-note)})]
+          (if out
+            (println-out (str out))
+            ;; nil from add-note-cmd is either "id missing" or "empty
+            ;; content cancelled". Disambiguate by running the same
+            ;; resolver. Partial ids must round-trip here too so an
+            ;; empty-content cancel on `knot add-note 01abc` doesn't get
+            ;; misread as a missing id.
+            (if (try
+                  (store/resolve-id (:project-root ctx) (:tickets-dir ctx) id)
+                  true
+                  (catch clojure.lang.ExceptionInfo e
+                    (if (= :not-found (:kind (ex-data e)))
+                      false
+                      (throw e))))
+              ;; resolver succeeds → empty content cancellation; exit 0
+              ;; quietly (no JSON envelope — the contract documents this).
+              (System/exit 0)
+              (if json?
+                (emit-not-found-envelope! id)
+                (die (str "knot add-note: no ticket matching " id))))))
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (cond
+              (and json? (= :ambiguous (:kind data)))
+              (emit-ambiguous-envelope! e data)
+
+              :else (throw e))))))))
 
 (defn- edit-handler
   "Handle `knot edit <id>`."
@@ -609,7 +706,7 @@
         "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)
         "reopen"  (transition-handler "reopen" :reopen 1 cli/reopen-cmd rest-argv)
         "dep"      (dep-handler rest-argv)
-        "undep"    (edge-handler "undep" cli/undep-cmd rest-argv)
+        "undep"    (edge-handler "undep" :undep cli/undep-cmd rest-argv)
         "link"     (link-handler   rest-argv)
         "unlink"   (unlink-handler rest-argv)
         "ready"    (list-handler :ready   cli/ready-cmd   rest-argv)

@@ -254,8 +254,9 @@ authorizes that ticket. The mode is the contract.
 
 ## JSON for parsing
 
-Every read command accepts `--json` and emits a tagged envelope on
-stdout with snake_case keys. Warnings and errors go to stderr.
+Every read AND mutating command accepts `--json` and emits a tagged
+envelope on stdout with snake_case keys. Warnings and errors go to
+stderr.
 
 ```json
 {"schema_version": 1, "ok": true, "data": <payload>}
@@ -269,6 +270,26 @@ errors (e.g. `show <missing-id>`), the envelope flips to
 `data` slot. `knot check` is the one exception: it may emit
 `{ok: false, data: {...}}` because `ok` mirrors a health verdict.
 
+Mutating commands (`create`, `start`, `status`, `close`, `reopen`,
+`dep`, `undep`, `link`, `unlink`, `add-note`) put the touched ticket
+under `.data` — eliminating the read-after-write round-trip.
+Lifecycle commands and `add-note` emit a single ticket object (body
+included). `dep`/`undep` emit the `from` ticket with the updated
+`:deps`. `link`/`unlink` emit an array of every touched ticket (body
+excluded, ls-shape). `close --json` (and any `status` transition to a
+terminal status) adds `meta.archived_to` with the archive path:
+
+```json
+{"schema_version": 1, "ok": true, "data": {...ticket...},
+ "meta": {"archived_to": ".tickets/archive/kno-01abc--…md"}}
+```
+
+Mutating-command error envelopes mirror the read-side contract:
+missing ids emit `{ok:false, error:{code:"not_found", ...}}`
+(exit 1); partial-id ambiguity emits `code: "ambiguous_id"` with a
+`candidates` array; `dep --json` cycle rejection emits `code:
+"cycle"` with the offending path under `error.cycle`.
+
 ```sh
 knot list --json           | jq '.data[] | select(.priority <= 1)'
 knot ready --json --mode afk
@@ -278,6 +299,12 @@ knot check --json          | jq '.data.issues'   # integrity issues, if any
 
 # Pick the highest-priority unblocked afk ticket, id only:
 knot ready --json --mode afk | jq -r '.data | sort_by(.priority) | .[0].id'
+
+# Mutate then read the post-state in one shot:
+knot start <id> --json       | jq -r '.data.status'
+knot close <id> --json       | jq -r '.meta.archived_to'
+knot create "T" --json       | jq -r '.data.id'
+knot add-note <id> "x" --json | jq -r '.data.body'
 ```
 
 For any decision logic, prefer `--json | jq` over parsing tables. Don't
@@ -331,7 +358,11 @@ link / unlink                          symmetric graph
 Most commands return `0` on success and `1` on error. `knot check`
 adds `2` for unable-to-scan (no project root or invalid `.knot.edn`).
 Every read command supports `--json` and the filter flags `--type`,
-`--mode`, `--tag`, `--status`, `--assignee` (each repeatable).
-`knot check` uses its own filters: `--severity` (error|warning,
-closed enum) and `--code` (open enum), both repeatable; OR within a
-flag, AND across flags.
+`--mode`, `--tag`, `--status`, `--assignee` (each repeatable). Every
+mutating command (`create`, `start`, `status`, `close`, `reopen`,
+`dep`, `undep`, `link`, `unlink`, `add-note`) also supports `--json`
+— the envelope's `data` is the touched ticket(s); `close --json` and
+terminal `status --json` add `meta.archived_to`. `knot check` uses
+its own filters: `--severity` (error|warning, closed enum) and
+`--code` (open enum), both repeatable; OR within a flag, AND across
+flags.
