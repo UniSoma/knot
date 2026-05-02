@@ -376,6 +376,39 @@
       (is (contains? help/registry sk)
           (str k " references missing subcommand: " sk)))))
 
+(deftest create-has-no-mode-shortcut-flags-test
+  ;; --mode <value> is the only path to set mode on `knot create`. Per-mode
+  ;; shortcut flags (--afk, --hitl) bake canonical mode names into CLI
+  ;; parsing — the same hardcoded-canonical-config-literals pattern fixed
+  ;; for :active-status. A project that customizes :modes (drops afk/hitl
+  ;; or adds new modes) would have shortcut flags referencing modes it
+  ;; does not have.
+  ;;
+  ;; This test pins the *registry* (the source of truth derive-spec reads
+  ;; from). The end-to-end parser-rejection contract is pinned by
+  ;; create-mode-shortcut-flags-removed-test in integration_test.clj — keep
+  ;; the two in lockstep if the :create flag spec ever moves out of the
+  ;; help registry.
+  (testing ":create flag list contains :mode but no per-mode shortcut keys"
+    (let [flag-names (->> (get-in help/registry [:create :flags])
+                          (map :name)
+                          set)]
+      (is (contains? flag-names :mode)
+          ":create still exposes the canonical --mode flag")
+      (is (not (contains? flag-names :afk))
+          ":create must not expose a --afk shortcut flag")
+      (is (not (contains? flag-names :hitl))
+          ":create must not expose a --hitl shortcut flag")))
+
+  (testing "no registry entry exposes a per-mode shortcut flag"
+    ;; Belt-and-suspenders: keep this clean across every command, not just
+    ;; :create. If a future command tries to reintroduce the shortcut, this
+    ;; test catches it.
+    (doseq [[k entry] help/registry
+            {:keys [name]} (:flags entry)]
+      (is (not (contains? #{:afk :hitl} name))
+          (str k " reintroduces a per-mode shortcut flag: " name)))))
+
 ;; ---- Integration tests for help routing (subprocess via babashka.process) ----
 
 (def ^:private project-root

@@ -141,14 +141,15 @@ candidates; relay them, don't guess.
 - `-t / --type` (default `task`)
 - `-p / --priority` 0 (highest) … 4 (default 2)
 - `-a / --assignee`
-- `--afk` / `--hitl` (default `hitl`)
+- `--mode afk` / `--mode hitl` (default `hitl`)
 - `--tags`, `--parent`, `--external-ref`
 - `-d / --description`, `--design`, `--acceptance` for body sections
 
 Always pass `--description` when there's any context worth saving — a
 title-only ticket forces the next reader to reconstruct intent from
-scratch. Default `--afk` when the work is well-specified and an agent
-could run end-to-end without a human; otherwise leave the `hitl` default.
+scratch. Default `--mode afk` when the work is well-specified and an
+agent could run end-to-end without a human; otherwise leave the `hitl`
+default.
 
 For multi-line prose flags, use a quoted-delimiter heredoc so `$vars`,
 backticks, and quotes pass through literally:
@@ -376,7 +377,7 @@ list (alias ls) / show                 read live; show one
 ready / blocked / closed               backlog views (--limit + full filter set)
 check                                  project-integrity scan (cycles, dangling
                                        refs, schema, archive placement)
-create                                 new ticket (-t -p -a --tags --afk --hitl
+create                                 new ticket (-t -p -a --tags --mode
                                        -d --design --acceptance --parent
                                        --external-ref)
 start / status / close / reopen        lifecycle (--summary on close)

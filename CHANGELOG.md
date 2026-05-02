@@ -59,6 +59,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (BREAKING)
 
+- `knot create` no longer accepts the `--afk` and `--hitl` shortcut
+  flags. `--mode <value>` is the only path to set the mode at create
+  time. The shortcuts baked the canonical mode names `"afk"` and
+  `"hitl"` into CLI parsing — projects that customize `:modes` (e.g.
+  `["solo" "team"]`) would expose shortcuts referencing modes they did
+  not have. `:create` is also now a strict-parsing command: unknown
+  flags (`--afk`, `--hitl`, `--body`, anything mistyped) exit non-zero
+  with `knot: Unknown option: :<name>` on stderr, matching the
+  behavior already in place on `prime`/`ready`/`blocked`/`closed`. The
+  init stub documents the per-mode-shortcut invariant under `:modes`
+  for future contributors. Pre-1.0 break window — no deprecation
+  cycle. Migration: replace `--afk` with `--mode afk` and `--hitl`
+  with `--mode hitl`.
 - `knot dep cycle` is **removed**; its role is subsumed by `knot check
   --code dep_cycle`. The semantic shift: `dep cycle` previously scanned
   only non-terminal tickets, while `knot check` scans the whole project

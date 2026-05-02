@@ -6,8 +6,7 @@
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
-            [knot.ticket]))
+            [clojure.test :refer [deftest is testing]]))
 
 (def ^:private project-root
   (or (System/getProperty "user.dir") "."))
@@ -495,34 +494,55 @@
                            ":default-priority")
             "stub should be back after --force")))))
 
-(deftest create-mode-flags-end-to-end-test
-  (testing "--afk is sugar for --mode afk"
+(deftest create-mode-shortcut-flags-removed-test
+  ;; `--mode <value>` is the only path to set the mode on `knot create`.
+  ;; The legacy `--afk` and `--hitl` shortcuts have been removed because
+  ;; they baked canonical mode names into CLI parsing (a project that
+  ;; customizes :modes — e.g. ["solo" "team"] — would expose shortcuts
+  ;; referencing modes it does not have).
+  ;;
+  ;; `:create` carries `:restrict? true` so the parser rejects the removed
+  ;; flags loudly rather than silently absorbing them. A user with stale
+  ;; muscle memory typing `--afk` gets a clear unknown-option error, not a
+  ;; quietly-wrong ticket whose mode falls through to the default.
+  (testing "--afk is rejected as an unknown option"
     (with-tmp tmp
-      (let [{:keys [exit out err]} (run-knot tmp "create" "Afk job" "--afk")]
-        (is (zero? exit) (str "create err=" err))
-        (let [text (slurp (str/trim out))]
-          (is (str/includes? text "mode: afk"))))))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "Job" "--afk")]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; out=" out))
+        (is (str/includes? err "Unknown option")
+            "stderr must name the unknown-option failure")
+        (is (re-find #"(?i)afk" err)
+            "stderr must name the offending flag"))))
 
-  (testing "--hitl is sugar for --mode hitl"
+  (testing "--hitl is rejected as an unknown option"
     (with-tmp tmp
-      ;; Use a config with default-mode "afk" so --hitl actually changes
-      ;; the result and can't pass by accident on the global default.
-      (spit (str (fs/path tmp ".knot.edn"))
-            (pr-str {:default-mode "afk"}))
-      (fs/create-dirs (fs/path tmp ".tickets"))
-      (let [{:keys [exit out err]} (run-knot tmp "create" "Hitl job" "--hitl")]
+      (let [{:keys [exit err]} (run-knot tmp "create" "Job" "--hitl")]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (str/includes? err "Unknown option"))
+        (is (re-find #"(?i)hitl" err)))))
+
+  (testing "--mode hitl still sets the mode (sanity check that --mode works)"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "Hitl job" "--mode" "hitl")]
         (is (zero? exit) (str "create err=" err))
         (let [text (slurp (str/trim out))]
           (is (str/includes? text "mode: hitl"))))))
 
-  (testing "explicit --mode wins over inferred --afk/--hitl shortcut"
+  (testing "knot create --help still works with :restrict? true"
+    ;; The help router intercepts --help before parse-args runs, so
+    ;; restrict-mode rejection does not block discoverability.
     (with-tmp tmp
-      (let [{:keys [exit out err]}
-            (run-knot tmp "create" "Mixed" "--afk" "--mode" "hitl")]
-        (is (zero? exit) (str "create err=" err))
-        (let [text (slurp (str/trim out))]
-          (is (str/includes? text "mode: hitl")
-              "explicit --mode hitl should override --afk shortcut"))))))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "--help")]
+        (is (zero? exit) (str "help err=" err))
+        (is (str/includes? out "--mode")
+            "--mode is still advertised as the canonical entry point")
+        (is (not (re-find #"--afk\b" out))
+            "help text must not advertise --afk")
+        (is (not (re-find #"--hitl\b" out))
+            "help text must not advertise --hitl")
+        (is (not (re-find #"(?i)shortcut for --mode" out))
+            "help text must not describe any --mode shortcut")))))
 
 (deftest create-body-flags-with-dash-prefixed-values-end-to-end-test
   (testing "--acceptance with a dash-prefixed bullet value writes the body verbatim"
@@ -762,8 +782,8 @@
 (deftest ls-filter-flags-end-to-end-test
   (testing "ls --mode afk filters out hitl tickets"
     (with-tmp tmp
-      (run-knot tmp "create" "Afk job"  "--afk")
-      (run-knot tmp "create" "Hitl job" "--hitl")
+      (run-knot tmp "create" "Afk job"  "--mode" "afk")
+      (run-knot tmp "create" "Hitl job" "--mode" "hitl")
       (let [{:keys [exit out err]} (run-knot tmp "ls" "--mode" "afk")]
         (is (zero? exit) (str "ls err=" err))
         (is (str/includes? out "Afk job"))
@@ -771,8 +791,8 @@
 
   (testing "ls --status open --mode afk ANDs the filters"
     (with-tmp tmp
-      (run-knot tmp "create" "Afk open"  "--afk")
-      (run-knot tmp "create" "Hitl open" "--hitl")
+      (run-knot tmp "create" "Afk open"  "--mode" "afk")
+      (run-knot tmp "create" "Hitl open" "--mode" "hitl")
       (let [{:keys [exit out err]} (run-knot tmp "ls" "--status" "open"
                                              "--mode" "afk")]
         (is (zero? exit) (str "ls err=" err))
@@ -800,8 +820,8 @@
 (deftest ready-mode-filter-end-to-end-test
   (testing "ready --mode afk hides hitl tickets even when ready"
     (with-tmp tmp
-      (run-knot tmp "create" "Afk job"  "--afk")
-      (run-knot tmp "create" "Hitl job" "--hitl")
+      (run-knot tmp "create" "Afk job"  "--mode" "afk")
+      (run-knot tmp "create" "Hitl job" "--mode" "hitl")
       (let [{:keys [exit out err]} (run-knot tmp "ready" "--mode" "afk")]
         (is (zero? exit) (str "ready err=" err))
         (is (str/includes? out "Afk job"))
@@ -809,11 +829,11 @@
 
   (testing "ready --mode afk --limit caps after filtering"
     (with-tmp tmp
-      (run-knot tmp "create" "Hitl one"   "--hitl")
-      (run-knot tmp "create" "Hitl two"   "--hitl")
-      (run-knot tmp "create" "Afk one"    "--afk")
-      (run-knot tmp "create" "Afk two"    "--afk")
-      (run-knot tmp "create" "Afk three"  "--afk")
+      (run-knot tmp "create" "Hitl one"   "--mode" "hitl")
+      (run-knot tmp "create" "Hitl two"   "--mode" "hitl")
+      (run-knot tmp "create" "Afk one"    "--mode" "afk")
+      (run-knot tmp "create" "Afk two"    "--mode" "afk")
+      (run-knot tmp "create" "Afk three"  "--mode" "afk")
       (let [{:keys [exit out]} (run-knot tmp "ready" "--mode" "afk"
                                          "--limit" "2")
             afk-hits  (count (re-seq #"Afk " out))
@@ -861,8 +881,8 @@
 
   (testing "closed --mode filters by mode"
     (with-tmp tmp
-      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Afk ticket" "--afk")) "afk-ticket")
-            b-id (id-from-create-out (:out (run-knot tmp "create" "Hitl ticket" "--hitl")) "hitl-ticket")
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Afk ticket" "--mode" "afk")) "afk-ticket")
+            b-id (id-from-create-out (:out (run-knot tmp "create" "Hitl ticket" "--mode" "hitl")) "hitl-ticket")
             _ (run-knot tmp "close" a-id)
             _ (run-knot tmp "close" b-id)
             {:keys [exit out err]} (run-knot tmp "closed" "--mode" "afk")]
@@ -901,8 +921,8 @@
   (testing "blocked --mode filters by mode"
     (with-tmp tmp
       (let [dep-id  (id-from-create-out (:out (run-knot tmp "create" "Dep")) "dep")
-            afk-id  (id-from-create-out (:out (run-knot tmp "create" "Afk blocked" "--afk")) "afk-blocked")
-            hitl-id (id-from-create-out (:out (run-knot tmp "create" "Hitl blocked" "--hitl")) "hitl-blocked")
+            afk-id  (id-from-create-out (:out (run-knot tmp "create" "Afk blocked" "--mode" "afk")) "afk-blocked")
+            hitl-id (id-from-create-out (:out (run-knot tmp "create" "Hitl blocked" "--mode" "hitl")) "hitl-blocked")
             _ (run-knot tmp "dep" afk-id dep-id)
             _ (run-knot tmp "dep" hitl-id dep-id)
             {:keys [exit out err]} (run-knot tmp "blocked" "--mode" "afk")]
@@ -1220,8 +1240,8 @@
 
   (testing "prime --mode afk filters the ready section to afk-only tickets"
     (with-tmp tmp
-      (run-knot tmp "create" "Afk job"  "--afk")
-      (run-knot tmp "create" "Hitl job" "--hitl")
+      (run-knot tmp "create" "Afk job"  "--mode" "afk")
+      (run-knot tmp "create" "Hitl job" "--mode" "hitl")
       (let [{:keys [exit out err]} (run-knot tmp "prime" "--mode" "afk")]
         (is (zero? exit) (str "prime --mode afk err=" err))
         (let [rd-start (str/index-of out "## Ready")
@@ -1630,13 +1650,17 @@
   ;; whole-body-replace flag, not a `create` flag. Adding it to a global
   ;; body-flag-extraction map silently routed `--body x` into create's
   ;; body-opts where it was dropped on the floor. Scope --body to update.
-  (testing "create --body x does NOT inject \"x\" into the new ticket's body"
+  ;;
+  ;; With `:restrict? true` on `:create` (kno-01kqgqa7wnep), the contract is
+  ;; now stronger: `--body` is rejected as an unknown option rather than
+  ;; silently absorbed. The user gets a clear error instead of a ticket
+  ;; whose `--body` value vanished.
+  (testing "create --body x is rejected as an unknown option (not silently dropped)"
     (with-tmp tmp
       (let [{:keys [exit out err]}
-            (run-knot tmp "create" "T" "--body" "should-not-leak")
-            path (str/trim out)]
-        (is (zero? exit) (str "create --body err=" err))
-        (is (str/includes? path ".tickets"))
-        (let [parsed (knot.ticket/parse (slurp path))]
-          (is (not (str/includes? (:body parsed) "should-not-leak"))
-              "knot create has no --body flag; the value must not silently land in the body"))))))
+            (run-knot tmp "create" "T" "--body" "should-not-leak")]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; out=" out))
+        (is (str/includes? err "Unknown option")
+            "stderr must name the unknown-option failure")
+        (is (re-find #"(?i)body" err)
+            "stderr must name the offending flag")))))

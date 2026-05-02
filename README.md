@@ -65,7 +65,7 @@ knot init
 
 # Create a ticket (defaults: type=task, priority=2, mode=hitl)
 knot create "Fix login redirect"
-knot create "Backfill telemetry" -d "Description body" --afk -p 1
+knot create "Backfill telemetry" -d "Description body" --mode afk -p 1
 
 # List the live (non-terminal) backlog
 knot list                      # alias: `knot ls`

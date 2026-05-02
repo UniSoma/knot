@@ -175,6 +175,7 @@
    {:group       :lifecycle
     :description "Create a new ticket."
     :args        [{:name "title" :required true}]
+    :restrict?   true
     :flags       [{:name :type        :alias :t :desc "Type label (default: task)."}
                   {:name :priority    :alias :p :coerce :long :desc "Priority 0-4 (default 2)."}
                   {:name :assignee    :alias :a :desc "Assignee handle."}
@@ -182,8 +183,6 @@
                   {:name :parent      :desc "Parent ticket id."}
                   {:name :tags        :desc "Comma-separated tag list."}
                   {:name :mode        :desc "Mode (afk|hitl)."}
-                  {:name :afk  :coerce :boolean :desc "Shortcut for --mode afk."}
-                  {:name :hitl :coerce :boolean :desc "Shortcut for --mode hitl."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}
                   {:name :description :alias :d :body? true :desc "Body content for the Description section."}
                   {:name :design      :body? true :desc "Body content for the Design section."}

@@ -971,6 +971,26 @@
                 (re-find #"(?i)active lane" preceding-tail))
             "comment names at least one consumer of :active-status"))))
 
+  (testing "stub :modes block warns against per-mode shortcut flags"
+    ;; --mode <value> is the only path on `knot create`. Adding per-mode
+    ;; shortcut flags (--afk, --hitl) bakes canonical mode names into
+    ;; CLI parsing — projects that customize :modes would expose
+    ;; shortcuts for modes they don't have. The init stub documents this
+    ;; as a project-template invariant so :modes growth doesn't tempt
+    ;; future agents into the same trap.
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))
+            modes-idx (str/index-of content ":modes")
+            preceding (subs content 0 modes-idx)
+            preceding-tail (last (str/split preceding #"\n\n"))]
+        (is (re-find #";;" preceding-tail)
+            "explanatory comment precedes :modes")
+        (is (re-find #"--mode" preceding-tail)
+            ":modes comment points at --mode <value> as the canonical entry")
+        (is (re-find #"(?i)shortcut" preceding-tail)
+            ":modes comment names the per-mode-shortcut anti-pattern"))))
+
   (testing "creates the tickets-dir if missing"
     (with-tmp tmp
       (cli/init-cmd {:project-root tmp} {})

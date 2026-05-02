@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-01T02:56:42.844118574Z'
-updated: '2026-05-01T02:57:47.509170828Z'
+updated: '2026-05-02T21:18:54.163951281Z'
 tags:
 - v0.3
 - docs
@@ -49,3 +49,9 @@ Cover the user-visible documentation surface for the v0.3 changes.
 - [ ] At least one example per envelope variant: success / error / partial-id ambiguity / mutation with meta
 - [ ] CHANGELOG v0.3 entry consolidates every breaking change in one place
 - [ ] CI badge / docs links in README still work
+
+## Notes
+
+**2026-05-02T21:18:54.163951281Z**
+
+PRD doc-debt to fold into v0.3 docs scope: `docs/prd/knot-v0.md:111` still names `--afk` and `--hitl` as `--mode` sugar. Those flags were removed in kno-01kqgqa7wnep. The PRD is a historical product spec, not a user reference, so the right move is probably an inline note ("history: removed in v0.3 per kno-01kqgqa7wnep") rather than an edit that loses the spec's original intent. Decision belongs to whoever picks this ticket up.

@@ -109,20 +109,6 @@
           :else
           (recur tail (conj out head) opts))))))
 
-(defn- resolve-mode
-  "Reconcile `--mode`, `--afk`, `--hitl`. Explicit `:mode` wins; otherwise
-   `:afk` → \"afk\", `:hitl` → \"hitl\". When both shortcuts are set with
-   no explicit `--mode`, throw — the caller's intent is ambiguous."
-  [{:keys [mode afk hitl]}]
-  (cond
-    (some? mode)         mode
-    (and afk hitl)
-    (throw (ex-info "knot create: --afk and --hitl are mutually exclusive"
-                    {:afk afk :hitl hitl}))
-    afk                  "afk"
-    hitl                 "hitl"
-    :else                nil))
-
 (defn- split-tags
   "Split a `--tags` value on commas, trimming whitespace and dropping empties."
   [s]
@@ -176,15 +162,12 @@
         json? (boolean (:json opts))]
     (when (or (nil? title) (str/blank? title))
       (die "knot create: a title is required"))
-    (let [resolved-mode (resolve-mode opts)
-          opts          (cond-> (-> opts
-                                    (merge body-opts)
-                                    (dissoc :afk :hitl)
-                                    (assoc :title title)
-                                    (assoc :json? json?))
-                          (:tags opts)        (assoc :tags (split-tags (:tags opts)))
-                          (some? resolved-mode) (assoc :mode resolved-mode))
-          out           (cli/create-cmd (discover-ctx) opts)]
+    (let [opts (cond-> (-> opts
+                           (merge body-opts)
+                           (assoc :title title)
+                           (assoc :json? json?))
+                 (:tags opts) (assoc :tags (split-tags (:tags opts))))
+          out  (cli/create-cmd (discover-ctx) opts)]
       (println-out (str out)))))
 
 (defn- ->set
