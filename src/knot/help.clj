@@ -352,8 +352,6 @@
     :args        [{:name "id" :variadic true}]
     :flags       [{:name :json     :coerce :boolean
                    :desc "Emit a JSON envelope instead of a text table."}
-                  {:name :no-color :coerce :boolean
-                   :desc "Force plain output (no ANSI)."}
                   {:name :severity :coerce []
                    :desc "Filter by severity (error|warning, repeatable)."}
                   {:name :code     :coerce []

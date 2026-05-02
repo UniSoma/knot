@@ -430,6 +430,64 @@
                         tickets)]
     (str/join "\n" (cons header-row data-rows))))
 
+(def ^:private check-columns
+  "Canonical column order for the human-readable `knot check` table."
+  [{:key :severity :header "SEVERITY" :align :left}
+   {:key :code     :header "CODE"     :align :left}
+   {:key :ids      :header "IDS"      :align :left}
+   {:key :message  :header "MESSAGE"  :align :left}])
+
+(defn- issue-cell
+  [issue {:keys [key]}]
+  (case key
+    :severity (name (:severity issue))
+    :code     (name (:code     issue))
+    :ids      (if (seq (:ids issue))
+                (str/join "," (:ids issue))
+                "—")
+    :message  (let [{:keys [message path field value]} issue
+                    parts (cond-> [message]
+                            field (conj (str "field=" (name field)
+                                             " value=" (pr-str value)))
+                            path  (conj (str "path=" path)))]
+                (str/join " | " parts))))
+
+(defn check-table-text
+  "Render the `knot check` issues table. Columns: SEVERITY CODE IDS MESSAGE.
+   `:path`, `:field`, and `:value` are folded into the message cell so
+   the table stays narrow. Empty `:ids` (path-only / global issues)
+   render as `—`. Returns an empty string when `issues` is empty so the
+   caller can collapse table+footer to footer-only."
+  [issues]
+  (if (empty? issues)
+    ""
+    (let [rows       (mapv (fn [issue]
+                             (mapv #(issue-cell issue %) check-columns))
+                           issues)
+          header-row (mapv :header check-columns)
+          all-rows   (cons header-row rows)
+          col-count  (count check-columns)
+          col-widths (mapv (fn [i] (apply max 0 (map #(count (nth % i))
+                                                     all-rows)))
+                           (range col-count))
+          fmt-row    (fn [row]
+                       (str/join "  " (map (fn [{:keys [align]} w cell]
+                                             (pad cell w align))
+                                           check-columns col-widths row)))]
+      (str/join "\n" (map fmt-row all-rows)))))
+
+(defn check-summary-footer
+  "One-line footer summarizing a `knot check` run: counts of
+   errors/warnings + scanned counts. Always emitted (table or no table)."
+  [issues {:keys [live archive]}]
+  (let [errs   (count (filter #(= :error   (:severity %)) issues))
+        warns  (count (filter #(= :warning (:severity %)) issues))
+        total  (+ errs warns)
+        suffix (str " — scanned: live=" live " archive=" archive)]
+    (if (zero? total)
+      (str "knot check: ok" suffix)
+      (str total " issues (" errs " errors, " warns " warnings)" suffix))))
+
 (def ^:private prime-preamble-found
   "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
 

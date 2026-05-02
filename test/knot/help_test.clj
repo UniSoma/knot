@@ -176,12 +176,15 @@
       (is (str/includes? out "on error")))))
 
 (def ^:private mini-registry
-  "Three-entry registry for subcommand-rendering tests."
-  {:dep        (assoc dep-entry :subcommands [:dep/tree :dep/cycle])
-   :dep/tree   {:group :graph :description "Render the deps subtree."
-                :args [{:name "id" :required true}] :flags []}
-   :dep/cycle  {:group :graph :description "Scan open tickets for cycles."
-                :args [] :flags []}})
+  "Three-entry registry for subcommand-rendering tests. The `:dep/foo`
+   key is a synthetic fixture — it does NOT correspond to any real
+   subcommand. Picked deliberately to avoid false-positive grep hits
+   for retired commands."
+  {:dep      (assoc dep-entry :subcommands [:dep/tree :dep/foo])
+   :dep/tree {:group :graph :description "Render the deps subtree."
+              :args [{:name "id" :required true}] :flags []}
+   :dep/foo  {:group :graph :description "Synthetic fixture subcommand."
+              :args [] :flags []}})
 
 (deftest command-help-text-subcommands-test
   (testing "SUBCOMMANDS section lists each subcommand's name + brief"
@@ -190,8 +193,8 @@
       (is (str/includes? out "SUBCOMMANDS"))
       (is (str/includes? out "knot dep tree"))
       (is (str/includes? out "Render the deps subtree."))
-      (is (str/includes? out "knot dep cycle"))
-      (is (str/includes? out "Scan open tickets for cycles."))))
+      (is (str/includes? out "knot dep foo"))
+      (is (str/includes? out "Synthetic fixture subcommand."))))
 
   (testing "SUBCOMMANDS section is omitted when entry has no :subcommands"
     (is (not (str/includes?
@@ -250,10 +253,10 @@
    :start     {:group :lifecycle :description "Start a ticket."}
    :dep       {:group :graph     :description "Add a dep edge."
                :args [{:name "from" :required true} {:name "to" :required true}]
-               :subcommands [:dep/tree :dep/cycle]}
+               :subcommands [:dep/tree :dep/foo]}
    :dep/tree  {:group :graph     :description "Render deps subtree."
                :args [{:name "id" :required true}]}
-   :dep/cycle {:group :graph     :description "Scan for cycles."}
+   :dep/foo   {:group :graph     :description "Synthetic fixture subcommand."}
    :undep     {:group :graph     :description "Remove a dep edge."}
    :ls        {:group :listing   :description "List live tickets."}
    :show      {:group :listing   :description "Show one ticket."
@@ -291,7 +294,7 @@
   (testing "subcommands are indented under their parent"
     (let [out (help/top-level-help-text toplevel-registry {:color? false})]
       (is (re-find #"\n    dep tree" out))
-      (is (re-find #"\n    dep cycle" out))))
+      (is (re-find #"\n    dep foo" out))))
 
   (testing "subcommand keys do not appear flat at the top-level indent"
     (let [out (help/top-level-help-text toplevel-registry {:color? false})]

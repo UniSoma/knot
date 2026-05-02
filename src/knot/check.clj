@@ -129,20 +129,23 @@
 (defn- check-unknown-id
   "Per-ticket: every id named in :deps, :links, or :parent must resolve
    to a known ticket. Issues are owned by the holder; the missing target
-   is named in :message."
+   is named in :message. Skipped when the holder has no :id —
+   :missing_required_field already surfaces that, and an :ids of `[nil]`
+   would violate the JSON contract."
   [{:keys [all-ids]} ticket]
-  (let [{:keys [id deps links parent]} (:frontmatter ticket)
-        all-ids (or all-ids #{})
-        missing (fn [field xs]
-                  (for [target (cond
-                                 (sequential? xs) xs
-                                 (some? xs)       [xs])
-                        :when (and (string? target)
-                                   (not (contains? all-ids target)))]
-                    (unknown-id-issue id field target)))]
-    (vec (concat (missing :deps   deps)
-                 (missing :links  links)
-                 (missing :parent parent)))))
+  (let [{:keys [id deps links parent]} (:frontmatter ticket)]
+    (when id
+      (let [all-ids (or all-ids #{})
+            missing (fn [field xs]
+                      (for [target (cond
+                                     (sequential? xs) xs
+                                     (some? xs)       [xs])
+                            :when (and (string? target)
+                                       (not (contains? all-ids target)))]
+                        (unknown-id-issue id field target)))]
+        (vec (concat (missing :deps   deps)
+                     (missing :links  links)
+                     (missing :parent parent)))))))
 
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries
@@ -166,7 +169,10 @@
                  tickets))))
 
 (defn- severity-rank
-  "Sort helper: 0 for :error, 1 for :warning. errors first."
+  "Sort helper: 0 for :error, 1 for :warning. errors first. Unknown
+   severities sort last (rank 9) — intentional: keeps the total order
+   total even if a future code slips a stray severity past
+   `validate-filter-spec`'s closed enum."
   [severity]
   (case severity :error 0 :warning 1 9))
 

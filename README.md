@@ -92,11 +92,16 @@ knot dep tree <id>             # ASCII tree, --full to expand dups
 # Annotation
 knot add-note <id> "raced GC under load"
 knot edit <id>                 # opens $VISUAL/$EDITOR
+
+# Validate project integrity
+knot check                     # cycles, dangling refs, schema, archive placement
+knot check --code dep_cycle    # filter by code (repeatable; OR within / AND across)
+knot check --json              # envelope + sorted issues, exit 0/1/2
 ```
 
 Every read command (`show`, `ls`, `ready`, `blocked`, `closed`,
-`dep tree`, `prime`) accepts `--json` and emits snake_case keys. Stdout
-carries data only; warnings and errors go to stderr.
+`dep tree`, `check`, `prime`) accepts `--json` and emits snake_case
+keys. Stdout carries data only; warnings and errors go to stderr.
 
 ## `.knot.edn` schema
 

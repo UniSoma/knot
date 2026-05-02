@@ -1447,17 +1447,15 @@ Restart the daemon.
         (is (str/includes? stderr "severity"))
         (is (str/includes? stderr "loud")))))
 
-  (testing "check-cmd --json + unknown severity: error envelope on stdout (no data), exit 2"
+  (testing "check-cmd --json + unknown severity: stderr in both modes (arg-parsing-stays-on-stderr), exit 2"
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (let [{:keys [exit stdout stderr]}
-            (cli/check-cmd (ctx tmp) {:severity #{:loud} :json? true})
-            parsed (cheshire.core/parse-string stdout true)]
+            (cli/check-cmd (ctx tmp) {:severity #{:loud} :json? true})]
         (is (= 2 exit))
-        (is (str/blank? stderr))
-        (is (false? (:ok parsed)))
-        (is (= "invalid_argument" (get-in parsed [:error :code])))
-        (is (not (contains? parsed :data)))))))
+        (is (str/blank? stdout) "no stdout under --json for arg-parse failures")
+        (is (str/includes? stderr "severity"))
+        (is (str/includes? stderr "loud"))))))
 
 (deftest check-cmd-filter-test
   (testing "--code filter narrows issues; exit code reflects filtered view (grep semantics)"

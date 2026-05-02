@@ -259,7 +259,18 @@
       (is (= 2 (count issues)))
       (is (every? #(= ["a"] %) (map :ids issues)))
       (is (some #(re-find #"\bx\b" %) msgs))
-      (is (some #(re-find #"\by\b" %) msgs)))))
+      (is (some #(re-find #"\by\b" %) msgs))))
+
+  (testing "holder missing :id -> unknown_id skipped (missing_required_field surfaces the bare id)"
+    (let [bad     (-> (ticket "ignored" "open" ["ghost"] :title "T")
+                      (update :frontmatter dissoc :id))
+          result  (run-with [bad])
+          unknown (issues-of result :unknown_id)
+          missing (issues-of result :missing_required_field)]
+      (is (= [] unknown)
+          "no :ids [nil] issues — the unknown-id check is skipped without a holder id")
+      (is (some #(= :id (:field %)) missing)
+          "missing-required-field still surfaces the absent :id"))))
 
 (deftest frontmatter-parse-error-test
   (testing "each parse-error path becomes a frontmatter_parse_error issue"
