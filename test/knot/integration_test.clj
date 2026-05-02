@@ -881,7 +881,21 @@
         (is (zero? exit) (str "closed --type err=" err))
         (is (str/includes? out "A bug"))
         (is (not (str/includes? out "A task"))
-            "task-type closed ticket filtered out by --type bug")))))
+            "task-type closed ticket filtered out by --type bug"))))
+
+  (testing "contradictory filter yields empty `data` array, not an error"
+    ;; Pins the v0.3 contract: contradictory filters are valid and return
+    ;; []. `closed --status open` is the canonical case — it cannot match
+    ;; any terminal ticket, so the JSON envelope must still be ok=true with
+    ;; data=[]. Earlier surfaces rejected this combination at parse time.
+    (with-tmp tmp
+      (let [a-id (id-from-create-out (:out (run-knot tmp "create" "Live")) "live")
+            _ (run-knot tmp "close" a-id)
+            {:keys [exit out err]} (run-knot tmp "closed" "--status" "open" "--json")]
+        (is (zero? exit) (str "closed --status open --json err=" err))
+        (is (str/includes? out "\"ok\":true"))
+        (is (str/includes? out "\"data\":[]")
+            "empty result renders as data=[], not as an error envelope")))))
 
 (deftest blocked-filter-flags-end-to-end-test
   (testing "blocked --mode filters by mode"

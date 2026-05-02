@@ -201,7 +201,9 @@
 
 (defn- filter-opts-from-cli
   "Project the parsed CLI `opts` map onto the keyword-set shape that
-   `cli/ls-cmd` and `cli/ready-cmd` expect for `query/filter-tickets`."
+   the listing commands expect for `query/filter-tickets`. Used by every
+   listing handler (`ls`, `ready`, `closed`, `blocked`, and — modulo
+   `:mode`, which `prime-cmd` keeps as a scalar — `prime`)."
   [opts]
   (reduce (fn [acc k]
             (if-let [s (->set (get opts k))]
@@ -353,11 +355,12 @@
 
 (defn- list-handler
   "Run a non-mutating list command that shares the `ls`-like output
-   shape: `--json`, `--no-color`, optionally `--limit`, optionally
-   filter flags. `spec` controls which flags are accepted — `ready`
-   passes `ready-spec` (filters); `closed`/`blocked` pass `list-spec`
-   (no filters). Filters that survive parsing apply BEFORE `--limit`
-   truncation."
+   shape: `--json`, `--no-color`, `--limit`, and the unified six-flag
+   filter set (`--status --assignee --tag --type --mode`). `cmd-key`
+   selects the per-command `spec` from the help registry — every
+   listing spec carries the full filter set, so the difference is
+   purely the upstream source of tickets each `list-fn` walks. Filters
+   that survive parsing apply BEFORE `--limit` truncation."
   [cmd-key list-fn argv]
   (let [{:keys [opts]} (bcli/parse-args argv (spec cmd-key))
         json?    (boolean (:json opts))
