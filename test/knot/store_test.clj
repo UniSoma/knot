@@ -261,6 +261,60 @@
           (is (not (fs/exists? stale-archive))
               "stale archive duplicate must be removed when saving to live"))))))
 
+;; --- Crash-mid-operation atomicity (kno-01kqgqafcxvv) ---
+;;
+;; The close/reopen round-trip moves a ticket file between the live and
+;; archive directories. The invariant we care about: at every observable
+;; moment (including immediately after a crash), the ticket exists in
+;; *exactly one* on-disk location — never in two places, never in neither.
+;;
+;; We simulate a crash by replacing `fs/delete-if-exists` with a thrower.
+;; That function is the last filesystem step in the legacy save! shape
+;; (write target, then delete source), so injecting a throw there mimics
+;; a process kill landing between the target write and the source removal.
+
+(defn- count-locations
+  "How many on-disk files exist for `id` across live + archive."
+  [tmp id slug]
+  (count
+   (filter fs/exists?
+           [(str (fs/path tmp ".tickets" (str id "--" slug ".md")))
+            (str (fs/path tmp ".tickets" "archive" (str id "--" slug ".md")))])))
+
+(deftest save-close-crash-leaves-file-in-one-place-test
+  (testing "crash between target write and source removal during close (live → archive)
+            must not leave the file in two places"
+    (with-tmp tmp
+      ;; Setup: ticket in live with status=open.
+      (store/save! tmp ".tickets" "kno-01" "fix"
+                   (mk-ticket "kno-01" "open") save-opts)
+      (is (= 1 (count-locations tmp "kno-01" "fix")) "precondition: one file in live")
+      ;; Simulate crash: the very last fs op throws.
+      (with-redefs [fs/delete-if-exists (fn [& _]
+                                          (throw (ex-info "simulated crash" {})))]
+        (try
+          (store/save! tmp ".tickets" "kno-01" "fix"
+                       (mk-ticket "kno-01" "closed") save-opts)
+          (catch Exception _)))
+      (is (= 1 (count-locations tmp "kno-01" "fix"))
+          "after a crash mid-close, file must exist in exactly one location"))))
+
+(deftest save-reopen-crash-leaves-file-in-one-place-test
+  (testing "crash between target write and source removal during reopen (archive → live)
+            must not leave the file in two places"
+    (with-tmp tmp
+      (store/save! tmp ".tickets" "kno-01" "fix"
+                   (mk-ticket "kno-01" "closed") save-opts)
+      (is (= 1 (count-locations tmp "kno-01" "fix")) "precondition: one file in archive")
+      (with-redefs [fs/delete-if-exists (fn [& _]
+                                          (throw (ex-info "simulated crash" {})))]
+        (try
+          (store/save! tmp ".tickets" "kno-01" "fix"
+                       (mk-ticket "kno-01" "open") save-opts)
+          (catch Exception _)))
+      (is (= 1 (count-locations tmp "kno-01" "fix"))
+          "after a crash mid-reopen, file must exist in exactly one location"))))
+
 (deftest load-all-test
   (testing "load-all returns every ticket file in the live tickets dir"
     (with-tmp tmp

@@ -6,10 +6,12 @@
             [clojure.string :as str]
             [flatland.ordered.map :as om]
             [knot.ticket :as ticket])
-  (:import (java.nio.file FileAlreadyExistsException Files OpenOption
-                          Path StandardOpenOption)
+  (:import (java.nio.file CopyOption FileAlreadyExistsException Files
+                          OpenOption Path StandardCopyOption
+                          StandardOpenOption)
            (java.nio.charset StandardCharsets)
-           (java.time Instant)))
+           (java.time Instant)
+           (java.util UUID)))
 
 (def ^:private archive-subdir "archive")
 
@@ -112,6 +114,44 @@
   (when fname
     (second (re-matches #".+--(.+)\.md" (str fname)))))
 
+(def ^:private atomic-move-options
+  "CopyOption[] for `Files/move`. ATOMIC_MOVE asks the kernel to honor
+   POSIX `rename(2)` semantics — the destination flips from old contents
+   to new in a single filesystem step, with no observer-visible window
+   where the file is missing or partial. REPLACE_EXISTING permits the
+   destination to pre-exist (the rename overwrites it atomically)."
+  (into-array CopyOption [StandardCopyOption/ATOMIC_MOVE
+                          StandardCopyOption/REPLACE_EXISTING]))
+
+(def ^:private write-create-new-options
+  (into-array OpenOption [StandardOpenOption/CREATE_NEW
+                          StandardOpenOption/WRITE]))
+
+(defn- atomic-write!
+  "Atomically replace (or create) the file at `path` with `bytes`. Writes
+   to a sibling temp file first, then renames into place via ATOMIC_MOVE.
+   A crash at any point leaves either the prior file contents or the new
+   contents at `path` — never a partial or empty file."
+  [^Path path ^bytes bytes]
+  (let [parent  (.getParent path)
+        tmp-fn  (str ".tmp-" (UUID/randomUUID) "-" (.getFileName path))
+        tmp     ^Path (fs/path parent tmp-fn)]
+    (Files/write tmp bytes write-create-new-options)
+    (try
+      (Files/move tmp path atomic-move-options)
+      (catch Throwable t
+        (Files/deleteIfExists tmp)
+        (throw t)))))
+
+(defn- atomic-move!
+  "Atomically rename `src` to `dst` via `rename(2)`. The single-syscall
+   semantics guarantee that `src` disappears and `dst` takes its content
+   in one observable step — no window where the file lives in both places
+   or in neither. Wrapped as a private fn so tests can `with-redefs` it
+   to simulate filesystem failures."
+  [^Path src ^Path dst]
+  (Files/move src dst atomic-move-options))
+
 (defn save!
   "Render `ticket` and write it to its target on-disk path under
    `<project-root>/<tickets-dir>/`. Centralizes timestamping and archive
@@ -126,6 +166,18 @@
    When `slug` is nil, the slug is recovered from the existing on-disk
    filename — keeping the slug stable across status transitions without
    the caller having to track it.
+
+   **Atomicity** (kno-01kqgqafcxvv): the write is structured so a crash
+   at any observable point leaves the ticket file in *exactly one*
+   on-disk location — never in two places, never in none. For
+   cross-directory transitions (close: live → archive, reopen:
+   archive → live) the new content is first written atomically at the
+   source path, then a single `rename(2)` moves the source into the
+   target — the source's removal piggybacks on the rename's atomicity.
+   For same-path saves (no transition) the content is replaced in place
+   via temp-and-rename. A trailing sweep removes any stragglers from
+   prior crashes or hand-edits.
+
    Returns the written path. `opts` is `{:now <iso-string?> :terminal-statuses <set?>}`."
   [project-root tickets-dir id slug ticket {:keys [now terminal-statuses]}]
   (let [now*           (or now (now-iso))
@@ -140,15 +192,37 @@
                          (archive-path project-root tickets-dir id slug*)
                          (ticket-path project-root tickets-dir id slug*))
         fm*            (stamp-timestamps (:frontmatter ticket) new-st prior-st now* terminal-statuses)
-        ticket*        (assoc ticket :frontmatter fm*)]
-    (fs/create-dirs (fs/parent target))
-    (spit target (ticket/render ticket*))
-    ;; Self-heal: remove every pre-existing copy of this id that isn't the
-    ;; new target. This sweeps stale duplicates across both live and archive,
-    ;; not just the first match — important when hand-edits or process races
-    ;; have left an id in two places.
+        ticket*        (assoc ticket :frontmatter fm*)
+        rendered-bytes (.getBytes ^String (ticket/render ticket*) StandardCharsets/UTF_8)
+        target-path    ^Path (fs/path target)
+        ;; Pick a primary source: prefer one already at `target` (no
+        ;; cross-directory move needed); else the first existing path.
+        primary-source (or (first (filter #(= % target) existing-paths))
+                           (first existing-paths))]
+    (fs/create-dirs (.getParent target-path))
+    (cond
+      ;; Fresh ticket — atomic write straight to target.
+      (nil? primary-source)
+      (atomic-write! target-path rendered-bytes)
+
+      ;; Same-location save — replace contents in place via temp-and-rename.
+      (= primary-source target)
+      (atomic-write! target-path rendered-bytes)
+
+      ;; Cross-directory transition (close or reopen). Stage the new
+      ;; content at the source path with an atomic content swap, then
+      ;; rename source → target as a single fs op. At every observable
+      ;; moment the file lives in exactly one location.
+      :else
+      (let [source-path ^Path (fs/path primary-source)]
+        (atomic-write! source-path rendered-bytes)
+        (atomic-move! source-path target-path)))
+    ;; Sweep any remaining stragglers (legacy hand-edits, pre-fix crashes).
+    ;; The primary source is already gone via the rename above, so this
+    ;; loop only matters when `existing-paths` had more than one entry.
     (doseq [p existing-paths
-            :when (not= p target)]
+            :when (and (not= p target)
+                       (not= p primary-source))]
       (fs/delete-if-exists p))
     target))
 
