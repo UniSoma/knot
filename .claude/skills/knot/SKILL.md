@@ -24,6 +24,9 @@ signal — the user may already use a different tracker.
 `knot close` / `knot reopen` / `knot add-note` / `knot edit` / `knot dep` /
 `knot link`.
 
+**Validate project integrity via** `knot check` (cycles, dangling refs,
+schema, archive placement).
+
 Never `cat .tickets/<id>--*.md`, `grep -r ... .tickets/`, `vim .tickets/...`,
 write a new file under `.tickets/` by hand, or `mv` files between
 `.tickets/` and `.tickets/archive/`.
@@ -62,7 +65,7 @@ one of these against `.tickets/`, switch to the knot equivalent:
 | Tempted to use… on `.tickets/` | Use this instead |
 |---|---|
 | `Read` / `cat` / `head` / `tail` | `knot show <id>` |
-| `Grep` / `grep` / `rg` | `knot list --json \| jq …` |
+| `Grep` / `grep` / `rg` | `knot list --json \| jq '.data[] \| …'` |
 | `ls` | `knot list` (or `knot list --json`) |
 | `Write` (new file) | `knot create "<title>" -d "..."` |
 | `Edit` (modify file) | `knot add-note <id> "..."` (additive) or `knot edit <id>` (interactive) |
@@ -99,7 +102,8 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "blocked on <other>"                                    | `knot dep <current> <other>`                                 |
 | "what's blocking <id>?"                                 | `knot dep tree <id>`                                         |
 | "these are related: a, b, c"                            | `knot link <a> <b> <c>`                                      |
-| "scan for cycles"                                       | `knot dep cycle`                                             |
+| "validate the project" / "any integrity issues?"        | `knot check`                                                 |
+| "scan for cycles" / "any dep cycles?"                   | `knot check --code dep_cycle`                                |
 | "give me a summary of project state"                    | `knot prime`                                                 |
 
 ### Filter, don't eyeball
@@ -194,9 +198,8 @@ edit` will fail. Use `add-note` for additive context instead.
 ### Graph operations
 
 ```sh
-knot dep <from> <to>            # <from> waits on <to>; cycle-checked
+knot dep <from> <to>            # <from> waits on <to>; cycle-checked on add
 knot dep tree <id>              # ASCII tree; --full to expand dups
-knot dep cycle                  # scan all open tickets
 knot undep <from> <to>
 
 knot link <a> <b> [<c>...]      # symmetric peer link across every pair
@@ -205,7 +208,28 @@ knot unlink <from> <to>
 
 `deps` are directional ("blocks") and honored by `knot ready`. `links`
 are symmetric ("see also"). Use `dep` when one ticket has to wait on
-another; use `link` for "here's context".
+another; use `link` for "here's context". `knot dep` rejects
+cycle-creating edges at write time; to scan an already-corrupted graph
+(e.g. after a hand-edit) use `knot check --code dep_cycle`.
+
+## Project integrity
+
+```sh
+knot check                      # validate every ticket + config; exit 0/1/2
+knot check <id>...              # narrow per-ticket checks; globals still run
+knot check --code dep_cycle     # filter by issue code (repeatable)
+knot check --severity error     # filter by severity (closed enum)
+knot check --json               # envelope; data.issues sorted, data.scanned counts
+```
+
+`knot check` walks every ticket (live + archive) and the config and
+emits issues for: dep cycles, dangling `:deps`/`:links`/`:parent` ids,
+invalid status/type/mode/priority, terminal-vs-archive placement,
+missing required fields, frontmatter parse errors, and an
+invalid-`:active-status` config. Filters apply *before* the exit-code
+decision (grep semantics). Exit `2` means unable to scan (no project
+root or invalid `.knot.edn`) — different from `1` (errors found in
+the filtered view).
 
 ## AFK vs HITL: agent-runnable work
 
@@ -230,17 +254,30 @@ authorizes that ticket. The mode is the contract.
 
 ## JSON for parsing
 
-Every read command accepts `--json` and emits snake_case keys on stdout;
-warnings and errors go to stderr.
+Every read command accepts `--json` and emits a tagged envelope on
+stdout with snake_case keys. Warnings and errors go to stderr.
+
+```json
+{"schema_version": 1, "ok": true, "data": <payload>}
+```
+
+The actual payload sits at `.data`. List-shaped commands (`list`,
+`ready`, `blocked`, `closed`) put an array there; object-shaped
+commands (`show`, `dep tree`, `prime`, `check`) put an object. On
+errors (e.g. `show <missing-id>`), the envelope flips to
+`{schema_version: 1, ok: false, error: {code, message, ...}}` with no
+`data` slot. `knot check` is the one exception: it may emit
+`{ok: false, data: {...}}` because `ok` mirrors a health verdict.
 
 ```sh
-knot list --json           | jq '.[] | select(.priority <= 1)'
+knot list --json           | jq '.data[] | select(.priority <= 1)'
 knot ready --json --mode afk
-knot show <id> --json      | jq -r '.title'
+knot show <id> --json      | jq -r '.data.title'
 knot prime --json
+knot check --json          | jq '.data.issues'   # integrity issues, if any
 
 # Pick the highest-priority unblocked afk ticket, id only:
-knot ready --json --mode afk | jq -r 'sort_by(.priority) | .[0].id'
+knot ready --json --mode afk | jq -r '.data | sort_by(.priority) | .[0].id'
 ```
 
 For any decision logic, prefer `--json | jq` over parsing tables. Don't
@@ -280,15 +317,21 @@ remote id like `GH-482`, `ENG-1234`), use the tool they named.
 init / prime                           project setup, agent context primer
 list (alias ls) / show                 read live; show one
 ready / blocked / closed               backlog views (--limit, terminal status)
+check                                  project-integrity scan (cycles, dangling
+                                       refs, schema, archive placement)
 create                                 new ticket (-t -p -a --tags --afk --hitl
                                        -d --design --acceptance --parent
                                        --external-ref)
 start / status / close / reopen        lifecycle (--summary on close)
 add-note / edit                        annotation (edit is interactive)
-dep / undep / dep tree / dep cycle     directional graph; cycle-checked
+dep / undep / dep tree                 directional graph; cycle-checked on add
 link / unlink                          symmetric graph
 ```
 
-All commands return `0` on success, `1` on error. Every read command
-supports `--json` and these filter flags (each repeatable): `--type`,
-`--mode`, `--tag`, `--status`, `--assignee`.
+Most commands return `0` on success and `1` on error. `knot check`
+adds `2` for unable-to-scan (no project root or invalid `.knot.edn`).
+Every read command supports `--json` and the filter flags `--type`,
+`--mode`, `--tag`, `--status`, `--assignee` (each repeatable).
+`knot check` uses its own filters: `--severity` (error|warning,
+closed enum) and `--code` (open enum), both repeatable; OR within a
+flag, AND across flags.
