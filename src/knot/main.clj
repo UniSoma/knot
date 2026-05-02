@@ -55,22 +55,41 @@
 ;; flags and either crashes coercion (`--priority`) or writes garbage
 ;; into other spec entries.
 
-(def ^:private body-flag->key
-  "Body-section flag tokens (long form, `=` form prefix, and short alias)
-   mapped to the opts key that `cli/create-cmd` expects."
+(def ^:private create-body-flags
+  "Body-section flag tokens for `knot create` (long form, `=` form
+   prefix, and short alias) mapped to the opts key that `cli/create-cmd`
+   expects. `--body` is intentionally absent — that is `knot update`'s
+   whole-body-replace flag and would silently swallow the value here."
   {"--description" :description
    "-d"            :description
    "--design"      :design
    "--acceptance"  :acceptance})
 
+(def ^:private update-body-flags
+  "Body flags for `knot update`: the create set plus `--body` for
+   whole-body replace."
+  (assoc create-body-flags "--body" :body))
+
+(def ^:private body-flag->key
+  "Union of every command's body-extraction flags. Used by
+   `help-requested?` so a literal `--help` inside any command's body
+   string never triggers help (the per-command body-extract maps are
+   too narrow for that — help detection is command-agnostic)."
+  update-body-flags)
+
 (defn- extract-body-flags
-  "Walk argv and pull `--description / --design / --acceptance` (plus the
-   `-d` alias) out before babashka.cli sees them. Supports both the
-   `--flag value` and `--flag=value` shapes; values are consumed verbatim
-   so dash-prefixed bodies like `\"- [ ] item\"` survive intact. Returns
-   `{:body-opts {kw value} :argv [...]}` where `:argv` is argv with the
-   consumed tokens removed."
-  [argv]
+  "Walk argv and pull body-section flag tokens (long form, `=` form
+   prefix, and short aliases — see `create-body-flags` /
+   `update-body-flags`) out before babashka.cli sees them. Supports
+   both the `--flag value` and `--flag=value` shapes; values are
+   consumed verbatim so dash-prefixed bodies like `\"- [ ] item\"`
+   survive intact. `flag-map` scopes which flags get extracted — pass
+   `create-body-flags` from `create-handler`, `update-body-flags` from
+   `update-handler`, `body-flag->key` from `help-requested?` (the
+   union, since help detection is command-agnostic). Returns
+   `{:body-opts {kw value} :argv [...]}` where `:argv` is argv with
+   the consumed tokens removed."
+  [argv flag-map]
   (loop [in argv, out [], opts {}]
     (if (empty? in)
       {:body-opts opts :argv out}
@@ -79,13 +98,13 @@
                             (str/index-of head "="))
             eq-flag       (when eq-idx (subs head 0 eq-idx))]
         (cond
-          (and eq-flag (contains? body-flag->key eq-flag))
+          (and eq-flag (contains? flag-map eq-flag))
           (recur tail out
-                 (assoc opts (body-flag->key eq-flag) (subs head (inc eq-idx))))
+                 (assoc opts (flag-map eq-flag) (subs head (inc eq-idx))))
 
-          (and (contains? body-flag->key head) (seq tail))
+          (and (contains? flag-map head) (seq tail))
           (recur (rest tail) out
-                 (assoc opts (body-flag->key head) (first tail)))
+                 (assoc opts (flag-map head) (first tail)))
 
           :else
           (recur tail (conj out head) opts))))))
@@ -151,7 +170,7 @@
   (System/exit 1))
 
 (defn- create-handler [argv]
-  (let [{:keys [body-opts argv]} (extract-body-flags argv)
+  (let [{:keys [body-opts argv]} (extract-body-flags argv create-body-flags)
         {:keys [opts args]}      (bcli/parse-args argv (spec :create))
         title (first args)
         json? (boolean (:json opts))]
@@ -524,6 +543,57 @@
 
               :else (throw e))))))))
 
+(defn- update-handler
+  "Handle `knot update <id> [flags...]`. Frontmatter flags route through
+   the parser; body flags (`--description / --design / --acceptance /
+   --body`) are pre-extracted before babashka.cli sees them so dash-
+   prefixed values survive intact. With `--json`, not-found and
+   ambiguous-id failures route to the v0.3 error envelope on stdout;
+   conflicting body flags emit `invalid_argument`. Tag splitting mirrors
+   `create-handler` so the on-disk `:tags` field stays a YAML list."
+  [argv]
+  (let [{:keys [body-opts argv]} (extract-body-flags argv update-body-flags)
+        {:keys [opts args]}      (bcli/parse-args argv (spec :update))
+        json? (boolean (:json opts))
+        id    (first args)]
+    (when (or (nil? id) (str/blank? id))
+      (die "knot update: an id is required"))
+    (let [opts* (cond-> (-> opts
+                            (merge body-opts)
+                            (dissoc :json)
+                            (assoc :id id :json? json?))
+                  (contains? opts :tags)
+                  (assoc :tags (split-tags (:tags opts)))
+
+                  ;; `--external-ref ""` from the CLI yields [""] from
+                  ;; babashka.cli's `:coerce []`. (empty? [""]) is
+                  ;; false, so the cli-layer dissoc-on-empty branch
+                  ;; would never fire and the user would end up with a
+                  ;; literal blank ref instead of a cleared field.
+                  ;; Normalize blanks to drop them (mirrors split-tags).
+                  (contains? opts :external-ref)
+                  (assoc :external-ref
+                         (vec (remove str/blank? (:external-ref opts)))))]
+      (try
+        (let [out (cli/update-cmd (discover-ctx) opts*)]
+          (cond
+            out   (println-out (str out))
+            json? (emit-not-found-envelope! id)
+            :else (die (str "knot update: no ticket matching " id))))
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (cond
+              (and json? (= :ambiguous (:kind data)))
+              (emit-ambiguous-envelope! e data)
+
+              json?
+              (emit-error-envelope! {:code    "invalid_argument"
+                                     :message (.getMessage e)})
+
+              (= :ambiguous (:kind data)) (throw e)
+
+              :else (die (str "knot update: " (.getMessage e))))))))))
+
 (defn- edit-handler
   "Handle `knot edit <id>`."
   [argv]
@@ -657,7 +727,7 @@
    `-h`. Body extraction keeps a literal `--help` inside a body string
    from triggering a false positive."
   [argv]
-  (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv)))))
+  (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv body-flag->key)))))
 
 (defn -main [& argv]
   (try
@@ -714,6 +784,7 @@
         "closed"   (list-handler :closed  cli/closed-cmd  rest-argv)
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
+        "update"   (update-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

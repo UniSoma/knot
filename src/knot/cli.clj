@@ -489,6 +489,140 @@
           (store/save! project-root tickets-dir full-id nil reloaded
                        {:now now :terminal-statuses terminal-statuses}))))))
 
+(defn- section-region
+  "Locate `## <heading>` in `body`. Returns `{:start :end}` where `:end`
+   is the start of the next `## ` heading or `(count body)`. Returns nil
+   when the heading is missing. Heading-text is regex-quoted so headings
+   with regex metacharacters are matched verbatim."
+  [body heading]
+  (let [pat (re-pattern (str "(?m)^## "
+                             (java.util.regex.Pattern/quote heading)
+                             "[ \\t]*$"))
+        m   (re-matcher pat body)]
+    (when (.find m)
+      (let [next-m (re-matcher #"(?m)^## " body)
+            after  (.end m)
+            end    (if (.find next-m after)
+                     (.start next-m)
+                     (count body))]
+        {:start (.start m) :end end}))))
+
+(defn- replace-section
+  "Return `body` with the `## <heading>` section replaced by `content`.
+   When the section is missing and `content` is non-blank, append it as
+   a new section to the end (mirrors `build-body`'s shape). When
+   `content` is blank, drop the section if present; otherwise no-op
+   (the input is returned verbatim — caller is responsible for the
+   shape of bodies that have never been touched). All shapes that
+   actually mutate the body normalize to a single trailing newline so
+   round-trips through `ticket/render` stay idempotent."
+  [body heading content]
+  (let [body* (or body "")
+        region (section-region body* heading)]
+    (cond
+      (and (str/blank? content) (nil? region))
+      body*
+
+      (str/blank? content)
+      (let [{:keys [start end]} region
+            head (str/replace (subs body* 0 start) #"\s+$" "")
+            tail (subs body* end)]
+        (cond
+          (str/blank? tail) (if (seq head) (str head "\n") "")
+          (seq head)        (str head "\n\n" tail)
+          :else             tail))
+
+      (some? region)
+      (let [{:keys [start end]} region
+            head     (subs body* 0 start)
+            tail     (subs body* end)
+            sep-tail (if (str/blank? tail) "\n" "\n\n")]
+        (str head "## " heading "\n\n" content sep-tail tail))
+
+      :else
+      (let [head (str/replace body* #"\s+$" "")
+            sep  (if (str/blank? head) "" "\n\n")]
+        (str head sep "## " heading "\n\n" content "\n")))))
+
+(defn- update-frontmatter
+  "Project `opts` onto `fm`. Keys absent from `opts` leave `fm`
+   unchanged; keys present with a non-empty value set the field; keys
+   present with a blank string or empty collection clear the field
+   (drop the YAML key) for the optional fields (`:assignee`, `:parent`,
+   `:tags`, `:external_refs`). The required-ish fields (`:title`,
+   `:type`, `:priority`, `:mode`) are set to whatever value the caller
+   passed — clearing those is not a sanctioned operation."
+  [fm opts]
+  (let [{:keys [title type priority mode assignee parent tags external-ref]} opts
+        clear-when (fn [m k pred v]
+                     (if (pred v) (dissoc m k) (assoc m k v)))]
+    (cond-> fm
+      (contains? opts :title)        (assoc :title title)
+      (contains? opts :type)         (assoc :type type)
+      (contains? opts :priority)     (assoc :priority priority)
+      (contains? opts :mode)         (assoc :mode mode)
+      (contains? opts :assignee)     (clear-when :assignee str/blank? assignee)
+      (contains? opts :parent)       (clear-when :parent   str/blank? parent)
+      (contains? opts :tags)         (clear-when :tags  empty? (vec tags))
+      (contains? opts :external-ref) (clear-when :external_refs
+                                                 empty? (vec external-ref)))))
+
+(defn- update-body
+  "Apply the body-mutation flags from `opts` to `body`. `--body`
+   replaces the whole body; the sectional flags
+   (`:description`/`:design`/`:acceptance`) replace named sections in
+   place (or append when missing). `--body` is mutually exclusive with
+   the sectional flags — the caller must validate that before calling."
+  [body opts]
+  (cond
+    (contains? opts :body)
+    (:body opts)
+
+    :else
+    (cond-> body
+      (contains? opts :description) (replace-section "Description" (:description opts))
+      (contains? opts :design)      (replace-section "Design" (:design opts))
+      (contains? opts :acceptance)  (replace-section "Acceptance Criteria"
+                                                     (:acceptance opts)))))
+
+(defn update-cmd
+  "Apply non-interactive updates to the ticket whose id is `(:id opts)`
+   (full or partial). Frontmatter flags (`:title`, `:type`, `:priority`,
+   `:mode`, `:assignee`, `:parent`, `:tags`, `:external-ref`) set field
+   values; sectional body flags (`:description`, `:design`,
+   `:acceptance`) replace those `## ...` sections in place; `:body`
+   replaces the whole body and is mutually exclusive with the sectional
+   flags. Optional frontmatter fields (`:assignee`, `:parent`, `:tags`,
+   `:external_refs`) are cleared when the supplied value is blank or
+   empty. Returns the saved path, or nil when no ticket matches; throws
+   on ambiguous partial ids. `:updated` bumps on every successful save
+   (re-uses `store/save!`).
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping the post-mutation ticket under `:data` instead of the
+   saved path. The `:updated` timestamp inside `:data` reflects the
+   bump."
+  [ctx opts]
+  (when (and (contains? opts :body)
+             (some #(contains? opts %) [:description :design :acceptance]))
+    (throw (ex-info (str "--body is mutually exclusive with "
+                         "--description / --design / --acceptance")
+                    {:offending (filter #(contains? opts %)
+                                        [:description :design :acceptance])})))
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)]
+    (when-let [loaded (resolve-or-nil project-root tickets-dir (:id opts))]
+      (let [full-id (get-in loaded [:frontmatter :id])
+            fm*     (update-frontmatter (:frontmatter loaded) opts)
+            body*   (update-body (:body loaded) opts)
+            ticket* (assoc loaded :frontmatter fm* :body body*)
+            saved   (store/save! project-root tickets-dir full-id nil ticket*
+                                 {:now now :terminal-statuses terminal-statuses})]
+        (if (:json? opts)
+          (output/touched-ticket-json
+           (store/load-one project-root tickets-dir full-id))
+          saved)))))
+
 (defn- filter-criteria
   "Project the filter-relevant keys out of `opts` into the criteria map
    accepted by `query/filter-tickets`. Empty/nil values are dropped so the

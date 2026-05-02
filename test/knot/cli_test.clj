@@ -2122,6 +2122,258 @@ Restart the daemon.
       (fs/create-dirs (fs/path tmp ".tickets"))
       (is (nil? (cli/add-note-cmd (ctx tmp) {:id "kno-nope" :text "x" :json? true}))))))
 
+(deftest update-cmd-frontmatter-test
+  (testing "update --title sets the title in frontmatter and bumps :updated"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "Original"})
+            id      (id-of-created created "original")
+            later   (assoc (ctx tmp) :now "2026-05-02T10:00:00Z")
+            saved   (cli/update-cmd later {:id id :title "New Title"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (string? saved))
+        (is (= "New Title" (get-in loaded [:frontmatter :title])))
+        (is (= "2026-05-02T10:00:00Z" (get-in loaded [:frontmatter :updated])))
+        (is (= created saved)
+            "slug-stable: filename unchanged when only title changes"))))
+
+  (testing "update --type, --priority, --mode, --assignee replace those keys"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :type "bug"
+                                     :priority 0
+                                     :mode "afk"
+                                     :assignee "alice"})
+            loaded  (store/load-one tmp ".tickets" id)
+            fm      (:frontmatter loaded)]
+        (is (= "bug" (:type fm)))
+        (is (= 0 (:priority fm)))
+        (is (= "afk" (:mode fm)))
+        (is (= "alice" (:assignee fm))))))
+
+  (testing "update --parent sets parent; --parent \"\" clears it"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :parent "kno-other"})
+            after-1 (store/load-one tmp ".tickets" id)
+            _       (cli/update-cmd (ctx tmp) {:id id :parent ""})
+            after-2 (store/load-one tmp ".tickets" id)]
+        (is (= "kno-other" (get-in after-1 [:frontmatter :parent])))
+        (is (not (contains? (:frontmatter after-2) :parent))
+            "blank --parent removes the key"))))
+
+  (testing "update --assignee \"\" clears the assignee"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :assignee "alice"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :assignee ""})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (not (contains? (:frontmatter loaded) :assignee))))))
+
+  (testing "update --tags replaces the tag list; empty list clears"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :tags ["x" "y" "z"]})
+            after-1 (store/load-one tmp ".tickets" id)
+            _       (cli/update-cmd (ctx tmp) {:id id :tags []})
+            after-2 (store/load-one tmp ".tickets" id)]
+        (is (= ["x" "y" "z"] (vec (get-in after-1 [:frontmatter :tags]))))
+        (is (not (contains? (:frontmatter after-2) :tags))
+            "empty --tags removes the key"))))
+
+  (testing "update --external-ref replaces external_refs; empty list clears"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :external-ref ["JIRA-2" "JIRA-3"]})
+            after-1 (store/load-one tmp ".tickets" id)
+            _       (cli/update-cmd (ctx tmp) {:id id :external-ref []})
+            after-2 (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-2" "JIRA-3"]
+               (vec (get-in after-1 [:frontmatter :external_refs]))))
+        (is (not (contains? (:frontmatter after-2) :external_refs))))))
+
+  (testing "update with no flags still bumps :updated"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-03T00:00:00Z")
+            _       (cli/update-cmd later {:id id})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "2026-05-03T00:00:00Z" (get-in loaded [:frontmatter :updated])))
+        (is (= "T" (get-in loaded [:frontmatter :title]))
+            "untouched fields stay put"))))
+
+  (testing "update returns nil when no ticket matches"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/update-cmd (ctx tmp) {:id "kno-nope" :title "X"})))))
+
+  (testing "update on an ambiguous partial id throws"
+    (with-tmp tmp
+      ;; create two tickets so a 1-char prefix is ambiguous
+      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+      (cli/create-cmd (ctx tmp) {:title "Beta"})
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous id"
+                            (cli/update-cmd (ctx tmp) {:id "kno-" :title "X"}))))))
+
+(deftest update-cmd-body-sectional-test
+  (testing "update --description replaces the Description section in place"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :description "Old description."})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :description "Brand new description."})
+            loaded  (store/load-one tmp ".tickets" id)
+            body    (:body loaded)]
+        (is (str/includes? body "## Description"))
+        (is (str/includes? body "Brand new description."))
+        (is (not (str/includes? body "Old description."))))))
+
+  (testing "update --description adds a new Description section when missing"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :description "First description."})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (str/includes? (:body loaded) "## Description"))
+        (is (str/includes? (:body loaded) "First description.")))))
+
+  (testing "update --design replaces the Design section"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :design "Old."})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :design "New design."})
+            loaded  (store/load-one tmp ".tickets" id)
+            body    (:body loaded)]
+        (is (str/includes? body "## Design"))
+        (is (str/includes? body "New design."))
+        (is (not (str/includes? body "Old."))))))
+
+  (testing "update --acceptance replaces the Acceptance Criteria section"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance "Old AC."})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :acceptance "- [ ] new item"})
+            loaded  (store/load-one tmp ".tickets" id)
+            body    (:body loaded)]
+        (is (str/includes? body "## Acceptance Criteria"))
+        (is (str/includes? body "- [ ] new item"))
+        (is (not (str/includes? body "Old AC."))))))
+
+  (testing "sectional update preserves other body sections (including Notes)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :description "Desc."
+                                     :design "Design."
+                                     :acceptance "AC."})
+            id      (id-of-created created "t")
+            ;; add a note so body has all four sections
+            _       (cli/add-note-cmd (ctx tmp) {:id id :text "kept"})
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :description "Replaced desc."})
+            loaded  (store/load-one tmp ".tickets" id)
+            body    (:body loaded)]
+        (is (str/includes? body "Replaced desc."))
+        (is (str/includes? body "## Design"))
+        (is (str/includes? body "Design."))
+        (is (str/includes? body "## Acceptance Criteria"))
+        (is (str/includes? body "AC."))
+        (is (str/includes? body "## Notes"))
+        (is (str/includes? body "kept")
+            "previous notes survive a sectional update")))))
+
+(deftest update-cmd-body-replace-test
+  (testing "update --body replaces the whole body"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :description "Old."
+                                     :design "Old design."})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :body "Brand new freeform body.\n"})
+            loaded  (store/load-one tmp ".tickets" id)
+            body    (:body loaded)]
+        (is (str/includes? body "Brand new freeform body."))
+        (is (not (str/includes? body "## Description")))
+        (is (not (str/includes? body "## Design"))))))
+
+  (testing "update --body \"\" empties the body"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :description "Old."})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :body ""})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "" (:body loaded))))))
+
+  (testing "update --body is mutually exclusive with --description / --design / --acceptance"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :body "x" :description "y"})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :body "x" :design "y"})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :body "x" :acceptance "y"})))))))
+
+(deftest update-cmd-json-test
+  (testing "update --json returns a v0.3 envelope wrapping the post-mutation ticket"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "Original"})
+            id      (id-of-created created "original")
+            out     (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :title "New"
+                                     :priority 1
+                                     :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (string? out))
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (= id (get-in parsed [:data :id])))
+        (is (= "New" (get-in parsed [:data :title])))
+        (is (= 1 (get-in parsed [:data :priority])))
+        (is (contains? (:data parsed) :body)
+            "single-ticket envelope includes the body")
+        (is (not (contains? parsed :meta))
+            "update never archives — no :meta slot"))))
+
+  (testing "update --json with sectional body update reflects the new body"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :description "Old."})
+            id      (id-of-created created "t")
+            out     (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :description "Brand new desc."
+                                     :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (str/includes? (get-in parsed [:data :body]) "Brand new desc.")))))
+
+  (testing "update --json returns nil when no ticket matches"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (is (nil? (cli/update-cmd (ctx tmp) {:id "kno-nope" :title "X" :json? true}))
+          "json? does not change the not-found contract; the handler emits the envelope"))))
+
 (deftest edit-cmd-test
   (testing "invokes the editor-fn with the ticket file path"
     (with-tmp tmp

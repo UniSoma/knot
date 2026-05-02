@@ -349,6 +349,38 @@
     :examples    [{:cmd "knot edit kno-01abc"
                    :note "Edit the ticket's frontmatter and body."}]}
 
+   :update
+   {:group       :notes
+    :description "Apply non-interactive frontmatter and body updates to a ticket."
+    :args        [{:name "id" :required true}]
+    :flags       [{:name :title        :desc "Replace the title."}
+                  {:name :type         :desc "Replace the type."}
+                  {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
+                  {:name :mode         :desc "Replace the mode (afk|hitl)."}
+                  {:name :assignee     :desc "Set or clear (\"\") the assignee."}
+                  {:name :parent       :desc "Set or clear (\"\") the parent id."}
+                  {:name :tags         :desc "Replace tags (comma-list); pass \"\" to clear."}
+                  {:name :external-ref :coerce []
+                   :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
+                  {:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}
+                  {:name :description :alias :d :body? true
+                   :desc "Replace the ## Description section."}
+                  {:name :design       :body? true
+                   :desc "Replace the ## Design section."}
+                  {:name :acceptance   :body? true
+                   :desc "Replace the ## Acceptance Criteria section."}
+                  {:name :body         :body? true
+                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design / --acceptance."}]
+    :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
+                   :note "Bump priority and replace the tag list."}
+                  {:cmd "knot update kno-01abc --description \"New desc.\""
+                   :note "Replace just the Description section."}
+                  {:cmd "knot update kno-01abc --body \"Plain body.\""
+                   :note "Destructive whole-body replace (use git to recover)."}]
+    :exit-codes  [{:code 0 :when "ticket saved"}
+                  {:code 1 :when "no ticket matches, ambiguous id, or conflicting body flags"}]}
+
    :check
    {:group       :project
     :description "Validate project integrity (cycles, schema, dangling refs)."
@@ -386,7 +418,7 @@
    :create :start :status :close :reopen
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed
-   :add-note :edit])
+   :add-note :edit :update])
 
 (defn- cmd-line-label
   "Render a top-level/subcommand line label: cmd-name + required positionals."

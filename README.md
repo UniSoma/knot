@@ -92,6 +92,9 @@ knot dep tree <id>             # ASCII tree, --full to expand dups
 # Annotation
 knot add-note <id> "raced GC under load"
 knot edit <id>                 # opens $VISUAL/$EDITOR
+knot update <id> --priority 0 --tags p0,auth   # non-interactive frontmatter write
+knot update <id> --description "New desc."     # replace ## Description in place
+knot update <id> --body "Plain body."          # destructive whole-body replace
 
 # Validate project integrity
 knot check                     # cycles, dangling refs, schema, archive placement
@@ -228,8 +231,11 @@ live + archive.
 **Never read or write `.tickets/` by hand.** No `Read`, `cat`, `grep`,
 `Write`, `Edit`, `sed`, or `mv` against files in there — use `knot
 show` / `knot list --json` / `knot create` / `knot add-note` /
-`knot close` instead. If a knot command behaves unexpectedly, surface
-the bug; don't bypass.
+`knot update` / `knot close` instead. `knot edit` opens `$EDITOR`
+(interactive); `knot update <id> --title ... --description ...
+--json` is the non-interactive path agents and scripts should use.
+If a knot command behaves unexpectedly, surface the bug; don't
+bypass.
 
 Hosted-tracker prefixes (`GH-`, `ENG-`, `LIN-`, `JIRA-`) point at
 *other* trackers — use the matching tool, not knot.

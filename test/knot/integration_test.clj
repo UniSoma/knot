@@ -6,7 +6,8 @@
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [knot.ticket]))
 
 (def ^:private project-root
   (or (System/getProperty "user.dir") "."))
@@ -1446,3 +1447,106 @@
         (is (str/blank? err))
         (is (= false (:ok parsed)))
         (is (= "not_found" (get-in parsed [:error :code])))))))
+
+(deftest update-end-to-end-test
+  (testing "update <id> --title rewrites frontmatter and prints the saved path"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Original")
+            id (id-of out "original")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--title" "Renamed")]
+        (is (zero? exit) (str "update --title err=" err))
+        (is (str/includes? (str/trim out) ".tickets")
+            "stdout is the saved path")
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "Renamed"))
+          (is (not (str/includes? shown "Original")))))))
+
+  (testing "update --description replaces a body section visible via show"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--description" "Old description.")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--description" "Brand new desc.")]
+        (is (zero? exit) (str "update --description err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "Brand new desc."))
+          (is (not (str/includes? shown "Old description.")))))))
+
+  (testing "update --body replaces the whole body, including dash-prefixed values"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--body" "- [ ] task one\n- [ ] task two\n")]
+        (is (zero? exit) (str "update --body err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- [ ] task one"))
+          (is (str/includes? shown "- [ ] task two"))))))
+
+  (testing "update --body conflicts with --description and exits non-zero"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--body" "x" "--description" "y")]
+        (is (= 1 exit))
+        (is (str/includes? err "mutually exclusive")))))
+
+  (testing "update --json emits a v0.3 envelope wrapping the post-mutation ticket"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--title" "New" "--priority" "1" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "update --json err=" err))
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (= "New" (get-in parsed [:data :title])))
+        (is (= 1 (get-in parsed [:data :priority])))
+        (is (not (contains? parsed :meta))
+            "update never archives — no :meta slot"))))
+
+  (testing "update --json on a missing id emits not_found envelope (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "update" "kno-ghost" "--title" "X" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "json error envelope goes to stdout, not stderr")
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code])))))))
+
+(deftest update-external-ref-clear-end-to-end-test
+  (testing "update --external-ref \"\" clears external_refs from the CLI"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--external-ref" "JIRA-1")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--external-ref" "" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "update --external-ref \"\" err=" err))
+        (is (= true (:ok parsed)))
+        (is (not (contains? (:data parsed) :external_refs))
+            "blank --external-ref must clear external_refs, not store [\"\"]")))))
+
+(deftest create-body-flag-not-consumed-end-to-end-test
+  ;; Regression guard for kno-01kqgqcqmy19 review: --body is `update`'s
+  ;; whole-body-replace flag, not a `create` flag. Adding it to a global
+  ;; body-flag-extraction map silently routed `--body x` into create's
+  ;; body-opts where it was dropped on the floor. Scope --body to update.
+  (testing "create --body x does NOT inject \"x\" into the new ticket's body"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "T" "--body" "should-not-leak")
+            path (str/trim out)]
+        (is (zero? exit) (str "create --body err=" err))
+        (is (str/includes? path ".tickets"))
+        (let [parsed (knot.ticket/parse (slurp path))]
+          (is (not (str/includes? (:body parsed) "should-not-leak"))
+              "knot create has no --body flag; the value must not silently land in the body"))))))

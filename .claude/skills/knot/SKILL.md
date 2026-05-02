@@ -21,8 +21,8 @@ signal — the user may already use a different tracker.
 `knot blocked` / `knot closed` / `knot prime`.
 
 **Write tickets only via** `knot create` / `knot start` / `knot status` /
-`knot close` / `knot reopen` / `knot add-note` / `knot edit` / `knot dep` /
-`knot link`.
+`knot close` / `knot reopen` / `knot add-note` / `knot edit` /
+`knot update` / `knot dep` / `knot link`.
 
 **Validate project integrity via** `knot check` (cycles, dangling refs,
 schema, archive placement).
@@ -68,7 +68,7 @@ one of these against `.tickets/`, switch to the knot equivalent:
 | `Grep` / `grep` / `rg` | `knot list --json \| jq '.data[] \| …'` |
 | `ls` | `knot list` (or `knot list --json`) |
 | `Write` (new file) | `knot create "<title>" -d "..."` |
-| `Edit` (modify file) | `knot add-note <id> "..."` (additive) or `knot edit <id>` (interactive) |
+| `Edit` (modify file) | `knot add-note <id> "..."` (additive), `knot update <id> --title ... --description ...` (non-interactive set/replace), or `knot edit <id>` (interactive) |
 | `Bash` + `mv` to `archive/` | `knot close <id> --summary "..."` |
 | `Bash` + `mv` from `archive/` | `knot reopen <id>` |
 | `sed -i` to flip `status:` | `knot status <id> <new>` |
@@ -99,6 +99,7 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "reopen <id>"                                           | `knot reopen <id>`                                           |
 | "track this as a bug" / "open a ticket for X"           | `knot create "<title>" -t bug …`                             |
 | "note that…" / "FYI mid-task"                           | `knot add-note <id> "…"`                                     |
+| "retitle <id> to …" / "retag <id> with …" / "set …"     | `knot update <id> --title "…"` / `--tags …` / etc.           |
 | "blocked on <other>"                                    | `knot dep <current> <other>`                                 |
 | "what's blocking <id>?"                                 | `knot dep tree <id>`                                         |
 | "these are related: a, b, c"                            | `knot link <a> <b> <c>`                                      |
@@ -188,12 +189,35 @@ stage.
 knot add-note <id> "raced GC under load"      # one-shot, append-only
 knot add-note <id>                            # opens $EDITOR
 knot edit <id>                                # opens whole file in $EDITOR
+knot update <id> --priority 0 --tags p0,auth  # non-interactive set/replace
+knot update <id> --description "New desc."    # replace ## Description in place
+knot update <id> --body "Plain body."         # destructive whole-body replace
 ```
 
-Prefer `knot add-note` for capturing observations mid-task. Reach for
-`knot edit` only to revise frontmatter or rewrite a body section, and only
-in interactive sessions — in an autonomous run with no terminal, `knot
-edit` will fail. Use `add-note` for additive context instead.
+Prefer `knot add-note` for capturing observations mid-task. For
+**non-interactive** revisions (autonomous agents, scripts), use `knot
+update <id> [flags...]` — it sets/replaces frontmatter and named body
+sections in one shot, returns the post-mutation ticket via `--json`,
+and never opens an editor. Reach for `knot edit` only in interactive
+sessions to free-form a file in `$EDITOR`; in an autonomous run with
+no terminal, `knot edit` will fail.
+
+Flag set on `knot update`:
+
+- Frontmatter: `--title`, `--type`, `--priority`, `--mode`,
+  `--assignee`, `--parent`, `--tags` (comma-list), `--external-ref`
+  (repeatable). Pass `""` (or no values for `--external-ref`) on
+  optional fields to clear them; `--tags ""` clears all tags.
+- Body sections (replace in place; create if missing):
+  `--description`, `--design`, `--acceptance`.
+- Whole body: `--body <text>` — destructive, mutually exclusive with
+  the sectional flags. There is **no `--force`**; git is the
+  documented undo path.
+- `--json` returns the v0.3 envelope wrapping the post-mutation
+  ticket (no `:meta` slot — `update` never archives).
+
+`update` is purely set/replace. To **append** to a body, use
+`add-note` instead — that's its job.
 
 ### Graph operations
 
@@ -247,6 +271,7 @@ checklist:
 - [ ] `knot show <id>` to confirm scope
 - [ ] `knot start <id>` to claim
 - [ ] `knot add-note <id> "<progress>"` after non-trivial milestones
+- [ ] `knot update <id> --priority …` / `--tags …` for non-interactive frontmatter or section revisions (never `knot edit` — it opens `$EDITOR` and will fail without a TTY)
 - [ ] `knot close <id> --summary "<what landed>"` when shipped
 
 Don't autonomously pick up `hitl` tickets unless the user explicitly
@@ -271,13 +296,14 @@ errors (e.g. `show <missing-id>`), the envelope flips to
 `{ok: false, data: {...}}` because `ok` mirrors a health verdict.
 
 Mutating commands (`create`, `start`, `status`, `close`, `reopen`,
-`dep`, `undep`, `link`, `unlink`, `add-note`) put the touched ticket
-under `.data` — eliminating the read-after-write round-trip.
-Lifecycle commands and `add-note` emit a single ticket object (body
-included). `dep`/`undep` emit the `from` ticket with the updated
-`:deps`. `link`/`unlink` emit an array of every touched ticket (body
-excluded, ls-shape). `close --json` (and any `status` transition to a
-terminal status) adds `meta.archived_to` with the archive path:
+`dep`, `undep`, `link`, `unlink`, `add-note`, `update`) put the
+touched ticket under `.data` — eliminating the read-after-write
+round-trip. Lifecycle commands, `add-note`, and `update` emit a
+single ticket object (body included). `dep`/`undep` emit the `from`
+ticket with the updated `:deps`. `link`/`unlink` emit an array of
+every touched ticket (body excluded, ls-shape). `close --json` (and
+any `status` transition to a terminal status) adds `meta.archived_to`
+with the archive path:
 
 ```json
 {"schema_version": 1, "ok": true, "data": {...ticket...},
@@ -305,6 +331,7 @@ knot start <id> --json       | jq -r '.data.status'
 knot close <id> --json       | jq -r '.meta.archived_to'
 knot create "T" --json       | jq -r '.data.id'
 knot add-note <id> "x" --json | jq -r '.data.body'
+knot update <id> --priority 0 --tags p0 --json | jq -r '.data.priority'
 ```
 
 For any decision logic, prefer `--json | jq` over parsing tables. Don't
@@ -350,7 +377,12 @@ create                                 new ticket (-t -p -a --tags --afk --hitl
                                        -d --design --acceptance --parent
                                        --external-ref)
 start / status / close / reopen        lifecycle (--summary on close)
-add-note / edit                        annotation (edit is interactive)
+add-note / edit / update               annotation (edit is interactive,
+                                       update is non-interactive set/replace
+                                       with --title --type --priority --mode
+                                       --assignee --parent --tags
+                                       --external-ref --description --design
+                                       --acceptance --body)
 dep / undep / dep tree                 directional graph; cycle-checked on add
 link / unlink                          symmetric graph
 ```
@@ -360,9 +392,9 @@ adds `2` for unable-to-scan (no project root or invalid `.knot.edn`).
 Every read command supports `--json` and the filter flags `--type`,
 `--mode`, `--tag`, `--status`, `--assignee` (each repeatable). Every
 mutating command (`create`, `start`, `status`, `close`, `reopen`,
-`dep`, `undep`, `link`, `unlink`, `add-note`) also supports `--json`
-— the envelope's `data` is the touched ticket(s); `close --json` and
-terminal `status --json` add `meta.archived_to`. `knot check` uses
-its own filters: `--severity` (error|warning, closed enum) and
-`--code` (open enum), both repeatable; OR within a flag, AND across
-flags.
+`dep`, `undep`, `link`, `unlink`, `add-note`, `update`) also
+supports `--json` — the envelope's `data` is the touched ticket(s);
+`close --json` and terminal `status --json` add `meta.archived_to`.
+`knot check` uses its own filters: `--severity` (error|warning,
+closed enum) and `--code` (open enum), both repeatable; OR within a
+flag, AND across flags.

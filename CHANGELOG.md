@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `knot update <id>` command for non-interactive ticket writes.
+  Frontmatter flags (`--title`, `--type`, `--priority`, `--mode`,
+  `--assignee`, `--parent`, `--tags`, `--external-ref`) set field
+  values; passing a blank string (or empty repeated `--external-ref`
+  list) clears `:assignee` / `:parent` / `:tags` / `:external_refs`.
+  Body flags replace named sections in place: `--description`,
+  `--design`, `--acceptance`. `--body <text>` replaces the *whole*
+  body and is destructive — there is **no `--force` ceremony**; git is
+  the documented undo path. `--body` is mutually exclusive with the
+  sectional body flags. `--json` returns the v0.3 success envelope
+  wrapping the post-mutation ticket under `:data` (no `:meta` slot —
+  `update` never archives). `:updated` bumps on every successful save
+  via `store/save!`. `--note` is intentionally absent: append remains
+  `add-note`'s job, while `update` is purely set/replace. `edit` keeps
+  its single meaning (open in `$EDITOR`); `update` is the
+  non-interactive path agents and scripts use.
+
 - New `knot check [<id>...]` command validates project integrity and
   surfaces issues. With no ids, scans every ticket (live + archive) and
   config; with ids, narrows the per-ticket tier to those (globals always
