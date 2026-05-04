@@ -46,6 +46,20 @@
                       args)
               {:dir cwd :in stdin-str :out :string :err :string}))
 
+(defn- run-knot-with-env
+  "Like `run-knot`, but merges `extra-env` (a string→string map) into
+   the subprocess environment. Use to exercise env-driven behaviour
+   such as `NO_COLOR`."
+  [cwd extra-env & args]
+  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+                       "-e"
+                       (str "(require '[knot.main]) "
+                            "(apply (resolve 'knot.main/-main) *command-line-args*)")
+                       "--"]
+                      args)
+              {:dir cwd :in "" :out :string :err :string
+               :extra-env extra-env}))
+
 (deftest create-then-show-end-to-end-test
   (testing "create writes a slug-suffixed file in .tickets/, show reads it back"
     (with-tmp tmp
@@ -251,6 +265,35 @@
           (is (str/includes? trimmed "\"ok\":true"))
           (is (str/includes? trimmed "\"data\":["))
           (is (str/includes? trimmed "\"status\":\"open\"")))))))
+
+(deftest list-no-color-end-to-end-test
+  ;; Sibling to the unit-level coverage of `output/color-enabled?` in
+  ;; output_test (the empty-string spec edge case + NO_COLOR=1 + the
+  ;; --no-color flag). This test pins the wiring: subprocess stdout is
+  ;; already piped (so tty? is false and no ANSI ever appears), but
+  ;; both `--no-color` and `NO_COLOR=1` must reach the handler without
+  ;; crashing and must produce the same plain output as the default.
+  (testing "knot list --no-color exits 0 and matches the default plain output"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (let [a (run-knot tmp "list")
+            b (run-knot tmp "list" "--no-color")]
+        (is (zero? (:exit a)) (str "list err=" (:err a)))
+        (is (zero? (:exit b)) (str "list --no-color err=" (:err b)))
+        (is (= (:out a) (:out b)))
+        (is (not (re-find #"\[" (:out b)))
+            "no ANSI escape sequences when --no-color is set"))))
+
+  (testing "knot list with NO_COLOR=1 in env exits 0 and matches the default output"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (let [a (run-knot tmp "list")
+            b (run-knot-with-env tmp {"NO_COLOR" "1"} "list")]
+        (is (zero? (:exit a)) (str "list err=" (:err a)))
+        (is (zero? (:exit b)) (str "list NO_COLOR=1 err=" (:err b)))
+        (is (= (:out a) (:out b)))
+        (is (not (re-find #"\[" (:out b)))
+            "no ANSI escape sequences when NO_COLOR=1 is set")))))
 
 (deftest list-end-to-end-test
   (testing "knot list renders the same table as knot ls"

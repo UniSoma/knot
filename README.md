@@ -106,6 +106,12 @@ Every read command (`show`, `ls`, `ready`, `blocked`, `closed`,
 `dep tree`, `check`, `prime`) accepts `--json` and emits snake_case
 keys. Stdout carries data only; warnings and errors go to stderr.
 
+Listing commands (`list` / `ls`, `ready`, `blocked`, `closed`) emit
+ANSI color when stdout is a TTY; piping disables it automatically.
+Pass `--no-color` or set `NO_COLOR` to any non-empty value to force
+plain output (per the [no-color.org](https://no-color.org) convention;
+`NO_COLOR=""` is treated as unset).
+
 ## `.knot.edn` schema
 
 `.knot.edn` at the project root is optional — defaults work zero-config.

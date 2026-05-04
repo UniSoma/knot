@@ -195,7 +195,7 @@
     :description "Render the ticket with the given id."
     :args        [{:name "id" :required true}]
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of text."}
-                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}]
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}]
     :examples    [{:cmd "knot show kno-01abc"
                    :note "Render the ticket whose id starts with 01abc."}]}
 
@@ -205,7 +205,7 @@
     :description "List live (non-terminal) tickets."
     :args        []
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
-                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
@@ -302,7 +302,7 @@
     :args        []
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
-                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
@@ -318,7 +318,7 @@
     :args        []
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
-                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
@@ -336,7 +336,7 @@
     :args        []
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
-                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI)."}
+                  {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
@@ -408,7 +408,7 @@
     :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of plain text."}
                   {:name :no-color :coerce :boolean
-                   :desc "Accepted for consistency; info text is always plain (no ANSI)."}]
+                   :desc "Accepted for consistency; info text is always plain (no ANSI). NO_COLOR is honored similarly."}]
     :examples    [{:cmd "knot info"
                    :note "Print effective config and allowed values for the current project."}
                   {:cmd "knot info --json"
