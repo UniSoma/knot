@@ -6,10 +6,13 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-05-04T13:20:11.622845040Z'
-updated: '2026-05-04T20:46:00.054701611Z'
+updated: '2026-05-04T21:08:43.885241349Z'
 closed: '2026-05-04T20:46:00.054701611Z'
 tags:
 - v0.3
+links:
+- kno-01kqtd2nmrdt
+- kno-01kqtd4qthd3
 ---
 
 ## Description
