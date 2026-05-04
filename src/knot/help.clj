@@ -401,6 +401,21 @@
     :exit-codes  [{:code 0 :when "ticket saved"}
                   {:code 1 :when "no ticket matches, ambiguous id, or conflicting body flags"}]}
 
+   :info
+   {:group       :project
+    :description "Report effective runtime configuration and allowed values."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of plain text."}
+                  {:name :no-color :coerce :boolean
+                   :desc "Accepted for consistency; info text is always plain (no ANSI)."}]
+    :examples    [{:cmd "knot info"
+                   :note "Print effective config and allowed values for the current project."}
+                  {:cmd "knot info --json"
+                   :note "Same payload, JSON envelope — for scripts and agents."}]
+    :exit-codes  [{:code 0 :when "report emitted successfully"}
+                  {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}
+
    :check
    {:group       :project
     :description "Validate project integrity (cycles, schema, dangling refs)."
@@ -434,7 +449,7 @@
   "Top-level command order for `top-level-help-text`. Subcommand keys
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
-  [:init :prime :check
+  [:init :prime :info :check
    :create :start :status :close :reopen
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed

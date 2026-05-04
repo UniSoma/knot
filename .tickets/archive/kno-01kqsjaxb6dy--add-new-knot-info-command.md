@@ -1,12 +1,13 @@
 ---
 id: kno-01kqsjaxb6dy
 title: Add new `knot info` command
-status: open
+status: closed
 type: feature
 priority: 2
 mode: hitl
 created: '2026-05-04T13:20:11.622845040Z'
-updated: '2026-05-04T20:07:57.533824134Z'
+updated: '2026-05-04T20:46:00.054701611Z'
+closed: '2026-05-04T20:46:00.054701611Z'
 tags:
 - v0.3
 ---
@@ -193,3 +194,27 @@ Notes on ordering:
 - [ ] `--json` reuses `no_project` and `config_invalid` error codes on those failure paths
 - [ ] `knot info` stays on ordinary 0/1 exit codes (no exit 2 contract)
 - [ ] Help/docs describe `knot info` as effective runtime configuration / allowed-values reporting, not an integrity/debugging command
+
+## Notes
+
+**2026-05-04T20:46:00.054701611Z**
+
+Implemented `knot info` as a runtime-facts command via TDD vertical slices.
+
+Source (4 files):
+- src/knot/cli.clj: info-cmd, info-data, effective-create-assignee, count-md-files (top-level *.md only, no parsing, no recursion)
+- src/knot/output.clj: info-text (plain-text renderer with section helpers), info-json (v0.3 envelope)
+- src/knot/main.clj: info-handler with strict discovery; emits no_project/config_invalid error envelopes (under --json) or stderr; stays on 0/1 exit codes
+- src/knot/help.clj: :info registry entry + slot in command-order between :prime and :check
+
+Tests (+97 assertions, 273 total / 2488 assertions / 0 failures):
+- cli_test: shape, JSON envelope, project/paths/defaults/allowed_values/counts blocks, edge cases (missing dirs, non-md files, no recursion, malformed tolerance), assignee precedence (config-only :default_assignee vs runtime :effective_create_assignee with git fallback)
+- output_test: info-text rendering — fixed sections, (none) for unset, yes/no for config_present, comma-joined lists, priority_range as min-max, no ANSI
+- integration_test: 9 e2e subtests (text + JSON + derived prefix + configured prefix + no-project + invalid .knot.edn + --no-color + malformed counts)
+- help_test: :info added to expected-cmd-keys parity set
+
+Docs:
+- .claude/skills/knot/SKILL.md: two new intent rows (what project / what does create default to) + info in quick-reference banner
+- CHANGELOG.md: feature entry under [Unreleased]
+
+Smoke-tested live: knot info, knot info --json, knot info --help, and from a non-project dir. Lint baseline unchanged (4 errors / 5 warnings, all pre-existing).

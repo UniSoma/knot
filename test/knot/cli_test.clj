@@ -3209,3 +3209,263 @@ Restart the daemon.
         (is (str/includes? section "Afk active"))
         (is (not (str/includes? section "Hitl active"))
             "hitl-mode in-progress ticket filtered from In Progress under --mode afk")))))
+
+(deftest info-cmd-text-shape-test
+  (testing "info-cmd returns a string with all five fixed section headings"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/info-cmd (ctx tmp) {})]
+        (is (string? out))
+        (is (str/includes? out "Project"))
+        (is (str/includes? out "Paths"))
+        (is (str/includes? out "Defaults"))
+        (is (str/includes? out "Allowed Values"))
+        (is (str/includes? out "Counts"))))))
+
+(deftest info-cmd-json-envelope-test
+  (testing "info-cmd with :json? true returns a v0.3 envelope with nested data sections"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (map? (:data parsed)))
+        (is (every? (set (keys (:data parsed)))
+                    [:project :paths :defaults :allowed_values :counts])
+            "data carries all five nested section keys")))))
+
+(deftest info-cmd-project-block-test
+  (testing "project block carries knot_version, prefix, name (nullable), config_present"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c       (assoc (ctx tmp) :prefix "kno" :config-present? false)
+            out     (cli/info-cmd c {:json? true})
+            project (get-in (cheshire/parse-string out true) [:data :project])]
+        (is (= "kno" (:prefix project)))
+        (is (string? (:knot_version project)))
+        (is (re-matches #"\d+\.\d+\.\d+" (:knot_version project)))
+        (is (contains? project :name))
+        (is (nil? (:name project)) "name is null when not configured")
+        (is (= false (:config_present project))))))
+
+  (testing "project.config_present is true when ctx says so, project.name passes through"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c       (assoc (ctx tmp)
+                           :project-name "Knot"
+                           :config-present? true)
+            out     (cli/info-cmd c {:json? true})
+            project (get-in (cheshire/parse-string out true) [:data :project])]
+        (is (= "Knot" (:name project)))
+        (is (= true (:config_present project)))))))
+
+(deftest info-cmd-paths-block-test
+  (testing "paths carries cwd, project_root, config_path, tickets_dir, tickets_path, archive_path"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c     (assoc (ctx tmp) :cwd tmp :tickets-dir ".tickets")
+            out   (cli/info-cmd c {:json? true})
+            paths (get-in (cheshire/parse-string out true) [:data :paths])]
+        (is (= tmp (:cwd paths)))
+        (is (= tmp (:project_root paths)))
+        (is (= ".tickets" (:tickets_dir paths)))
+        (is (= (str (fs/path tmp ".knot.edn"))   (:config_path paths))
+            "config_path is the expected effective absolute path even when missing")
+        (is (= (str (fs/path tmp ".tickets"))    (:tickets_path paths)))
+        (is (= (str (fs/path tmp ".tickets" "archive")) (:archive_path paths))))))
+
+  (testing "paths uses :tickets-dir from config (not the literal default) when overridden"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp "issues"))
+      (let [c     (assoc (ctx tmp) :cwd tmp :tickets-dir "issues")
+            out   (cli/info-cmd c {:json? true})
+            paths (get-in (cheshire/parse-string out true) [:data :paths])]
+        (is (= "issues" (:tickets_dir paths)))
+        (is (= (str (fs/path tmp "issues"))            (:tickets_path paths)))
+        (is (= (str (fs/path tmp "issues" "archive"))  (:archive_path paths)))))))
+
+(deftest info-cmd-defaults-block-test
+  (testing "defaults carries default_type, default_priority, default_mode (from config)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c        (-> (ctx tmp)
+                         (assoc :default-type     "feature"
+                                :default-priority 1
+                                :default-mode     "afk"))
+            out      (cli/info-cmd c {:json? true})
+            defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+        (is (= "feature" (:default_type defaults)))
+        (is (= 1         (:default_priority defaults)))
+        (is (= "afk"     (:default_mode defaults))))))
+
+  (testing "default_assignee is config-only and stays null when unset"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (with-redefs [git/user-name (constantly "Git User")]
+        (let [c        (ctx tmp)
+              out      (cli/info-cmd c {:json? true})
+              defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+          (is (contains? defaults :default_assignee))
+          (is (nil? (:default_assignee defaults))
+              "default_assignee reflects only :default-assignee from config, never git fallback")))))
+
+  (testing "default_assignee carries the config value when set"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c        (assoc (ctx tmp) :default-assignee "alice")
+            out      (cli/info-cmd c {:json? true})
+            defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+        (is (= "alice" (:default_assignee defaults))))))
+
+  (testing "effective_create_assignee falls back to git user.name when config :default-assignee is unset"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (with-redefs [git/user-name (constantly "Git User")]
+        (let [c        (ctx tmp)
+              out      (cli/info-cmd c {:json? true})
+              defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+          (is (= "Git User" (:effective_create_assignee defaults)))))))
+
+  (testing "effective_create_assignee uses :default-assignee when set (config overrides git)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (with-redefs [git/user-name (constantly "Git User")]
+        (let [c        (assoc (ctx tmp) :default-assignee "alice")
+              out      (cli/info-cmd c {:json? true})
+              defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+          (is (= "alice" (:effective_create_assignee defaults)))))))
+
+  (testing "effective_create_assignee is null when :default-assignee is explicitly nil (opt-out)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (with-redefs [git/user-name (constantly "Git User")]
+        (let [c        (assoc (ctx tmp) :default-assignee nil)
+              ;; assoc nil leaves the key contained — same as `.knot.edn` setting it to nil
+              out      (cli/info-cmd c {:json? true})
+              defaults (get-in (cheshire/parse-string out true) [:data :defaults])]
+          (is (contains? defaults :effective_create_assignee))
+          (is (nil? (:effective_create_assignee defaults))
+              "explicit :default-assignee nil means 'no auto-assign', not 'fall back to git'"))))))
+
+(deftest info-cmd-allowed-values-block-test
+  (testing "allowed_values carries statuses, active_status, terminal_statuses, types, modes, priority_range"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/info-cmd (ctx tmp) {:json? true})
+            av  (get-in (cheshire/parse-string out true) [:data :allowed_values])]
+        (is (= ["open" "in_progress" "closed"] (:statuses av)))
+        (is (= "in_progress"                   (:active_status av)))
+        (is (= ["closed"]                      (:terminal_statuses av)))
+        (is (= ["bug" "feature" "task" "epic" "chore"] (:types av)))
+        (is (= ["afk" "hitl"]                  (:modes av)))
+        (is (= {:min 0 :max 4}                 (:priority_range av))))))
+
+  (testing "allowed_values preserves configured order across statuses, types, modes"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c   (assoc (ctx tmp)
+                       :statuses          ["open" "review" "in_progress" "done" "wontfix"]
+                       :terminal-statuses #{"done" "wontfix"}
+                       :active-status     "in_progress"
+                       :types             ["task" "bug"]
+                       :modes             ["hitl" "afk"])
+            out (cli/info-cmd c {:json? true})
+            av  (get-in (cheshire/parse-string out true) [:data :allowed_values])]
+        (is (= ["open" "review" "in_progress" "done" "wontfix"] (:statuses av))
+            "statuses preserve configured order")
+        (is (= ["task" "bug"]   (:types av)) "types preserve configured order")
+        (is (= ["hitl" "afk"]   (:modes av)) "modes preserve configured order")
+        (is (= ["done" "wontfix"] (:terminal_statuses av))
+            "terminal_statuses ordered by filtering :statuses in order — not the raw set"))))
+
+  (testing "terminal_statuses is always an array, even when only one terminal status exists"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [out (cli/info-cmd (ctx tmp) {:json? true})
+            av  (get-in (cheshire/parse-string out true) [:data :allowed_values])]
+        (is (vector? (:terminal_statuses av)))))))
+
+(deftest info-cmd-counts-block-test
+  (testing "live_count, archive_count, total_count are top-level *.md file counts"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--a.md")) "")
+      (spit (str (fs/path tmp ".tickets" "kno-01b--b.md")) "")
+      (spit (str (fs/path tmp ".tickets" "kno-01c--c.md")) "")
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01x--x.md")) "")
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01y--y.md")) "")
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            counts (get-in (cheshire/parse-string out true) [:data :counts])]
+        (is (= 3 (:live_count counts)))
+        (is (= 2 (:archive_count counts)))
+        (is (= 5 (:total_count counts)) "total = live + archive"))))
+
+  (testing "non-md files in tickets dir are ignored"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--a.md")) "")
+      (spit (str (fs/path tmp ".tickets" "README.txt")) "")
+      (spit (str (fs/path tmp ".tickets" ".gitkeep")) "")
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            counts (get-in (cheshire/parse-string out true) [:data :counts])]
+        (is (= 1 (:live_count counts)) "only *.md files counted")))))
+
+(deftest info-cmd-counts-edge-cases-test
+  (testing "missing tickets dir yields zero counts (no error)"
+    (with-tmp tmp
+      ;; deliberately do NOT create .tickets/
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            counts (get-in (cheshire/parse-string out true) [:data :counts])]
+        (is (= 0 (:live_count counts)))
+        (is (= 0 (:archive_count counts)))
+        (is (= 0 (:total_count counts))))))
+
+  (testing "missing archive dir yields zero archive_count, live still counts"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--a.md")) "")
+      ;; no .tickets/archive/ subdirectory
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            counts (get-in (cheshire/parse-string out true) [:data :counts])]
+        (is (= 1 (:live_count counts)))
+        (is (= 0 (:archive_count counts)))
+        (is (= 1 (:total_count counts))))))
+
+  (testing "nested .md files inside subdirectories of tickets dir do not count toward live_count"
+    ;; Top-level only — archive/ is the only subdir we recurse into, and
+    ;; its contents go to archive_count, not live_count. Anything else
+    ;; nested (random subfolders, archive/sub/) is invisible.
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "scratch"))
+      (fs/create-dirs (fs/path tmp ".tickets" "archive" "deep"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--a.md")) "")
+      (spit (str (fs/path tmp ".tickets" "scratch" "kno-01b--b.md")) "")
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01x--x.md")) "")
+      (spit (str (fs/path tmp ".tickets" "archive" "deep" "kno-01y--y.md")) "")
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            counts (get-in (cheshire/parse-string out true) [:data :counts])]
+        (is (= 1 (:live_count counts))
+            "only top-level .md in tickets dir counts toward live_count")
+        (is (= 1 (:archive_count counts))
+            "only top-level .md in archive dir counts toward archive_count")))))
+
+(deftest info-cmd-tolerates-malformed-tickets-test
+  (testing "malformed *.md files in tickets dir do not break info and do count"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--good.md"))
+            "---\nid: kno-01a\nstatus: open\ntitle: Good\n---\n\n# Good\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01b--broken-yaml.md"))
+            "---\nthis is: { not valid : yaml }: : :\n---\n\n# broken\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01c--no-frontmatter.md"))
+            "no frontmatter at all, just text\n")
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01x--archived-broken.md"))
+            "---\n[][][]\n---\n")
+      (let [out    (cli/info-cmd (ctx tmp) {:json? true})
+            parsed (cheshire/parse-string out true)
+            counts (get-in parsed [:data :counts])]
+        (is (= true (:ok parsed)) "envelope still ok:true despite malformed tickets")
+        (is (= 3 (:live_count counts)) "all three live *.md files counted, including malformed ones")
+        (is (= 1 (:archive_count counts)))
+        (is (= 4 (:total_count counts)))))))

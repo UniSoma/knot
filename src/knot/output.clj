@@ -740,3 +740,79 @@ before issuing other Knot commands.")
     :ready_truncated  (boolean ready-truncated?)
     :ready_remaining  (or ready-remaining 0)
     :recently_closed  (mapv jsonify-recently-closed (or recently-closed []))}))
+
+(defn- info-scalar
+  "Format a scalar value for `info-text`: nil → `(none)`, anything else →
+   its `str` form. Boolean values are not auto-mapped to yes/no — the
+   caller renders `config_present` explicitly."
+  [v]
+  (if (nil? v) "(none)" (str v)))
+
+(defn- info-list
+  "Format a list value as a single comma-separated line preserving order.
+   Empty/nil → `(none)`."
+  [xs]
+  (if (empty? xs) "(none)" (str/join ", " xs)))
+
+(defn- info-yes-no [b] (if b "yes" "no"))
+
+(defn- info-section
+  "Render one section as `## <heading>\\n\\n<body>\\n` where `body` is the
+   already-joined `Label: value` lines."
+  [heading body]
+  (str "## " heading "\n\n" body "\n"))
+
+(defn info-text
+  "Render the `knot info` payload as plain text (no ANSI). Five fixed
+   sections; each value renders on its own `Label: value` line. Unset
+   scalars render as `(none)`; `config_present` as `yes`/`no`; lists as
+   one-line comma-separated values preserving order."
+  [{:keys [project paths defaults allowed_values counts]}]
+  (let [{:keys [knot_version name prefix config_present]} project
+        {:keys [cwd project_root config_path tickets_dir
+                tickets_path archive_path]} paths
+        {:keys [default_assignee effective_create_assignee
+                default_type default_priority default_mode]} defaults
+        {:keys [statuses active_status terminal_statuses types modes
+                priority_range]} allowed_values
+        {:keys [live_count archive_count total_count]} counts
+        project-block  (str/join "\n"
+                                 [(str "Knot version: "   (info-scalar knot_version))
+                                  (str "Name: "           (info-scalar name))
+                                  (str "Prefix: "         (info-scalar prefix))
+                                  (str "Config present: " (info-yes-no config_present))])
+        paths-block    (str/join "\n"
+                                 [(str "CWD: "           (info-scalar cwd))
+                                  (str "Project root: "  (info-scalar project_root))
+                                  (str "Config path: "   (info-scalar config_path))
+                                  (str "Tickets dir: "   (info-scalar tickets_dir))
+                                  (str "Tickets path: "  (info-scalar tickets_path))
+                                  (str "Archive path: "  (info-scalar archive_path))])
+        defaults-block (str/join "\n"
+                                 [(str "Default assignee: "          (info-scalar default_assignee))
+                                  (str "Effective create assignee: " (info-scalar effective_create_assignee))
+                                  (str "Default type: "              (info-scalar default_type))
+                                  (str "Default priority: "          (info-scalar default_priority))
+                                  (str "Default mode: "              (info-scalar default_mode))])
+        allowed-block  (str/join "\n"
+                                 [(str "Statuses: "          (info-list statuses))
+                                  (str "Active status: "     (info-scalar active_status))
+                                  (str "Terminal statuses: " (info-list terminal_statuses))
+                                  (str "Types: "             (info-list types))
+                                  (str "Modes: "             (info-list modes))
+                                  (str "Priority range: "    (:min priority_range) "-" (:max priority_range))])
+        counts-block   (str/join "\n"
+                                 [(str "Live count: "    (info-scalar live_count))
+                                  (str "Archive count: " (info-scalar archive_count))
+                                  (str "Total count: "   (info-scalar total_count))])]
+    (str (info-section "Project"        project-block) "\n"
+         (info-section "Paths"          paths-block) "\n"
+         (info-section "Defaults"       defaults-block) "\n"
+         (info-section "Allowed Values" allowed-block) "\n"
+         (info-section "Counts"         counts-block))))
+
+(defn info-json
+  "Wrap the `knot info` payload in the v0.3 success envelope with the
+   data map nested per section."
+  [data]
+  (envelope-str data))

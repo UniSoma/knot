@@ -656,6 +656,63 @@
                              :code     (:code opts)
                              :ids      (vec args)}))))))))
 
+(defn- info-emit-error!
+  "Emit the cannot-discover error path for `knot info`. Plain stderr +
+   exit 1 by default; with `--json`, a v0.3 error envelope on stdout
+   (so JSON consumers can parse it) + exit 1. Reuses the `no_project`
+   and `config_invalid` codes from `check`'s exit-2 contract — `info`
+   stays on the ordinary 0/1 path because it's a runtime-facts
+   command, not a health verdict."
+  [json? code message]
+  (if json?
+    (do (println-out (output/error-envelope-str
+                      {:code code :message message}))
+        (System/exit 1))
+    (do (binding [*out* *err*]
+          (println (str "knot info: " message)))
+        (System/exit 1))))
+
+(defn- info-handler
+  "Run `knot info`. Discovery is strict (no degrade): a missing project
+   or invalid `.knot.edn` exits 1 with `no_project` / `config_invalid`
+   error envelopes (under `--json`) or stderr (plain). On success, builds
+   the same kind of ctx `discover-ctx` produces but adds `:cwd` and
+   `:config-present?` so `cli/info-cmd` can report runtime-vs-config
+   distinctions."
+  [argv]
+  (let [parsed (try
+                 (bcli/parse-args argv (spec :info))
+                 (catch Exception e e))]
+    (if (instance? Exception parsed)
+      (info-emit-error! false "invalid_argument" (.getMessage ^Exception parsed))
+      (let [{:keys [opts]} parsed
+            json?      (boolean (:json opts))
+            cwd        (str (fs/cwd))
+            discovered (try (config/discover cwd)
+                            (catch Exception e e))]
+        (cond
+          (instance? Exception discovered)
+          (info-emit-error! json? "config_invalid"
+                            (.getMessage ^Exception discovered))
+
+          (nil? discovered)
+          (info-emit-error! json? "no_project"
+                            (str "no project found at or above " cwd))
+
+          :else
+          (let [project-root (:project-root discovered)
+                cfg          (:config discovered)
+                cfg-present? (fs/exists? (fs/path project-root ".knot.edn"))
+                ctx          (merge cfg
+                                    {:project-root     project-root
+                                     :cwd              cwd
+                                     :prefix           (or (:prefix cfg)
+                                                           (ticket/derive-prefix
+                                                            (str (fs/file-name project-root))))
+                                     :config-present?  cfg-present?
+                                     :project-found?   true})]
+            (println-out (cli/info-cmd ctx {:json? json?}))))))))
+
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
@@ -756,6 +813,7 @@
       (case cmd
         "init"   (init-handler rest-argv)
         "prime"  (prime-handler rest-argv)
+        "info"   (info-handler rest-argv)
         "check"  (check-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)

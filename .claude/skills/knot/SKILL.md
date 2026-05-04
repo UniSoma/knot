@@ -106,6 +106,8 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "validate the project" / "any integrity issues?"        | `knot check`                                                 |
 | "scan for cycles" / "any dep cycles?"                   | `knot check --code dep_cycle`                                |
 | "give me a summary of project state"                    | `knot prime`                                                 |
+| "what project is this?" / "what statuses are valid?"    | `knot info`                                                  |
+| "what does `knot create` default to?"                   | `knot info --json`                                           |
 
 ### Filter, don't eyeball
 
@@ -372,7 +374,8 @@ remote id like `GH-482`, `ENG-1234`), use the tool they named.
 ## Quick reference
 
 ```
-init / prime                           project setup, agent context primer
+init / prime / info                    project setup, agent context primer,
+                                       runtime config + allowed values
 list (alias ls) / show                 read live; show one
 ready / blocked / closed               backlog views (--limit + full filter set)
 check                                  project-integrity scan (cycles, dangling

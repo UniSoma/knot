@@ -320,7 +320,7 @@
 (def ^:private expected-cmd-keys
   "Every command name dispatched from `knot.main/-main`'s top-level case
    plus the `dep` subcommand. The registry must cover all of these."
-  #{:init :prime :check
+  #{:init :prime :info :check
     :create :show :list
     :status :start :close :reopen
     :dep :dep/tree :undep

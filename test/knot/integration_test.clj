@@ -6,7 +6,8 @@
             [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [knot.ticket :as ticket]))
 
 (def ^:private project-root
   (or (System/getProperty "user.dir") "."))
@@ -1664,3 +1665,114 @@
             "stderr must name the unknown-option failure")
         (is (re-find #"(?i)body" err)
             "stderr must name the offending flag")))))
+
+(deftest info-end-to-end-test
+  (testing "knot info in a discovered project prints the five fixed sections (exit 0)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "info")]
+        (is (zero? exit) (str "info exited non-zero. err=" err))
+        (is (str/blank? err))
+        (is (str/includes? out "## Project"))
+        (is (str/includes? out "## Paths"))
+        (is (str/includes? out "## Defaults"))
+        (is (str/includes? out "## Allowed Values"))
+        (is (str/includes? out "## Counts")))))
+
+  (testing "knot info --json emits a v0.3 envelope with all five nested sections"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out]} (run-knot tmp "info" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= 1     (:schema_version parsed)))
+        (is (= true  (:ok parsed)))
+        (let [d (:data parsed)]
+          (is (map? (:project d)))
+          (is (map? (:paths d)))
+          (is (map? (:defaults d)))
+          (is (map? (:allowed_values d)))
+          (is (map? (:counts d)))))))
+
+  (testing "knot info uses the derived prefix when .knot.edn omits :prefix"
+    (with-tmp tmp
+      ;; The tmp dir name is the auto-derive source (per ticket/derive-prefix).
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out]}  (run-knot tmp "info" "--json")
+            project (-> out str/trim (json/parse-string true) :data :project)
+            expected-prefix     (ticket/derive-prefix (str (fs/file-name tmp)))]
+        (is (zero? exit))
+        (is (= expected-prefix (:prefix project))
+            "prefix derives from the project directory name when config has no :prefix")
+        (is (= false (:config_present project))
+            ".tickets/-only project (no .knot.edn) reports config_present=false"))))
+
+  (testing "knot info uses :prefix from .knot.edn when configured"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".knot.edn")) "{:prefix \"abc\"}")
+      (let [{:keys [exit out]} (run-knot tmp "info" "--json")
+            project (-> out str/trim (json/parse-string true) :data :project)]
+        (is (zero? exit))
+        (is (= "abc" (:prefix project)))
+        (is (= true  (:config_present project))))))
+
+  (testing "knot info from outside any project exits 1 with stderr message"
+    (with-tmp tmp
+      ;; No .knot.edn and no .tickets/ — make sure the walk-up does not
+      ;; cross into the project that hosts the test runner. with-tmp
+      ;; creates the dir in the OS tmp area, so this is naturally bounded.
+      (let [{:keys [exit out err]} (run-knot tmp "info")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "no project")))))
+
+  (testing "knot info --json from outside any project emits the no_project error envelope"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "info" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "JSON consumers parse stdout — error envelope goes there, not stderr")
+        (is (= 1     (:schema_version parsed)))
+        (is (= false (:ok parsed)))
+        (is (= "no_project" (get-in parsed [:error :code])))
+        (is (not (contains? parsed :data))))))
+
+  (testing "knot info --json with invalid .knot.edn emits the config_invalid error envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".knot.edn")) "{:prefix not-a-string-and-broken-edn (((")
+      (let [{:keys [exit out err]} (run-knot tmp "info" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "config_invalid" (get-in parsed [:error :code]))))))
+
+  (testing "knot info --no-color is accepted and does not change the plain text output"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [a (run-knot tmp "info")
+            b (run-knot tmp "info" "--no-color")]
+        (is (zero? (:exit a)))
+        (is (zero? (:exit b)))
+        (is (= (:out a) (:out b))
+            "--no-color is a no-op on info text output (always plain)"))))
+
+  (testing "knot info counts include malformed ticket files (no parsing)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--good.md"))
+            "---\nid: kno-01a\n---\n\nBody\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01b--broken.md"))
+            "garbage with no frontmatter\n")
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01x--archived.md"))
+            "---\nid: kno-01x\n---\n")
+      (let [{:keys [exit out]} (run-knot tmp "info" "--json")
+            counts (-> out str/trim (json/parse-string true) :data :counts)]
+        (is (zero? exit))
+        (is (= 2 (:live_count counts)))
+        (is (= 1 (:archive_count counts)))
+        (is (= 3 (:total_count counts)))))))
+

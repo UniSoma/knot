@@ -16,6 +16,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `knot info` command reports the project's effective runtime
+  configuration and allowed values for agents, scripts, and humans.
+  Five fixed sections: `Project` (knot version, name, prefix,
+  config_present), `Paths` (cwd, project root, config path, tickets
+  dir/path, archive path), `Defaults` (config-only `default_assignee`
+  vs runtime `effective_create_assignee` with git fallback,
+  `default_type`, `default_priority`, `default_mode`), `Allowed
+  Values` (statuses, active_status, terminal_statuses ordered by the
+  configured statuses order, types, modes, priority_range), and
+  `Counts` (live, archive, total — top-level `*.md` files only, no
+  parsing). `--json` returns the v0.3 envelope; `--no-color` is
+  accepted for consistency (text is always plain). Tolerant of
+  malformed ticket files; counts use raw filesystem listing. Strict
+  on discovery: missing project or invalid `.knot.edn` exits 1 with
+  reusable `no_project` / `config_invalid` error envelopes (under
+  `--json`) — `info` is for runtime facts, not health verdicts, so it
+  stays on the ordinary 0/1 path. Diagnostics, malformed-ticket
+  reporting, and config-health checks remain `knot check`'s job.
+
 - Uniform six-flag filter set across all listing commands. `list` gains
   `--limit`; `blocked` and `closed` gain `--status`, `--assignee`,
   `--tag`, `--type`, `--mode`; `prime` gains `--status`, `--assignee`,

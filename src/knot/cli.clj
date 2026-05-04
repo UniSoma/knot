@@ -10,7 +10,8 @@
             [knot.output :as output]
             [knot.query :as query]
             [knot.store :as store]
-            [knot.ticket :as ticket])
+            [knot.ticket :as ticket]
+            [knot.version :as version])
   (:import (java.time Instant)))
 
 (defn on-path?
@@ -1015,6 +1016,78 @@
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))
+
+(defn- effective-create-assignee
+  "Mirror `resolve-ctx`'s assignee precedence: an explicit `:default-assignee`
+   key in `ctx` (even with a nil value) wins; otherwise fall back to git
+   `user.name`. Pure-ish — pulls git through `git/user-name`, which other
+   tests redef with `with-redefs`."
+  [ctx]
+  (if (contains? ctx :default-assignee)
+    (:default-assignee ctx)
+    (git/user-name)))
+
+(defn- count-md-files
+  "Count top-level `*.md` files directly in `dir`. Does not recurse and
+   does not parse — a malformed ticket still counts. Returns 0 if `dir`
+   is missing."
+  [dir]
+  (if-not (fs/directory? dir)
+    0
+    (count (filter #(and (fs/regular-file? %)
+                         (str/ends-with? (str (fs/file-name %)) ".md"))
+                   (fs/list-dir dir)))))
+
+(defn- info-data
+  "Build the snake_case data map used by both `output/info-text` and
+   `output/info-json`. Five fixed sections: project, paths, defaults,
+   allowed_values, counts."
+  [{:keys [project-root prefix project-name config-present? cwd tickets-dir
+           default-type default-priority default-mode
+           statuses terminal-statuses active-status types modes]
+    :as ctx}]
+  {:project {:knot_version   version/version
+             :name           project-name
+             :prefix         prefix
+             :config_present (boolean config-present?)}
+   :paths {:cwd          cwd
+           :project_root project-root
+           :config_path  (str (fs/path project-root ".knot.edn"))
+           :tickets_dir  tickets-dir
+           :tickets_path (str (fs/path project-root tickets-dir))
+           :archive_path (str (fs/path project-root tickets-dir "archive"))}
+   :defaults {:default_assignee          (when (contains? ctx :default-assignee)
+                                           (:default-assignee ctx))
+              :effective_create_assignee (effective-create-assignee ctx)
+              :default_type              default-type
+              :default_priority          default-priority
+              :default_mode              default-mode}
+   :allowed_values {:statuses          (vec statuses)
+                    :active_status     active-status
+                    ;; Normalize the terminal-statuses set to an ordered
+                    ;; array by filtering :statuses in display order.
+                    :terminal_statuses (vec (filter (set terminal-statuses) statuses))
+                    :types             (vec types)
+                    :modes             (vec modes)
+                    :priority_range    {:min 0 :max 4}}
+   :counts (let [tickets-path (fs/path project-root tickets-dir)
+                 archive-path (fs/path tickets-path "archive")
+                 live    (count-md-files tickets-path)
+                 archive (count-md-files archive-path)]
+             {:live_count    live
+              :archive_count archive
+              :total_count   (+ live archive)})})
+
+(defn info-cmd
+  "Report the project's effective runtime configuration and allowed values.
+   Returns a string. Unlike `prime-cmd`, the caller (handler) must have
+   already discovered and validated the project — `info-cmd` does no
+   discovery and never degrades. `opts` supports `:json?`."
+  [ctx {:keys [json?]}]
+  (let [data (info-data ctx)]
+    (if json?
+      (output/info-json data)
+      (output/info-text data))))
 
 (defn- stub-config
   "Render a self-documenting `.knot.edn` stub with every known key present

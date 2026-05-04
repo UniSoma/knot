@@ -1498,3 +1498,80 @@
       (is (= [] (get-in parsed [:data :ready])))
       (is (= [] (get-in parsed [:data :in_progress])))
       (is (= false (get-in parsed [:data :ready_truncated]))))))
+
+(def ^:private full-info-data
+  {:project {:knot_version "0.2.0"
+             :name nil
+             :prefix "kno"
+             :config_present false}
+   :paths {:cwd "/cwd"
+           :project_root "/root"
+           :config_path "/root/.knot.edn"
+           :tickets_dir ".tickets"
+           :tickets_path "/root/.tickets"
+           :archive_path "/root/.tickets/archive"}
+   :defaults {:default_assignee nil
+              :effective_create_assignee "alice"
+              :default_type "task"
+              :default_priority 2
+              :default_mode "hitl"}
+   :allowed_values {:statuses ["open" "in_progress" "closed"]
+                    :active_status "in_progress"
+                    :terminal_statuses ["closed"]
+                    :types ["bug" "feature" "task"]
+                    :modes ["afk" "hitl"]
+                    :priority_range {:min 0 :max 4}}
+   :counts {:live_count 5
+            :archive_count 3
+            :total_count 8}})
+
+(deftest info-text-rendering-test
+  (testing "info-text emits the five fixed section headings"
+    (let [s (output/info-text full-info-data)]
+      (is (str/includes? s "Project"))
+      (is (str/includes? s "Paths"))
+      (is (str/includes? s "Defaults"))
+      (is (str/includes? s "Allowed Values"))
+      (is (str/includes? s "Counts"))))
+
+  (testing "scalar values render as `Label: value` lines, lists as comma-separated"
+    (let [s (output/info-text full-info-data)]
+      (is (str/includes? s "Knot version: 0.2.0"))
+      (is (str/includes? s "Prefix: kno"))
+      (is (str/includes? s "CWD: /cwd"))
+      (is (str/includes? s "Project root: /root"))
+      (is (str/includes? s "Config path: /root/.knot.edn"))
+      (is (str/includes? s "Tickets dir: .tickets"))
+      (is (str/includes? s "Tickets path: /root/.tickets"))
+      (is (str/includes? s "Archive path: /root/.tickets/archive"))
+      (is (str/includes? s "Default type: task"))
+      (is (str/includes? s "Default priority: 2"))
+      (is (str/includes? s "Default mode: hitl"))
+      (is (str/includes? s "Statuses: open, in_progress, closed")
+          "lists render as a single comma-separated line preserving order")
+      (is (str/includes? s "Active status: in_progress"))
+      (is (str/includes? s "Terminal statuses: closed"))
+      (is (str/includes? s "Types: bug, feature, task"))
+      (is (str/includes? s "Modes: afk, hitl"))
+      (is (str/includes? s "Priority range: 0-4"))
+      (is (str/includes? s "Live count: 5"))
+      (is (str/includes? s "Archive count: 3"))
+      (is (str/includes? s "Total count: 8"))))
+
+  (testing "unset scalars render as (none); config_present renders yes/no"
+    (let [s (output/info-text full-info-data)]
+      (is (str/includes? s "Name: (none)") "nil scalar renders as (none)")
+      (is (str/includes? s "Default assignee: (none)"))
+      (is (str/includes? s "Config present: no")
+          "config_present:false renders as 'no'")
+      (is (str/includes? s "Effective create assignee: alice"))))
+
+  (testing "config_present:true renders as yes"
+    (let [s (output/info-text (assoc-in full-info-data [:project :config_present] true))]
+      (is (str/includes? s "Config present: yes"))))
+
+  (testing "no ANSI escape codes appear in plain text output"
+    (let [s (output/info-text full-info-data)]
+      (is (not (str/includes? s "["))
+          "info-text never emits ANSI color"))))
+
