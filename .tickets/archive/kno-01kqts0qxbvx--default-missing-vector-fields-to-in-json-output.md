@@ -6,7 +6,7 @@ type: bug
 priority: 2
 mode: afk
 created: '2026-05-05T00:36:12.843353738Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-05T16:45:33.373728267Z'
 closed: '2026-05-05T00:47:52.467788061Z'
 tags:
 - v0.3
@@ -16,6 +16,7 @@ links:
 - kno-01kqgqegm782
 - kno-01kqgqf4aw4j
 - kno-01kqsm8xgjf3
+- kno-01kqwgeba7jz
 acceptance:
 - title: '`knot list --json` and `knot show --json` always include `tags`, `deps`, `links`, `external_refs` in every ticket''s JSON object — empty array when the ticket has no value, full array when it does.'
   done: false

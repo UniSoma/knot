@@ -1,12 +1,13 @@
 ---
 id: kno-01kqgqegm782
 title: knot schema command for runtime JSON schema introspection
-status: open
+status: closed
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-01T02:56:22.663087106Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-05T16:45:41.350262338Z'
+closed: '2026-05-05T16:45:41.350262338Z'
 tags:
 - v0.3
 - cli
@@ -20,6 +21,7 @@ deps:
 - kno-01kqgqc2ks70
 links:
 - kno-01kqts0qxbvx
+- kno-01kqwgeba7jz
 acceptance:
 - title: 'Sub-decision pinned in design notes: `--json` mode output format (JSON Schema spec / simple descriptor / runnable example)'
   done: false
@@ -67,3 +69,9 @@ Recommendation: (b) — it composes well with knot's tone (small CLI surface, te
 - Snapshot tests confirm the declared schema matches the actual runtime output of each command (the test you'd want under any docs strategy anyway).
 
 **Conventions doc** lives separately in the README/docs slice (kno-? T10) — `schema` returns shapes, README explains *why* there's an `ok` field, what `schema_version` means, the partial-id ambiguity contract, the full error-code catalogue.
+
+## Notes
+
+**2026-05-05T16:45:41.350262338Z**
+
+Decision: won't-do. Replaced by (1) skill+README expansion absorbed into kno-01kqgqf4aw4j and (2) a new JSON-contract test suite ticket kno-01kqwgeba7jz. The original ticket bundled two distinct benefits: a runtime introspection surface (so an installed binary is the authoritative contract) and snapshot-test drift detection (declared schema vs runtime output). Both are achievable without shipping a CLI command. The introspection benefit collapses into skill-as-reference: `.claude/skills/knot/SKILL.md` already documents the envelope, per-command `data` semantics, vector-default contract, and the three envelope error codes (`not_found`, `ambiguous_id`, `cycle`); the gap is per-command `data` shapes enumerated, the error-code/command matrix, and the `knot.check` issue-code catalogue — additive prose, naturally folded into the already-planned JSON-protocol docs slice. The drift-detection benefit is separable from the surface — a `test/knot/json_contract_test.clj` that runs every `--json` command against a fixture project and pins shape on `bb test` catches the same drift `knot schema` snapshot tests would have, without a new namespace, help entry, or the open a/b/c sub-decision (JSON Schema vs descriptor vs example) that this ticket flagged. What's given up: a machine-readable schema for non-LLM consumers (ajv, jsonschema, CI tooling) — they'd fetch the skill from the repo URL rather than shelling out to `knot schema --json`. For the stated use case (LLM agents installed via bbin or the plugin), prose-in-skill is at least as consumable as JSON Schema. Reconsider if a real non-LLM consumer requests a machine-readable contract, or if the kno-01kqgqf4aw4j docs slice surfaces a shape that prose can't describe cleanly. No code changes.
