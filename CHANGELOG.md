@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- New `test/knot/json_contract_test.clj` namespace pins the v0.3
+  `--json` envelope contract for every read and mutating command at
+  `bb test` time: schema_version + ok + data XOR error invariants
+  asserted centrally; per-command `data` shape (key presence + types)
+  asserted per command; the four ticket vector defaults
+  (`tags`/`deps`/`links`/`external_refs`) always-array contract pinned
+  on read and mutating envelopes; `meta.archived_to` pinned on
+  `close --json` and any `status --json` transition to a terminal
+  status; the four error envelopes — `not_found` (every id-resolving
+  command), `ambiguous_id` with `candidates`, `cycle` with the path
+  vector on `dep --json`, and the `check --json` exit-2 cannot-scan
+  envelope. Also pins the documented behavior asymmetries (`dep`/
+  `undep`/`unlink` `to`-side soft resolution; `dep tree` tolerant
+  unknown root; `knot check`'s `ok:false`-with-data exception). Adds
+  `knot.json-contract-test/with-tmp` to `.clj-kondo/config.edn` so
+  the lint baseline stays at 4 errors / 5 warnings, all pre-existing.
+
 - `knot update` gains `--add-tag <t>` and `--remove-tag <t>`
   (repeatable) for per-tag deltas, complementing the existing
   whole-list `--tags <comma-list>`. Mutually exclusive with `--tags`
