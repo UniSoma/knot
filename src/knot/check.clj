@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [knot.config :as config]
             [knot.query :as query]
+            [knot.store :as store]
             [knot.ticket :as ticket]))
 
 (defn- dep-cycle-issue
@@ -296,8 +297,6 @@
                     (match-set code     (:code     i))))
              issues)))
 
-(def ^:private archive-subdir "archive")
-
 (defn- try-load-file
   "Tolerantly load one ticket file. On success returns
    `{:ok? true :ticket {:frontmatter ... :body ... :path <s> :archived? <bool>}}`;
@@ -322,7 +321,7 @@
    `:scanned` counts files attempted (parse failures included)."
   [project-root tickets-dir]
   (let [live      (fs/path project-root tickets-dir)
-        archive   (fs/path project-root tickets-dir archive-subdir)
+        archive   (fs/path project-root tickets-dir store/archive-subdir)
         live-glob    (when (fs/directory? live)    (vec (fs/glob live    "*.md")))
         archive-glob (when (fs/directory? archive) (vec (fs/glob archive "*.md")))
         load-each (fn [paths archived?]

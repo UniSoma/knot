@@ -1,12 +1,13 @@
 ---
 id: kno-01kqtd4qthd3
 title: Consolidate `"archive"` subdir literal into a single shared constant
-status: open
+status: closed
 type: chore
 priority: 3
 mode: afk
 created: '2026-05-04T21:08:40.913022115Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-05T11:02:47.968972745Z'
+closed: '2026-05-05T11:02:47.968972745Z'
 tags:
 - v0.3
 - cleanup
@@ -37,3 +38,9 @@ The `"archive"` subdirectory name is hardcoded across three source files:
 Today this is harmless because the value is fixed everywhere. The risk is drift: if anyone ever parameterizes the archive-subdir name (e.g. `:archive-subdir` config key), the change has to touch four sites, and one will be missed.
 
 Mechanical fix: promote a single non-private `archive-subdir` constant in the natural home (`src/knot/store.clj` is the storage layer, the canonical owner) and have `check.clj` and `cli.clj` reference it instead of redefining or inlining.
+
+## Notes
+
+**2026-05-05T11:02:47.968972745Z**
+
+Promote knot.store/archive-subdir to a public def and route knot.check + knot.cli through it. Removes the duplicate private def in check.clj (line 299) and the two inline "archive" literals in cli.clj's info-data (:archive_path) and count-md-files invocation. Single source of truth for the archive subdirectory name; future :archive-subdir parameterization touches one site instead of four. Tests: 289/2657/0 (no behavior change). Lint baseline unchanged (4 errors / 5 warnings, all pre-existing).

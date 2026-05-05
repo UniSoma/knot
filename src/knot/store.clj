@@ -13,7 +13,7 @@
            (java.time Instant)
            (java.util UUID)))
 
-(def ^:private archive-subdir "archive")
+(def archive-subdir "archive")
 
 (defn ticket-path
   "Compute the live-directory path of a ticket from its id and slug.

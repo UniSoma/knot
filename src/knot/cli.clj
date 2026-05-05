@@ -1119,7 +1119,7 @@
            :config_path  (str (fs/path project-root ".knot.edn"))
            :tickets_dir  tickets-dir
            :tickets_path (str (fs/path project-root tickets-dir))
-           :archive_path (str (fs/path project-root tickets-dir "archive"))}
+           :archive_path (str (fs/path project-root tickets-dir store/archive-subdir))}
    :defaults {:default_assignee          (when (contains? ctx :default-assignee)
                                            (:default-assignee ctx))
               :effective_create_assignee (effective-create-assignee ctx)
@@ -1135,7 +1135,7 @@
                     :modes             (vec modes)
                     :priority_range    {:min 0 :max 4}}
    :counts (let [tickets-path (fs/path project-root tickets-dir)
-                 archive-path (fs/path tickets-path "archive")
+                 archive-path (fs/path tickets-path store/archive-subdir)
                  live    (count-md-files tickets-path)
                  archive (count-md-files archive-path)]
              {:live_count    live
