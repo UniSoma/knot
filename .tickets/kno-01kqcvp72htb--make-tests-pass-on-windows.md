@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T14:53:31.601460483Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-05T17:26:54.048936516Z'
 links:
 - kno-01kqgqafcxvv
 - kno-01kqgqfwk4h1
@@ -19,6 +19,8 @@ acceptance:
   done: false
 - title: No regressions on `ubuntu-latest` or `macos-latest`.
   done: false
+tags:
+- v0.3
 ---
 
 ## Description
