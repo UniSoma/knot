@@ -24,7 +24,9 @@
       (is (= "in_progress" (:active-status d)))
       (is (= ["bug" "feature" "task" "epic" "chore"] (:types d)))
       (is (= ["afk" "hitl"] (:modes d)))
-      (is (= "hitl" (:default-mode d))))))
+      (is (= "hitl" (:default-mode d)))
+      (is (= "afk" (:afk-mode d))
+          ":afk-mode names which entry in :modes denotes the autonomous-agent role"))))
 
 (deftest find-project-root-test
   (testing "walks up to find the dir containing .tickets/"
@@ -182,6 +184,35 @@
       (write-config! tmp {:modes ["afk" "hitl"]
                           :default-mode "auto"})
       (is (str/includes? (load-throws tmp) "default-mode"))))
+
+  (testing ":afk-mode must be one of :modes when supplied"
+    (with-tmp tmp
+      (write-config! tmp {:modes ["afk" "hitl"]
+                          :afk-mode "robot"})
+      (let [msg (load-throws tmp)]
+        (is (some? msg))
+        (is (str/includes? msg "afk-mode")
+            "error message names the offending key")
+        (is (str/includes? msg "robot")
+            "error message names the rejected value"))))
+
+  (testing ":afk-mode nil is allowed (opt out of the agent preamble)"
+    (with-tmp tmp
+      (write-config! tmp {:modes ["afk" "hitl"]
+                          :afk-mode nil})
+      (is (nil? (load-throws tmp))
+          "nil :afk-mode disables the agent preamble; should not throw")))
+
+  (testing ":afk-mode user override wins on merge and round-trips through load-config"
+    (with-tmp tmp
+      (write-config! tmp {:modes ["robot" "human"]
+                          :default-mode "human"
+                          :afk-mode "robot"})
+      (let [c (config/load-config tmp)]
+        (is (= "robot" (:afk-mode c))
+            "user override of :afk-mode reaches the merged map")
+        (is (contains? c :afk-mode)
+            ":afk-mode is a known key — not dropped during select-keys"))))
 
   (testing ":prefix must be a non-empty [a-z0-9]+ string"
     (with-tmp tmp

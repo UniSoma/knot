@@ -1035,12 +1035,13 @@
                 :ready            []
                 :ready-truncated? false
                 :ready-remaining  0
-                :active-status    (:active-status (config/defaults))}]
+                :active-status    (:active-status (config/defaults))
+                :afk-mode         (:afk-mode (config/defaults))}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))
     (let [{:keys [project-root tickets-dir terminal-statuses active-status
-                  prefix project-name now]} (resolve-ctx ctx)
+                  prefix project-name now afk-mode]} (resolve-ctx ctx)
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
@@ -1065,6 +1066,10 @@
           recently-closed* (recently-closed-tickets
                             (query/filter-tickets all criteria)
                             terminal-statuses)
+          ;; resolve-ctx merges defaults first, so :afk-mode is always
+          ;; populated (default "afk" or the user's override, including a
+          ;; nil opt-out). Thread it explicitly so the renderer doesn't
+          ;; have to fall back to (config/defaults) on the project path.
           data         {:project          {:found?        true
                                            :prefix        prefix
                                            :name          project-name
@@ -1076,7 +1081,8 @@
                         :ready-remaining  remaining
                         :recently-closed  recently-closed*
                         :mode             mode
-                        :active-status    active-status}]
+                        :active-status    active-status
+                        :afk-mode         afk-mode}]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))
@@ -1108,7 +1114,7 @@
    allowed_values, counts."
   [{:keys [project-root prefix project-name config-present? cwd tickets-dir
            default-type default-priority default-mode
-           statuses terminal-statuses active-status types modes]
+           statuses terminal-statuses active-status types modes afk-mode]
     :as ctx}]
   {:project {:knot_version   version/version
              :name           project-name
@@ -1133,6 +1139,7 @@
                     :terminal_statuses (vec (filter (set terminal-statuses) statuses))
                     :types             (vec types)
                     :modes             (vec modes)
+                    :afk_mode          afk-mode
                     :priority_range    {:min 0 :max 4}}
    :counts (let [tickets-path (fs/path project-root tickets-dir)
                  archive-path (fs/path tickets-path store/archive-subdir)
@@ -1243,6 +1250,13 @@
      "\n"
      " ;; Default mode on `knot create` (must be in :modes above).\n"
      " :default-mode \"" (:default-mode d) "\"\n"
+     "\n"
+     " ;; Names which entry in :modes denotes the autonomous-agent role.\n"
+     " ;; Drives the `knot prime` agent preamble: when --mode matches this\n"
+     " ;; value, prime emits the autonomous-flow directive instead of the\n"
+     " ;; human-oriented intent table. Set to nil to disable the agent\n"
+     " ;; preamble entirely. Must be a member of :modes (or nil).\n"
+     " :afk-mode \"" (:afk-mode d) "\"\n"
      "}\n")))
 
 (defn init-cmd

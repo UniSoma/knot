@@ -667,17 +667,21 @@ before issuing other Knot commands.")
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
-           recently-closed mode active-status]}]
+           recently-closed mode active-status afk-mode]
+    :or {afk-mode (:afk-mode (config/defaults))}}]
   (let [found? (:found? project)
         ;; Coerce mode through name+lower-case+trim so keywords (`:afk`),
         ;; uppercase (`"AFK"`), and stray whitespace all reach the same
         ;; preamble. Stringly-typed dispatch is a future trap otherwise.
-        mode-norm (some-> mode (cond-> (keyword? mode) name)
-                          str str/trim str/lower-case)
+        normalize (fn [v] (some-> v (cond-> (keyword? v) name)
+                                  str str/trim str/lower-case))
+        mode-norm (normalize mode)
+        afk-norm  (normalize afk-mode)
         preamble (cond
-                   (not found?)            prime-preamble-no-project
-                   (= mode-norm "afk")     prime-preamble-afk
-                   :else                   prime-preamble-found)
+                   (not found?)                          prime-preamble-no-project
+                   (and (some? afk-norm)
+                        (= mode-norm afk-norm))          prime-preamble-afk
+                   :else                                 prime-preamble-found)
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
                             " more (run `knot ready`)"))
@@ -789,7 +793,7 @@ before issuing other Knot commands.")
         {:keys [default_assignee effective_create_assignee
                 default_type default_priority default_mode]} defaults
         {:keys [statuses active_status terminal_statuses types modes
-                priority_range]} allowed_values
+                afk_mode priority_range]} allowed_values
         {:keys [live_count archive_count total_count]} counts
         project-block  (str/join "\n"
                                  [(str "Knot version: "   (info-scalar knot_version))
@@ -815,6 +819,7 @@ before issuing other Knot commands.")
                                   (str "Terminal statuses: " (info-list terminal_statuses))
                                   (str "Types: "             (info-list types))
                                   (str "Modes: "             (info-list modes))
+                                  (str "Afk mode: "          (info-scalar afk_mode))
                                   (str "Priority range: "    (:min priority_range) "-" (:max priority_range))])
         counts-block   (str/join "\n"
                                  [(str "Live count: "    (info-scalar live_count))

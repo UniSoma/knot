@@ -958,6 +958,39 @@
         (is (re-find #"(?i)autonomous" preamble)
             (str "mode " (pr-str m) " should still pick the afk preamble"))))))
 
+(deftest prime-text-afk-mode-config-driven-test
+  (testing "renderer dispatches the AFK preamble on data-map :afk-mode, not the literal \"afk\""
+    (let [data (assoc sample-prime-data :mode "robot" :afk-mode "robot")
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"(?i)autonomous|agent" preamble)
+          "custom :afk-mode value reaches the autonomous preamble")))
+
+  (testing "with custom :afk-mode, the literal \"afk\" no longer triggers the agent preamble"
+    (let [data (assoc sample-prime-data :mode "afk" :afk-mode "robot")
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"what's next" preamble)
+          "literal \"afk\" is no longer load-bearing — it falls through to the human preamble")))
+
+  (testing ":afk-mode nil opts the project out of the agent preamble entirely"
+    (let [data (assoc sample-prime-data :mode "afk" :afk-mode nil)
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"what's next" preamble)
+          "nil :afk-mode means no mode value picks the agent preamble")))
+
+  (testing ":afk-mode comparison normalizes both sides (keyword/case/whitespace)"
+    (let [data (assoc sample-prime-data :mode :ROBOT :afk-mode "  robot  ")
+          out  (output/prime-text data)
+          first-section (str/index-of out "## ")
+          preamble (subs out 0 first-section)]
+      (is (re-find #"(?i)autonomous|agent" preamble)
+          "normalization is symmetric — keyword mode matches whitespace-padded :afk-mode"))))
+
 (deftest prime-text-mentions-skill-test
   (testing "preamble mentions the `knot` skill so non-CC agents discover the canonical doc"
     (let [out (output/prime-text sample-prime-data)
@@ -1637,6 +1670,7 @@
                     :terminal_statuses ["closed"]
                     :types ["bug" "feature" "task"]
                     :modes ["afk" "hitl"]
+                    :afk_mode "afk"
                     :priority_range {:min 0 :max 4}}
    :counts {:live_count 5
             :archive_count 3
@@ -1670,6 +1704,8 @@
       (is (str/includes? s "Terminal statuses: closed"))
       (is (str/includes? s "Types: bug, feature, task"))
       (is (str/includes? s "Modes: afk, hitl"))
+      (is (str/includes? s "Afk mode: afk")
+          "the autonomous-mode label surfaces in the Allowed Values block")
       (is (str/includes? s "Priority range: 0-4"))
       (is (str/includes? s "Live count: 5"))
       (is (str/includes? s "Archive count: 3"))
@@ -1682,6 +1718,12 @@
       (is (str/includes? s "Config present: no")
           "config_present:false renders as 'no'")
       (is (str/includes? s "Effective create assignee: alice"))))
+
+  (testing "afk_mode nil opt-out renders as (none)"
+    (let [s (output/info-text (assoc-in full-info-data
+                                        [:allowed_values :afk_mode] nil))]
+      (is (str/includes? s "Afk mode: (none)")
+          "nil :afk_mode round-trips into a (none) marker")))
 
   (testing "config_present:true renders as yes"
     (let [s (output/info-text (assoc-in full-info-data [:project :config_present] true))]

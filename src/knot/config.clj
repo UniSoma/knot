@@ -13,7 +13,8 @@
    :active-status     "in_progress"
    :types             ["bug" "feature" "task" "epic" "chore"]
    :modes             ["afk" "hitl"]
-   :default-mode      "hitl"})
+   :default-mode      "hitl"
+   :afk-mode          "afk"})
 
 (defn defaults
   "Return the v0 schema defaults. `load-config` merges `.knot.edn`
@@ -57,7 +58,7 @@
 (def ^:private known-keys
   #{:tickets-dir :prefix :project-name :default-assignee :default-type
     :default-priority :statuses :terminal-statuses :active-status
-    :types :modes :default-mode})
+    :types :modes :default-mode :afk-mode})
 
 (defn- warn! [msg]
   (binding [*out* *err*] (println msg)))
@@ -93,7 +94,7 @@
   [merged]
   (let [{:keys [tickets-dir prefix project-name default-assignee default-type
                 default-priority statuses terminal-statuses active-status
-                types modes default-mode]} merged]
+                types modes default-mode afk-mode]} merged]
     (when-not (non-blank-string? tickets-dir)
       (throw (ex-info ".knot.edn :tickets-dir must be a non-blank string" {})))
     (when (and (some? prefix) (not (and (non-blank-string? prefix)
@@ -123,6 +124,12 @@
       (throw (ex-info ".knot.edn :modes must be a non-empty list of strings" {})))
     (when-not ((set modes) default-mode)
       (throw (ex-info ".knot.edn :default-mode must be one of :modes" {})))
+    (when (and (some? afk-mode)
+               (not ((set modes) afk-mode)))
+      (throw (ex-info (str ".knot.edn :afk-mode " (pr-str afk-mode)
+                           " must be one of :modes " (pr-str (vec modes))
+                           " (or nil to disable the agent preamble)")
+                      {:afk-mode afk-mode :modes modes})))
     (when-not (and (integer? default-priority) (<= 0 default-priority 4))
       (throw (ex-info ".knot.edn :default-priority must be an integer 0..4" {}))))
   merged)

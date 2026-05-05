@@ -1043,6 +1043,26 @@
                 (re-find #"(?i)active lane" preceding-tail))
             "comment names at least one consumer of :active-status"))))
 
+  (testing "stub :afk-mode defaults to afk and explains its purpose"
+    (with-tmp tmp
+      (cli/init-cmd {:project-root tmp} {})
+      (let [content (slurp (str (fs/path tmp ".knot.edn")))
+            afk-line (some (fn [l] (when (re-find #"^\s*:afk-mode\b" l) l))
+                           (str/split-lines content))
+            afk-idx  (str/index-of content ":afk-mode")
+            preceding (subs content 0 afk-idx)
+            preceding-tail (last (str/split preceding #"\n\n"))]
+        (is (some? afk-line)
+            "stub has an uncommented :afk-mode line")
+        (is (str/includes? afk-line "\"afk\"")
+            ":afk-mode defaults to \"afk\"")
+        (is (re-find #";;" preceding-tail)
+            "explanatory comment precedes :afk-mode")
+        (is (or (re-find #"(?i)autonomous" preceding-tail)
+                (re-find #"(?i)agent" preceding-tail)
+                (re-find #"(?i)preamble" preceding-tail))
+            "comment names what :afk-mode controls (agent / autonomous / preamble)"))))
+
   (testing "stub :modes block warns against per-mode shortcut flags"
     ;; --mode <value> is the only path on `knot create`. Adding per-mode
     ;; shortcut flags (--afk, --hitl) bakes canonical mode names into
@@ -2877,6 +2897,43 @@ Restart the daemon.
         (is (re-find #"what's next" preamble)
             "hitl mode is the human default — same preamble as bare prime")))))
 
+(deftest prime-cmd-afk-mode-config-driven-test
+  (testing "custom :modes + :afk-mode reach the agent preamble under the configured mode name"
+    (with-tmp tmp
+      (let [c (assoc (ctx tmp)
+                     :modes        ["robot" "human"]
+                     :default-mode "human"
+                     :afk-mode     "robot")
+            _ (cli/create-cmd c {:title "Live ticket"})
+            pctx (assoc c :project-found? true)
+            out  (cli/prime-cmd pctx {:mode "robot"})
+            first-section (str/index-of out "## ")
+            preamble (subs out 0 first-section)]
+        (is (re-find #"(?i)autonomous|agent" preamble)
+            "configured agent mode reaches the autonomous preamble"))))
+
+  (testing "with :afk-mode nil, no mode value picks up the agent preamble"
+    (with-tmp tmp
+      (let [c (assoc (ctx tmp) :afk-mode nil)
+            _ (cli/create-cmd c {:title "Live ticket"})
+            pctx (assoc c :project-found? true)
+            out  (cli/prime-cmd pctx {:mode "afk"})
+            first-section (str/index-of out "## ")
+            preamble (subs out 0 first-section)]
+        (is (re-find #"what's next" preamble)
+            "config opt-out wins — even --mode afk gets the human preamble"))))
+
+  (testing "no-project branch sources :afk-mode from (config/defaults), preserving back-compat"
+    ;; The no-project branch in prime-cmd builds its data map without the
+    ;; project ctx, so it must thread :afk-mode from defaults the same way
+    ;; it does for :active-status. Without that thread, the renderer falls
+    ;; back to defaults itself; either way the back-compat path stays green.
+    (with-tmp tmp
+      (let [no-proj-ctx {:project-found? false}
+            out (cli/prime-cmd no-proj-ctx {:mode "afk"})]
+        (is (str/includes? out "knot init")
+            "no-project preamble still wins over the agent preamble when no project is found")))))
+
 (deftest prime-cmd-stale-in-progress-test
   (testing "in-progress ticket whose :updated is >14 days before now is flagged [stale]"
     (with-tmp tmp
@@ -3504,7 +3561,7 @@ Restart the daemon.
               "explicit :default-assignee nil means 'no auto-assign', not 'fall back to git'"))))))
 
 (deftest info-cmd-allowed-values-block-test
-  (testing "allowed_values carries statuses, active_status, terminal_statuses, types, modes, priority_range"
+  (testing "allowed_values carries statuses, active_status, terminal_statuses, types, modes, afk_mode, priority_range"
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (let [out (cli/info-cmd (ctx tmp) {:json? true})
@@ -3514,7 +3571,32 @@ Restart the daemon.
         (is (= ["closed"]                      (:terminal_statuses av)))
         (is (= ["bug" "feature" "task" "epic" "chore"] (:types av)))
         (is (= ["afk" "hitl"]                  (:modes av)))
+        (is (= "afk"                           (:afk_mode av))
+            "afk_mode names which entry in :modes denotes the autonomous-agent role")
         (is (= {:min 0 :max 4}                 (:priority_range av))))))
+
+  (testing "allowed_values surfaces a custom :afk-mode override"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c   (assoc (ctx tmp)
+                       :modes        ["robot" "human"]
+                       :default-mode "human"
+                       :afk-mode     "robot")
+            out (cli/info-cmd c {:json? true})
+            av  (get-in (cheshire/parse-string out true) [:data :allowed_values])]
+        (is (= "robot" (:afk_mode av))
+            "user override of :afk-mode reaches info JSON"))))
+
+  (testing "allowed_values reports :afk_mode as nil when explicitly opted out"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [c   (assoc (ctx tmp) :afk-mode nil)
+            out (cli/info-cmd c {:json? true})
+            av  (get-in (cheshire/parse-string out true) [:data :allowed_values])]
+        (is (contains? av :afk_mode)
+            "afk_mode key is always present, even when nil")
+        (is (nil? (:afk_mode av))
+            "nil round-trips so consumers can detect opt-out"))))
 
   (testing "allowed_values preserves configured order across statuses, types, modes"
     (with-tmp tmp
