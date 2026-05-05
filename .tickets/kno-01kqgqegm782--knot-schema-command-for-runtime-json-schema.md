@@ -6,7 +6,7 @@ type: feature
 priority: 3
 mode: hitl
 created: '2026-05-01T02:56:22.663087106Z'
-updated: '2026-05-05T00:36:17.845651157Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - v0.3
 - cli
@@ -20,6 +20,21 @@ deps:
 - kno-01kqgqc2ks70
 links:
 - kno-01kqts0qxbvx
+acceptance:
+- title: 'Sub-decision pinned in design notes: `--json` mode output format (JSON Schema spec / simple descriptor / runnable example)'
+  done: false
+- title: '`knot schema` (no args) prints envelope, error-code catalogue, list of commands'
+  done: false
+- title: '`knot schema <command>` prints just that command''s shape'
+  done: false
+- title: '`knot schema --json` works for both forms'
+  done: false
+- title: Schemas single-sourced from a `knot.schemas` (or similar) namespace — no duplication between code and docs
+  done: false
+- title: Snapshot tests confirm declared schema matches runtime output for every command with `--json`
+  done: false
+- title: Help text covers the new command
+  done: false
 ---
 
 ## Description
@@ -52,13 +67,3 @@ Recommendation: (b) — it composes well with knot's tone (small CLI surface, te
 - Snapshot tests confirm the declared schema matches the actual runtime output of each command (the test you'd want under any docs strategy anyway).
 
 **Conventions doc** lives separately in the README/docs slice (kno-? T10) — `schema` returns shapes, README explains *why* there's an `ok` field, what `schema_version` means, the partial-id ambiguity contract, the full error-code catalogue.
-
-## Acceptance Criteria
-
-- [ ] Sub-decision pinned in design notes: `--json` mode output format (JSON Schema spec / simple descriptor / runnable example)
-- [ ] `knot schema` (no args) prints envelope, error-code catalogue, list of commands
-- [ ] `knot schema <command>` prints just that command's shape
-- [ ] `knot schema --json` works for both forms
-- [ ] Schemas single-sourced from a `knot.schemas` (or similar) namespace — no duplication between code and docs
-- [ ] Snapshot tests confirm declared schema matches runtime output for every command with `--json`
-- [ ] Help text covers the new command

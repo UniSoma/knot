@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-05-01T02:57:07.684531365Z'
-updated: '2026-05-01T03:11:18.232581707Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - v0.3
 - release
@@ -24,6 +24,21 @@ deps:
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqcvp72htb
+acceptance:
+- title: Merge order pinned and recorded in this ticket's notes
+  done: false
+- title: AC migration timing decided (first-invocation auto-run / explicit `knot init --migrate` / bash script)
+  done: false
+- title: Single CHANGELOG entry drafted covering every v0.3 breaking change
+  done: false
+- title: Release notes drafted with migration guidance for v0.2 users
+  done: false
+- title: All v0.3-tagged blockers closed before tag push
+  done: false
+- title: '`bb test` green on all platforms (or Windows ticket kno-01kqcvp72htb explicitly resolved or deferred)'
+  done: false
+- title: v0.3 tag pushed; bbin install verified end-to-end
+  done: false
 ---
 
 ## Description
@@ -62,13 +77,3 @@ Coordinate the v0.3 release once the v0.3 implementation slices are done. This i
 - `bb test` green on all platforms (depend on kno-01kqcvp72htb for Windows)
 - CHANGELOG entry merged
 - Tag pushed; bbin distribution updated (coordinate with kno-01kqcpb0t5s7 if distribution model is changing)
-
-## Acceptance Criteria
-
-- [ ] Merge order pinned and recorded in this ticket's notes
-- [ ] AC migration timing decided (first-invocation auto-run / explicit `knot init --migrate` / bash script)
-- [ ] Single CHANGELOG entry drafted covering every v0.3 breaking change
-- [ ] Release notes drafted with migration guidance for v0.2 users
-- [ ] All v0.3-tagged blockers closed before tag push
-- [ ] `bb test` green on all platforms (or Windows ticket kno-01kqcvp72htb explicitly resolved or deferred)
-- [ ] v0.3 tag pushed; bbin install verified end-to-end

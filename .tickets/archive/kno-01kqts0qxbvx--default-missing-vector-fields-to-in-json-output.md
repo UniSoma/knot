@@ -6,7 +6,7 @@ type: bug
 priority: 2
 mode: afk
 created: '2026-05-05T00:36:12.843353738Z'
-updated: '2026-05-05T00:47:52.467788061Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-05T00:47:52.467788061Z'
 tags:
 - v0.3
@@ -16,6 +16,39 @@ links:
 - kno-01kqgqegm782
 - kno-01kqgqf4aw4j
 - kno-01kqsm8xgjf3
+acceptance:
+- title: '`knot list --json` and `knot show --json` always include `tags`, `deps`, `links`, `external_refs` in every ticket''s JSON object — empty array when the ticket has no value, full array when it does.'
+  done: false
+- title: Same shape on `--json` envelopes from mutating commands routed through `touched-ticket-json` / `touched-tickets-json` (`start`, `close`, `update`, `dep`, `link`, etc.).
+  done: false
+- title: Optional scalars (`parent`, `assignee`, `closed`) remain absent when unset — no `null` emitted.
+  done: false
+- title: 'On-disk YAML frontmatter is unchanged: `cli.clj` continues to prune empty seqs at write time; tickets without tags do not gain a `tags: []` line in their `.md` file.'
+  done: false
+- title: '`knot list --json | jq -r ''[.data[].tags[]]''` succeeds on a project containing tickets with and without tags.'
+  done: false
+- title: The four normalized keys are declared in a single named constant inside `src/knot/output.clj`, discoverable for future vector fields.
+  done: false
+- title: 'Surfaces updated in the same commit:'
+  done: false
+- title: '`src/knot/output.clj` — `jsonify-ticket` injects the four vector defaults; named constant for the key list.'
+  done: false
+- title: '`test/knot/output_test.clj` — `jsonify-ticket` unit tests for default injection (absent → `[]`, present → unchanged) and key-set coverage.'
+  done: false
+- title: '`test/knot/integration_test.clj` — e2e: `knot list --json` and `knot show --json` for a tag-less ticket emit `tags: []`, same for the other three keys.'
+  done: false
+- title: '`CHANGELOG.md` — entry under `[Unreleased]`.'
+  done: false
+- title: 'Tests (TDD; `bb test`):'
+  done: false
+- title: '30-second grep audit before red-phase: search `cli_test` / `output_test` / `integration_test` for assertions referencing `:tags` / `:deps` / `:links` / `:external_refs` that depend on absence (e.g. `(not (contains? ...))`, `nil?` checks, `(count (keys ...))`); update those alongside the new assertions.'
+  done: false
+- title: 'Red-phase: write the new "always present" assertions; run.'
+  done: false
+- title: 'Green-phase: smallest change to `jsonify-ticket`.'
+  done: false
+- title: 'Lint baseline unchanged: `clj-kondo --lint src test` reports the existing 4 errors / 5 warnings only.'
+  done: false
 ---
 
 ## Description
@@ -52,25 +85,6 @@ Use a named constant for the vector-field set so contributors adding future opti
 ```
 
 Scope is **vector fields only**. Optional scalars (`parent`, `assignee`, `closed`) stay absent — the bug is iteration (a vector-only concept), and emitting `null` for unset scalars introduces "set vs. unset" ambiguity for zero user benefit (jq's `.parent` already returns `null` for both cases).
-
-## Acceptance Criteria
-
-- `knot list --json` and `knot show --json` always include `tags`, `deps`, `links`, `external_refs` in every ticket's JSON object — empty array when the ticket has no value, full array when it does.
-- Same shape on `--json` envelopes from mutating commands routed through `touched-ticket-json` / `touched-tickets-json` (`start`, `close`, `update`, `dep`, `link`, etc.).
-- Optional scalars (`parent`, `assignee`, `closed`) remain absent when unset — no `null` emitted.
-- On-disk YAML frontmatter is unchanged: `cli.clj` continues to prune empty seqs at write time; tickets without tags do not gain a `tags: []` line in their `.md` file.
-- `knot list --json | jq -r '[.data[].tags[]]'` succeeds on a project containing tickets with and without tags.
-- The four normalized keys are declared in a single named constant inside `src/knot/output.clj`, discoverable for future vector fields.
-- Surfaces updated in the same commit:
-  - `src/knot/output.clj` — `jsonify-ticket` injects the four vector defaults; named constant for the key list.
-  - `test/knot/output_test.clj` — `jsonify-ticket` unit tests for default injection (absent → `[]`, present → unchanged) and key-set coverage.
-  - `test/knot/integration_test.clj` — e2e: `knot list --json` and `knot show --json` for a tag-less ticket emit `tags: []`, same for the other three keys.
-  - `CHANGELOG.md` — entry under `[Unreleased]`.
-- Tests (TDD; `bb test`):
-  - 30-second grep audit before red-phase: search `cli_test` / `output_test` / `integration_test` for assertions referencing `:tags` / `:deps` / `:links` / `:external_refs` that depend on absence (e.g. `(not (contains? ...))`, `nil?` checks, `(count (keys ...))`); update those alongside the new assertions.
-  - Red-phase: write the new "always present" assertions; run.
-  - Green-phase: smallest change to `jsonify-ticket`.
-- Lint baseline unchanged: `clj-kondo --lint src test` reports the existing 4 errors / 5 warnings only.
 
 ## Notes
 

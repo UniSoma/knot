@@ -147,12 +147,66 @@
                      (missing :links  links)
                      (missing :parent parent)))))))
 
+(defn- ac-entry-issue
+  "Build an `:acceptance_invalid` issue for one offending entry. `field`
+   names the violated key (`:entry`, `:title`, `:done`); `value` is the
+   user-visible value that failed; `index` lets the message point at
+   the position in the list."
+  [holder-id field value index reason]
+  {:severity :error
+   :code     :acceptance_invalid
+   :ids      [holder-id]
+   :field    field
+   :value    value
+   :message  (str "invalid acceptance entry at index " index
+                  " (field :" (name field) "): " reason)})
+
+(defn- check-acceptance
+  "Per-ticket: validate `:acceptance` shape. Optional field; absent or
+   nil is a no-op. Required: a sequential collection of maps, each
+   carrying a non-blank string `:title` and a boolean `:done`."
+  [_ctx ticket]
+  (let [{:keys [id acceptance]} (:frontmatter ticket)]
+    (cond
+      (nil? acceptance) []
+
+      (not (sequential? acceptance))
+      [{:severity :error
+        :code     :acceptance_invalid
+        :ids      (if id [id] [])
+        :field    :acceptance
+        :value    acceptance
+        :message  (str "invalid :acceptance shape: expected a list of "
+                       "{title done} entries, got " (pr-str (type acceptance)))}]
+
+      :else
+      (vec (mapcat (fn [entry idx]
+                     (cond
+                       (not (map? entry))
+                       [(ac-entry-issue id :entry entry idx
+                                        "expected a {title done} map")]
+
+                       :else
+                       (let [{:keys [title done]} entry
+                             title-bad? (or (not (string? title))
+                                            (str/blank? title))
+                             done-bad?  (not (boolean? done))]
+                         (cond-> []
+                           title-bad?
+                           (conj (ac-entry-issue id :title title idx
+                                                 "expected a non-blank string"))
+                           done-bad?
+                           (conj (ac-entry-issue id :done done idx
+                                                 "expected a boolean"))))))
+                   acceptance
+                   (range))))))
+
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries
    `:config` (merged) and `:all-ids` (set of every known id)."
   [check-status check-type check-mode check-priority
    check-required-fields check-terminal-outside-archive
-   check-unknown-id])
+   check-unknown-id check-acceptance])
 
 (defn- per-ticket-issues
   "Run every per-ticket validator against every ticket. When `ids-filter`

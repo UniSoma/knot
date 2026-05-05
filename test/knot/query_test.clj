@@ -418,6 +418,25 @@
              (mapv #(get-in % [:frontmatter :id])
                    (query/filter-tickets ts {:tag #{"urgent" "frontend"}}))))))
 
+  (testing ":acceptance-complete filters by frontmatter acceptance completion"
+    (let [ts [(ft "no-ac")
+              (ft "one-undone" :acceptance [{:title "x" :done false}])
+              (ft "all-done"   :acceptance [{:title "x" :done true}])
+              (ft "mixed"      :acceptance [{:title "x" :done true}
+                                            {:title "y" :done false}])]]
+      (is (= ["one-undone" "mixed"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:acceptance-complete #{false}})))
+          "=false matches tickets with at least one undone AC")
+      (is (= ["all-done"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:acceptance-complete #{true}})))
+          "=true matches tickets where every AC is done")
+      (is (= ["no-ac" "one-undone" "all-done" "mixed"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:acceptance-complete #{}})))
+          "empty set is a no-op")))
+
   (testing "multiple criteria keys AND together"
     (let [ts [(ft "a" :status "open" :mode "afk")
               (ft "b" :status "open" :mode "hitl")

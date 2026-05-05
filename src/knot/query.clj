@@ -14,10 +14,14 @@
 (defn- match-criterion?
   "True when ticket `t` matches the value-set `vs` under criteria key `k`.
    Empty/nil `vs` is a no-op match. `:tag` checks set overlap with the
-   ticket's `:tags`; all other keys do equality lookup on the matching
-   frontmatter key (`:type`, `:status`, `:mode`, `:assignee`). Throws on
-   unknown criterion keys — silent fall-through would let a typo'd key
-   match every ticket and quietly disable the user's intended filter."
+   ticket's `:tags`; the scalar enum keys (`:type`, `:status`, `:mode`,
+   `:assignee`) do equality lookup on the matching frontmatter key.
+   `:acceptance-complete` requires the ticket to have at least one
+   `:acceptance` entry and matches against the boolean
+   `(every? :done acceptance)` — tickets with no AC list are excluded
+   from both `#{true}` and `#{false}` filters. Throws on unknown
+   criterion keys — silent fall-through would let a typo'd key match
+   every ticket and quietly disable the user's intended filter."
   [k vs t]
   (if (empty? vs)
     true
@@ -28,6 +32,9 @@
         :mode     (contains? vs (:mode fm))
         :assignee (contains? vs (:assignee fm))
         :type     (contains? vs (:type fm))
+        :acceptance-complete
+        (let [ac (:acceptance fm)]
+          (and (seq ac) (contains? vs (every? :done ac))))
         (throw (ex-info (str "filter-tickets: unknown criterion key " k)
                         {:key k}))))))
 

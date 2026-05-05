@@ -6,7 +6,7 @@ type: bug
 priority: 2
 mode: afk
 created: '2026-05-01T02:54:10.333902682Z'
-updated: '2026-05-02T19:45:20.310127164Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-02T19:45:20.310127164Z'
 tags:
 - v0.3
@@ -14,6 +14,17 @@ tags:
 - needs-triage
 links:
 - kno-01kqcvp72htb
+acceptance:
+- title: Audit current `close` (auto-archive) and `reopen` (move-back) paths for atomicity
+  done: true
+- title: Findings recorded in this ticket's notes
+  done: true
+- title: 'If non-atomic: fix using OS-level rename (single fs operation) where possible'
+  done: true
+- title: 'Test: simulated crash mid-operation does not leave the system in inconsistent state (file in two places, or in neither)'
+  done: true
+- title: Behavior on Windows considered (file-locking semantics differ — coordinate with kno-01kqcvp72htb)
+  done: true
 ---
 
 ## Description
@@ -25,14 +36,6 @@ Investigate the current implementation in `store.clj` (or wherever the file-move
 If the operation is non-atomic, fix it. Preferred shape: write the new file content to the destination via an OS-level rename (single filesystem operation, atomic on POSIX), and let the source path's removal piggyback on rename semantics where possible.
 
 Q7 of the v0.3 API review named this a non-negotiable invariant.
-
-## Acceptance Criteria
-
-- [x] Audit current `close` (auto-archive) and `reopen` (move-back) paths for atomicity
-- [x] Findings recorded in this ticket's notes
-- [x] If non-atomic: fix using OS-level rename (single fs operation) where possible
-- [x] Test: simulated crash mid-operation does not leave the system in inconsistent state (file in two places, or in neither)
-- [x] Behavior on Windows considered (file-locking semantics differ — coordinate with kno-01kqcvp72htb)
 
 ## Notes
 

@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: afk
 created: '2026-05-01T02:54:46.272213294Z'
-updated: '2026-05-02T18:46:56.062007681Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-02T18:46:56.062007681Z'
 tags:
 - v0.3
@@ -15,6 +15,25 @@ tags:
 - needs-triage
 deps:
 - kno-01kqgq9vhmvr
+acceptance:
+- title: '`--json` flag added to: `create`, `start`, `status`, `close`, `reopen`, `dep`, `undep`, `link`, `unlink`, `add-note`'
+  done: false
+- title: Output uses the envelope from kno-01kqgq9vhmvr
+  done: false
+- title: '`data` is the touched ticket (single) for lifecycle commands and `add-note`'
+  done: false
+- title: '`data` is the `from` ticket for `dep`/`undep`'
+  done: false
+- title: '`data` is an array of touched tickets for `link`/`unlink`'
+  done: false
+- title: '`close --json` populates `meta.archived_to` with the archive path'
+  done: false
+- title: 'Errors emit `{ok: false, error: {...}}` per the envelope contract'
+  done: false
+- title: Tests cover happy path + error path per command
+  done: false
+- title: CHANGELOG entry covers the new flag set
+  done: false
 ---
 
 ## Description
@@ -39,18 +58,6 @@ Operation metadata that does not belong on the ticket schema (e.g. `archived_to:
 ```
 
 `init` and `edit` are excluded — `init` is project setup (no ticket), `edit` opens `$EDITOR` (interactive only; non-interactive writes go through the new `knot update` command from kno-? Q6).
-
-## Acceptance Criteria
-
-- [ ] `--json` flag added to: `create`, `start`, `status`, `close`, `reopen`, `dep`, `undep`, `link`, `unlink`, `add-note`
-- [ ] Output uses the envelope from kno-01kqgq9vhmvr
-- [ ] `data` is the touched ticket (single) for lifecycle commands and `add-note`
-- [ ] `data` is the `from` ticket for `dep`/`undep`
-- [ ] `data` is an array of touched tickets for `link`/`unlink`
-- [ ] `close --json` populates `meta.archived_to` with the archive path
-- [ ] Errors emit `{ok: false, error: {...}}` per the envelope contract
-- [ ] Tests cover happy path + error path per command
-- [ ] CHANGELOG entry covers the new flag set
 
 ## Notes
 

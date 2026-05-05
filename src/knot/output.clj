@@ -4,6 +4,7 @@
   (:require [babashka.process :as p]
             [cheshire.core :as json]
             [clojure.string :as str]
+            [knot.acceptance :as acceptance]
             [knot.ticket :as ticket]))
 
 (defn- ticket-title
@@ -46,15 +47,19 @@
 
 (defn show-text
   "Render a ticket map for the `show` command. Returns a string containing
-   the YAML frontmatter, the markdown body, and (when supplied) the four
-   computed inverse sections — `## Blockers`, `## Blocking`, `## Children`,
-   `## Linked` — appended after the body. Each inverse entry is
+   the YAML frontmatter, the markdown body, the synthesized
+   `## Acceptance Criteria` checklist (built from frontmatter
+   `:acceptance`), and (when supplied) the four computed inverse
+   sections — `## Blockers`, `## Blocking`, `## Children`, `## Linked`
+   — appended after the body. Each inverse entry is
    `{:id ... :ticket <full-ticket>}` for a resolved ref or
    `{:id ... :missing? true}` for a broken one. Empty sections are omitted."
   ([ticket]
-   (ticket/render ticket))
+   (str (ticket/render ticket)
+        (acceptance/render-section (get-in ticket [:frontmatter :acceptance]))))
   ([ticket inverses]
    (str (ticket/render ticket)
+        (acceptance/render-section (get-in ticket [:frontmatter :acceptance]))
         (render-inverse-sections inverses))))
 
 (def ^:private ansi-codes

@@ -6,7 +6,7 @@ type: bug
 priority: 2
 mode: afk
 created: '2026-05-04T21:07:33.144840213Z'
-updated: '2026-05-05T00:04:34.768628053Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-05T00:04:34.768628053Z'
 tags:
 - v0.3
@@ -14,6 +14,17 @@ tags:
 - json
 links:
 - kno-01kqsjaxb6dy
+acceptance:
+- title: '`knot info --bogus --json` emits a JSON envelope with `schema_version: 1`, `ok: false`, `error.code: "invalid_argument"`, and the parser message in `error.message`'
+  done: false
+- title: Exit code remains `1` on the parse-failure path
+  done: false
+- title: Plain `knot info --bogus` (no `--json`) still emits stderr text as today
+  done: false
+- title: Implementation pattern matches the existing argv-based `--json` detection used by link/unlink/update handlers
+  done: false
+- title: 'Test coverage: a unit or integration test pins the JSON-envelope shape on the parse-failure path'
+  done: false
 ---
 
 ## Description
@@ -36,14 +47,6 @@ Surfaced during code review of kno-01kqsjaxb6dy (commit 12911ed). Spec-wise this
 ## Design
 
 Replicate the pattern from the sibling handlers in `src/knot/main.clj` (link/unlink/update): cheaply detect `--json` from the raw argv before delegating to `bcli/parse-args`, and pass that flag through to `info-emit-error!` on the parse-failure branch. Existing JSON-envelope error helpers can be reused — no new shape.
-
-## Acceptance Criteria
-
-- `knot info --bogus --json` emits a JSON envelope with `schema_version: 1`, `ok: false`, `error.code: "invalid_argument"`, and the parser message in `error.message`
-- Exit code remains `1` on the parse-failure path
-- Plain `knot info --bogus` (no `--json`) still emits stderr text as today
-- Implementation pattern matches the existing argv-based `--json` detection used by link/unlink/update handlers
-- Test coverage: a unit or integration test pins the JSON-envelope shape on the parse-failure path
 
 ## Notes
 

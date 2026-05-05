@@ -6,8 +6,29 @@ type: task
 priority: 2
 mode: afk
 created: '2026-04-29T20:52:57.242922337Z'
-updated: '2026-04-29T21:34:10.851419425Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-04-29T21:34:10.851419425Z'
+acceptance:
+- title: '`src/knot/cli.clj`: `build-frontmatter` accepts and emits `:title` at position 2 (right after `:id`); `build-body` no longer prepends `# <title>`; an empty section list yields an empty body string.'
+  done: false
+- title: '`src/knot/output.clj`: `extract-title` is deleted; all 7 call sites (`inverse-line`, `ls` table value-of, JSON projections, dep-tree text and JSON nodes, prime in-progress line, `show-json`) read `(or (:title (:frontmatter ticket)) "")`.'
+  done: false
+- title: '`knot create "X"` writes a frontmatter that contains `title: X` between `id` and `status`, and a body that does not contain any H1.'
+  done: false
+- title: '`knot create "X"` with no `-d/--design/--acceptance` writes an empty body (no synthesized header).'
+  done: false
+- title: '`knot show <id>` output is unchanged in shape: closing `---` followed by the body verbatim, with no synthesized `# <title>`.'
+  done: false
+- title: Reading a ticket that lacks `title:` in frontmatter does not crash `knot ls`, `knot show`, or `knot dep tree` — it renders an empty title.
+  done: false
+- title: Renaming a ticket via $EDITOR (changing only the `title:` line) does not change the filename on disk.
+  done: false
+- title: All existing tickets in `.tickets/` and `issues/` are manually migrated in the same PR (H1 stripped from body, `title:` added to frontmatter at position 2).
+  done: false
+- title: '`CHANGELOG.md` notes the breaking storage-format change.'
+  done: false
+- title: Tests in `output_test.clj` that synthesize a fake body with `# title` are updated to set `:title` in frontmatter instead.
+  done: false
 ---
 
 ## Description
@@ -38,16 +59,3 @@ Assumptions:
 - Single-user / local-CLI tool; graceful read-side fallback is preferred over hard schema validation.
 - Stale slugs after rename are already the de-facto behavior and acceptable.
 - The body-only-sections shape is acceptable in editors; no UX adjustment needed for empty bodies.
-
-## Acceptance Criteria
-
-- `src/knot/cli.clj`: `build-frontmatter` accepts and emits `:title` at position 2 (right after `:id`); `build-body` no longer prepends `# <title>`; an empty section list yields an empty body string.
-- `src/knot/output.clj`: `extract-title` is deleted; all 7 call sites (`inverse-line`, `ls` table value-of, JSON projections, dep-tree text and JSON nodes, prime in-progress line, `show-json`) read `(or (:title (:frontmatter ticket)) "")`.
-- `knot create "X"` writes a frontmatter that contains `title: X` between `id` and `status`, and a body that does not contain any H1.
-- `knot create "X"` with no `-d/--design/--acceptance` writes an empty body (no synthesized header).
-- `knot show <id>` output is unchanged in shape: closing `---` followed by the body verbatim, with no synthesized `# <title>`.
-- Reading a ticket that lacks `title:` in frontmatter does not crash `knot ls`, `knot show`, or `knot dep tree` — it renders an empty title.
-- Renaming a ticket via $EDITOR (changing only the `title:` line) does not change the filename on disk.
-- All existing tickets in `.tickets/` and `issues/` are manually migrated in the same PR (H1 stripped from body, `title:` added to frontmatter at position 2).
-- `CHANGELOG.md` notes the breaking storage-format change.
-- Tests in `output_test.clj` that synthesize a fake body with `# title` are updated to set `:title` in frontmatter instead.

@@ -6,12 +6,21 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-04T21:08:40.913022115Z'
-updated: '2026-05-04T21:08:43.885241349Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - v0.3
 - cleanup
 links:
 - kno-01kqsjaxb6dy
+acceptance:
+- title: A single `archive-subdir` def is the source of truth across the codebase
+  done: false
+- title: '`src/knot/store.clj`, `src/knot/check.clj`, and `src/knot/cli.clj` all reference that one constant; no other source file inlines `"archive"` for the subdir'
+  done: false
+- title: '`bb test` passes; `clj-kondo --lint src test` baseline unchanged (4 errors / 5 warnings)'
+  done: false
+- title: No behavior change observable from any CLI surface
+  done: false
 ---
 
 ## Description
@@ -28,10 +37,3 @@ The `"archive"` subdirectory name is hardcoded across three source files:
 Today this is harmless because the value is fixed everywhere. The risk is drift: if anyone ever parameterizes the archive-subdir name (e.g. `:archive-subdir` config key), the change has to touch four sites, and one will be missed.
 
 Mechanical fix: promote a single non-private `archive-subdir` constant in the natural home (`src/knot/store.clj` is the storage layer, the canonical owner) and have `check.clj` and `cli.clj` reference it instead of redefining or inlining.
-
-## Acceptance Criteria
-
-- A single `archive-subdir` def is the source of truth across the codebase
-- `src/knot/store.clj`, `src/knot/check.clj`, and `src/knot/cli.clj` all reference that one constant; no other source file inlines `"archive"` for the subdir
-- `bb test` passes; `clj-kondo --lint src test` baseline unchanged (4 errors / 5 warnings)
-- No behavior change observable from any CLI surface

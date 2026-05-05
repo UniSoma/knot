@@ -59,11 +59,13 @@
   "Body-section flag tokens for `knot create` (long form, `=` form
    prefix, and short alias) mapped to the opts key that `cli/create-cmd`
    expects. `--body` is intentionally absent — that is `knot update`'s
-   whole-body-replace flag and would silently swallow the value here."
+   whole-body-replace flag and would silently swallow the value here.
+   `--acceptance` is intentionally absent — under the v0.3 schema it
+   is a structured frontmatter list, parsed as a repeatable string by
+   babashka.cli."
   {"--description" :description
    "-d"            :description
-   "--design"      :design
-   "--acceptance"  :acceptance})
+   "--design"      :design})
 
 (def ^:private update-body-flags
   "Body flags for `knot update`: the create set plus `--body` for
@@ -173,14 +175,17 @@
 (defn- ->set
   "Coerce an opt value to a non-empty set, or nil. babashka.cli with
    `:coerce []` always returns a vector even for a single occurrence; a
-   bare string is also tolerated. Empty inputs become nil so the cli
-   primitive treats the dimension as unfiltered."
+   bare string is also tolerated. A bare boolean (e.g. from
+   `--acceptance-complete=false`) is wrapped in a singleton set. Empty
+   inputs become nil so the cli primitive treats the dimension as
+   unfiltered."
   [v]
   (cond
-    (nil? v)        nil
-    (string? v)     #{v}
-    (sequential? v) (when (seq v) (set v))
-    :else           nil))
+    (nil? v)         nil
+    (boolean? v)     #{v}
+    (string? v)      #{v}
+    (sequential? v)  (when (seq v) (set v))
+    :else            nil))
 
 (defn- filter-opts-from-cli
   "Project the parsed CLI `opts` map onto the keyword-set shape that
@@ -193,7 +198,7 @@
               (assoc acc k s)
               acc))
           {}
-          [:status :assignee :tag :type :mode]))
+          [:status :assignee :tag :type :mode :acceptance-complete]))
 
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
@@ -532,9 +537,10 @@
 
 (defn- update-handler
   "Handle `knot update <id> [flags...]`. Frontmatter flags route through
-   the parser; body flags (`--description / --design / --acceptance /
-   --body`) are pre-extracted before babashka.cli sees them so dash-
-   prefixed values survive intact. With `--json`, not-found and
+   the parser; body flags (`--description / --design / --body`) are
+   pre-extracted before babashka.cli sees them so dash-prefixed values
+   survive intact. The `--ac`/`--done`/`--undone` triple flips a single
+   frontmatter `acceptance` entry. With `--json`, not-found and
    ambiguous-id failures route to the v0.3 error envelope on stdout;
    conflicting body flags emit `invalid_argument`. Tag splitting mirrors
    `create-handler` so the on-disk `:tags` field stays a YAML list."
@@ -580,6 +586,27 @@
               (= :ambiguous (:kind data)) (throw e)
 
               :else (die (str "knot update: " (.getMessage e))))))))))
+
+(defn- migrate-ac-handler
+  "Handle `knot migrate-ac`. One-shot v0.3 migration: lifts every
+   ticket's body `## Acceptance Criteria` section into a frontmatter
+   `:acceptance` list and strips the section. Idempotent — running it
+   again on a migrated project is a no-op. Hidden from `knot help`
+   (not present in `command-order`); discoverable via `knot help
+   migrate-ac` or release notes."
+  [argv]
+  (let [{:keys [opts]} (bcli/parse-args argv (spec :migrate-ac))
+        json? (boolean (:json opts))
+        {:keys [migrated unchanged total]}
+        (cli/migrate-ac-cmd (discover-ctx) {})]
+    (if json?
+      (println-out (output/envelope-str
+                    (array-map :migrated  migrated
+                               :unchanged unchanged
+                               :total     total)))
+      (println-out (str "Migrated " migrated " ticket"
+                        (when-not (= 1 migrated) "s")
+                        " (" unchanged " unchanged, " total " total).")))))
 
 (defn- edit-handler
   "Handle `knot edit <id>`."
@@ -835,6 +862,7 @@
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
         "update"   (update-handler rest-argv)
+        "migrate-ac" (migrate-ac-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

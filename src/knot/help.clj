@@ -186,7 +186,8 @@
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}
                   {:name :description :alias :d :body? true :desc "Body content for the Description section."}
                   {:name :design      :body? true :desc "Body content for the Design section."}
-                  {:name :acceptance  :body? true :desc "Body content for the Acceptance Criteria section."}]
+                  {:name :acceptance  :coerce []
+                   :desc "Acceptance criterion title (repeatable). Stored in frontmatter; rendered by `knot show`."}]
     :examples    [{:cmd "knot create \"Fix login bug\" -p 1 --tags auth,p0"
                    :note "Create a ticket at priority 1 with two tags."}]}
 
@@ -211,9 +212,13 @@
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
-                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :acceptance-complete :coerce :boolean
+                   :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot list --mode afk --tag p0"
-                   :note "Show afk-mode tickets tagged p0."}]}
+                   :note "Show afk-mode tickets tagged p0."}
+                  {:cmd "knot list --acceptance-complete=false"
+                   :note "Show tickets with at least one undone acceptance criterion."}]}
 
    :status
    {:group       :lifecycle
@@ -308,7 +313,9 @@
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
-                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :acceptance-complete :coerce :boolean
+                   :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot ready --mode afk"
                    :note "Show afk-mode tickets ready to start."}]}
 
@@ -324,7 +331,9 @@
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
-                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :acceptance-complete :coerce :boolean
+                   :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot blocked"
                    :note "Show tickets currently blocked by an open dep."}
                   {:cmd "knot blocked --mode afk"
@@ -342,7 +351,9 @@
                   {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
-                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}]
+                  {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :acceptance-complete :coerce :boolean
+                   :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot closed --limit 10"
                    :note "Show the ten most-recently-closed tickets."}
                   {:cmd "knot closed --type bug"
@@ -382,20 +393,26 @@
                   {:name :tags         :desc "Replace tags (comma-list); pass \"\" to clear."}
                   {:name :external-ref :coerce []
                    :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
+                  {:name :ac
+                   :desc "Acceptance criterion title to flip (exact match). Use with --done or --undone."}
+                  {:name :done   :coerce :boolean
+                   :desc "Mark the --ac criterion as done."}
+                  {:name :undone :coerce :boolean
+                   :desc "Mark the --ac criterion as not done."}
                   {:name :json :coerce :boolean
                    :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}
                   {:name :description :alias :d :body? true
                    :desc "Replace the ## Description section."}
                   {:name :design       :body? true
                    :desc "Replace the ## Design section."}
-                  {:name :acceptance   :body? true
-                   :desc "Replace the ## Acceptance Criteria section."}
                   {:name :body         :body? true
-                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design / --acceptance."}]
+                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design."}]
     :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
                    :note "Bump priority and replace the tag list."}
                   {:cmd "knot update kno-01abc --description \"New desc.\""
                    :note "Replace just the Description section."}
+                  {:cmd "knot update kno-01abc --ac \"Ship it\" --done"
+                   :note "Flip the matching frontmatter acceptance criterion to done."}
                   {:cmd "knot update kno-01abc --body \"Plain body.\""
                    :note "Destructive whole-body replace (use git to recover)."}]
     :exit-codes  [{:code 0 :when "ticket saved"}
@@ -415,6 +432,18 @@
                    :note "Same payload, JSON envelope — for scripts and agents."}]
     :exit-codes  [{:code 0 :when "report emitted successfully"}
                   {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}
+
+   :migrate-ac
+   {:group       :project
+    :description "One-shot v0.3 migration: lift body `## Acceptance Criteria` sections into structured frontmatter."
+    :args        []
+    :restrict?   true
+    :hidden?     true
+    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of plain text."}]
+    :examples    [{:cmd "knot migrate-ac"
+                   :note "Migrate every ticket; safe to re-run (idempotent)."}]
+    :exit-codes  [{:code 0 :when "migration complete (or nothing to migrate)"}
+                  {:code 1 :when "no project found, or another scan failure"}]}
 
    :check
    {:group       :project

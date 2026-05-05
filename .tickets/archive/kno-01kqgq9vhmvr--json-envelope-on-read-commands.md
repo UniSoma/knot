@@ -6,7 +6,7 @@ type: task
 priority: 1
 mode: afk
 created: '2026-05-01T02:53:50.004055763Z'
-updated: '2026-05-01T18:03:32.996037322Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-01T17:35:59.877129692Z'
 tags:
 - v0.3
@@ -15,6 +15,21 @@ tags:
 - needs-triage
 links:
 - kno-01kqe94cgmd2
+acceptance:
+- title: All `--json` read commands wrap output in the envelope
+  done: false
+- title: '`schema_version` set to `1` on every command'
+  done: false
+- title: 'Error path (unknown id, ambiguous id, validation failure) emits `{ok: false, error: {code, message, candidates?}}`'
+  done: false
+- title: 'Partial-id ambiguity error has `code: "ambiguous_id"` and populates `candidates`'
+  done: false
+- title: Snapshot tests cover envelope shape per command (success + at least one error path)
+  done: false
+- title: Existing tests updated for the new shape
+  done: false
+- title: CHANGELOG entry documents the breaking change
+  done: false
 ---
 
 ## Description
@@ -24,16 +39,6 @@ Adopt the tagged JSON envelope `{schema_version, ok, data?, error?}` as the sing
 On error (unknown id, ambiguous partial id, validation failure), `ok: false` carries `{code, message, candidates?}`. Partial-id ambiguity already exits 1 with candidates listed inline; under the envelope it surfaces as `{ok: false, error: {code: "ambiguous_id", candidates: [...]}}` in JSON mode.
 
 The `warnings: []` slot is reserved for future use; do not populate in this slice. Foundational for every other v0.3 slice that touches JSON.
-
-## Acceptance Criteria
-
-- [ ] All `--json` read commands wrap output in the envelope
-- [ ] `schema_version` set to `1` on every command
-- [ ] Error path (unknown id, ambiguous id, validation failure) emits `{ok: false, error: {code, message, candidates?}}`
-- [ ] Partial-id ambiguity error has `code: "ambiguous_id"` and populates `candidates`
-- [ ] Snapshot tests cover envelope shape per command (success + at least one error path)
-- [ ] Existing tests updated for the new shape
-- [ ] CHANGELOG entry documents the breaking change
 
 ## Notes
 

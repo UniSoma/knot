@@ -6,13 +6,42 @@ type: bug
 priority: 0
 mode: afk
 created: '2026-05-01T17:54:57.416209665Z'
-updated: '2026-05-01T19:35:09.978736855Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-01T19:35:09.978736855Z'
 tags:
 - v0.3
 - test
 - flake
 - id-gen
+acceptance:
+- title: '`knot.ticket/generate-id` is deterministically collision-free for any number of consecutive same-ms calls within a single process (covered by `advance-id-state` unit tests)'
+  done: false
+- title: '`generate-id` public signature remains single-arity `(generate-id prefix)` — no clock-injection seam exposed'
+  done: false
+- title: 'Id format unchanged: `<prefix>-<12 lowercase Crockford-base32 chars>`; existing `generate-id-test` regex/length assertions pass without modification'
+  done: false
+- title: State held in a `defonce` `^:private` atom in `knot.ticket`; no test-only reset hook
+  done: false
+- title: '`knot.store/save-new!` exists with the documented two-callback signature and retries on filesystem-level id collision'
+  done: false
+- title: On exhaustion, throws `ex-info` with `{:kind :id-collision-exhausted :attempts <n> :last-id <id>}`; default `max-retries` is 10
+  done: false
+- title: Atomic write via `Files/write` with `OpenOption[] {CREATE_NEW, WRITE}` — no `fs/exists?`-then-write TOCTOU pattern
+  done: false
+- title: '`knot.store/save!` overwrite-for-updates semantics unchanged'
+  done: false
+- title: '`cli/create-cmd` uses `save-new!`; cross-process same-ms create attempts no longer silently overwrite each other'
+  done: false
+- title: '`create-spaced!` test helper (cli_test.clj:1902–1910) removed; its 4 callsites (lines 2019, 2042, 2058, 2059) use plain `cli/create-cmd`'
+  done: false
+- title: '`save-direct` helper (cli_test.clj:2361) retained — still load-bearing for `partial-id-resolution-test`'
+  done: false
+- title: prime-cmd-json-test passes 100 consecutive `bb test` runs without modification to its body
+  done: false
+- title: No silent sleeps introduced
+  done: false
+- title: '`bb test` and `clj-kondo --lint src test` both clean'
+  done: false
 ---
 
 ## Description
@@ -50,28 +79,6 @@ Per attempt: call `(gen-id-fn)`, call `(build-fn id)`, compute the target path (
 - **`knot.ticket-test`** — extract `^:private advance-id-state` (pure fn: `(last-state, now-ms, prefix) → [new-state, id]`) and unit-test the bump algorithm directly via `#'knot.ticket/advance-id-state`: same-ms-bumps-rand, new-ms-fresh-rand, overflow-bumps-ts. The public `generate-id` signature stays single-arity — no clock-injection seam.
 - **`knot.store-test`** — new `save-new!` tests, driven by a deterministic `gen-id-fn` backed by `(atom [id1 id2 …])`: happy path (single id, creates file, returns path), collision retry (seq `[taken-id taken-id fresh-id]` with `taken-id` pre-staged on disk → succeeds at `fresh-id`, retry count = 2), exhaustion (seq of all taken ids → throws `:id-collision-exhausted` with `:attempts 10` after the bound is hit).
 - **`prime-cmd-json-test`** — line 2333 sub-test left exactly as written; verify it now passes naturally under the fixed `cli/create-cmd`.
-
-## Acceptance Criteria
-
-**Layer A (monotonic factory):**
-- [ ] `knot.ticket/generate-id` is deterministically collision-free for any number of consecutive same-ms calls within a single process (covered by `advance-id-state` unit tests)
-- [ ] `generate-id` public signature remains single-arity `(generate-id prefix)` — no clock-injection seam exposed
-- [ ] Id format unchanged: `<prefix>-<12 lowercase Crockford-base32 chars>`; existing `generate-id-test` regex/length assertions pass without modification
-- [ ] State held in a `defonce` `^:private` atom in `knot.ticket`; no test-only reset hook
-
-**Layer B (atomic create-or-retry):**
-- [ ] `knot.store/save-new!` exists with the documented two-callback signature and retries on filesystem-level id collision
-- [ ] On exhaustion, throws `ex-info` with `{:kind :id-collision-exhausted :attempts <n> :last-id <id>}`; default `max-retries` is 10
-- [ ] Atomic write via `Files/write` with `OpenOption[] {CREATE_NEW, WRITE}` — no `fs/exists?`-then-write TOCTOU pattern
-- [ ] `knot.store/save!` overwrite-for-updates semantics unchanged
-
-**Integration & cleanup:**
-- [ ] `cli/create-cmd` uses `save-new!`; cross-process same-ms create attempts no longer silently overwrite each other
-- [ ] `create-spaced!` test helper (cli_test.clj:1902–1910) removed; its 4 callsites (lines 2019, 2042, 2058, 2059) use plain `cli/create-cmd`
-- [ ] `save-direct` helper (cli_test.clj:2361) retained — still load-bearing for `partial-id-resolution-test`
-- [ ] prime-cmd-json-test passes 100 consecutive `bb test` runs without modification to its body
-- [ ] No silent sleeps introduced
-- [ ] `bb test` and `clj-kondo --lint src test` both clean
 
 ## Notes
 

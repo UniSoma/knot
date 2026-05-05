@@ -6,13 +6,26 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-01T02:54:02.645480566Z'
-updated: '2026-05-02T21:19:18.925616087Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-02T20:45:22.418074018Z'
 tags:
 - v0.3
 - cli
 - cleanup
 - needs-triage
+acceptance:
+- title: '`--afk` flag removed from `knot create`'
+  done: false
+- title: '`--hitl` flag removed from `knot create`'
+  done: false
+- title: Help text updated to remove the shortcut entries
+  done: false
+- title: Init-stub `.knot.edn` template has a comment under `:modes` forbidding shortcut flags ("use --mode <value> always; do not add per-mode shortcut flags")
+  done: false
+- title: Tests updated; any test using `--afk`/`--hitl` migrated to `--mode <value>`
+  done: false
+- title: CHANGELOG entry notes the breaking change
+  done: false
 ---
 
 ## Description
@@ -24,15 +37,6 @@ On a project that customizes `:modes` to drop `afk` or `hitl` (e.g. `:modes ["so
 After this slice, `--mode <value>` is the only path to set the mode on `knot create`. Add a comment to the `:modes` section of the init stub forbidding new mode-shortcut flags as `:modes` grows.
 
 Pre-1.0 break window — no deprecation cycle.
-
-## Acceptance Criteria
-
-- [ ] `--afk` flag removed from `knot create`
-- [ ] `--hitl` flag removed from `knot create`
-- [ ] Help text updated to remove the shortcut entries
-- [ ] Init-stub `.knot.edn` template has a comment under `:modes` forbidding shortcut flags ("use --mode <value> always; do not add per-mode shortcut flags")
-- [ ] Tests updated; any test using `--afk`/`--hitl` migrated to `--mode <value>`
-- [ ] CHANGELOG entry notes the breaking change
 
 ## Notes
 

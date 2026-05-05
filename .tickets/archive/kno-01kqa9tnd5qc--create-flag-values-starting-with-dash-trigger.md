@@ -6,12 +6,24 @@ type: bug
 priority: 2
 mode: hitl
 created: '2026-04-28T15:02:54.117024754Z'
-updated: '2026-04-28T20:20:07.609752815Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-04-28T20:20:07.609752815Z'
 tags:
 - cli
 - parsing
+acceptance:
+- title: '`bb knot create "T" --acceptance "- [ ] item"` succeeds and writes the bullet item under `## Acceptance Criteria` in the body'
+  done: false
+- title: Same for `--description` and `--design` when their values start with `-`
+  done: false
+- title: Existing flags (`--type`, `--priority`, `--tags`, etc.) still parse identically
+  done: false
+- title: 'Test: an end-to-end `run-knot` integration test creating a ticket whose acceptance contains `- [ ]` items'
+  done: false
+- title: 'Stretch: explore whether the same workaround / pre-processor can apply to other flags accepting freeform text (e.g. `--summary`, `add-note` text)'
+  done: false
 ---
+
 ## Reproduction Steps
 
 ```
@@ -52,14 +64,6 @@ Two paths:
 2. **Skip babashka.cli for body-section flags**. Parse `--description / --design / --acceptance` ourselves in `create-handler` (consume the next argv slot verbatim), then strip them from argv before delegating the rest to `babashka.cli`. Clean separation, scoped to `create`, and forward-compatible.
 
 Option 2 is preferred. Body-section flags are a special case — they're the only ones whose values are reasonably expected to contain dashes.
-
-## Acceptance Criteria
-
-- [ ] `bb knot create "T" --acceptance "- [ ] item"` succeeds and writes the bullet item under `## Acceptance Criteria` in the body
-- [ ] Same for `--description` and `--design` when their values start with `-`
-- [ ] Existing flags (`--type`, `--priority`, `--tags`, etc.) still parse identically
-- [ ] Test: an end-to-end `run-knot` integration test creating a ticket whose acceptance contains `- [ ]` items
-- [ ] Stretch: explore whether the same workaround / pre-processor can apply to other flags accepting freeform text (e.g. `--summary`, `add-note` text)
 
 ## Notes
 

@@ -6,9 +6,29 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-04-28T20:23:18.013529700Z'
-updated: '2026-04-28T23:32:52.637736467Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-04-28T23:32:52.637736467Z'
+acceptance:
+- title: knot --help, knot -h, and knot help all exit 0 and print to stdout (not stderr)
+  done: false
+- title: knot help <cmd> and knot <cmd> --help / -h print per-command help on stdout, exit 0
+  done: false
+- title: Top-level help groups commands (Project / Lifecycle / Graph / Listing / Notes) rather than a flat list
+  done: false
+- title: Per-command help shows synopsis, flag list with descriptions, at least one example, and exit-code semantics
+  done: false
+- title: 'Bare knot (no args) keeps current behavior: usage on stderr, exit 1'
+  done: false
+- title: Help registry is a single data-driven map; no duplicated text between top-level and per-command output
+  done: false
+- title: knot help unknown-cmd exits 1 with a clear stderr error
+  done: false
+- title: 'Integration tests cover: --help at root, --help on at least two subcommands (create + dep tree), and the unknown-help-target error path'
+  done: false
+- title: Help output contains no ANSI escapes when stdout is piped
+  done: false
 ---
+
 ## Description
 
 The CLI has no --help flag at root or for any subcommand. bb knot --help falls through the case in -main and exits 1 with 'unknown command: --help' plus the bare usage on stderr. Bare bb knot prints usage to stderr and exits 1. There is no per-command help, no flag-level documentation, no usage examples, no exit-code documentation, and no structural grouping in the existing flat usage block.
@@ -29,18 +49,6 @@ Routing changes in -main:
 - bare 'knot' (no args)                        -> current behavior (usage on stderr, exit 1) so scripts do not silently no-op
 
 Help is rendered as plain text with no ANSI escapes when stdout is piped, matching the existing 'ls' output discipline.
-
-## Acceptance Criteria
-
-- [ ] knot --help, knot -h, and knot help all exit 0 and print to stdout (not stderr)
-- [ ] knot help <cmd> and knot <cmd> --help / -h print per-command help on stdout, exit 0
-- [ ] Top-level help groups commands (Project / Lifecycle / Graph / Listing / Notes) rather than a flat list
-- [ ] Per-command help shows synopsis, flag list with descriptions, at least one example, and exit-code semantics
-- [ ] Bare knot (no args) keeps current behavior: usage on stderr, exit 1
-- [ ] Help registry is a single data-driven map; no duplicated text between top-level and per-command output
-- [ ] knot help unknown-cmd exits 1 with a clear stderr error
-- [ ] Integration tests cover: --help at root, --help on at least two subcommands (create + dep tree), and the unknown-help-target error path
-- [ ] Help output contains no ANSI escapes when stdout is piped
 
 ## Notes
 

@@ -4,6 +4,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [flatland.ordered.map :as om]
+            [knot.acceptance :as acceptance]
             [knot.check :as check]
             [knot.config :as config]
             [knot.git :as git]
@@ -36,19 +37,16 @@
 
 (defn- build-body
   "Assemble the markdown body from the optional section flags. The title
-   lives in frontmatter, not the body — with no sections supplied the
-   body is the empty string."
-  [{:keys [description design acceptance]}]
+   and the acceptance criteria live in frontmatter, not the body — with
+   no sections supplied the body is the empty string."
+  [{:keys [description design]}]
   (let [sections
         (cond-> []
           (not (str/blank? description))
           (conj (str "## Description\n\n" description "\n"))
 
           (not (str/blank? design))
-          (conj (str "## Design\n\n" design "\n"))
-
-          (not (str/blank? acceptance))
-          (conj (str "## Acceptance Criteria\n\n" acceptance "\n")))]
+          (conj (str "## Design\n\n" design "\n")))]
     (if (empty? sections)
       ""
       (str/join "\n" sections))))
@@ -56,10 +54,11 @@
 (defn- build-frontmatter
   "Build a frontmatter map with a stable, human-readable key order. Keys
    present in this canonical order: id, title, status, type, priority,
-   mode, created, updated, assignee, parent, tags, external_refs. Optional
-   keys are omitted when their value is nil/blank/empty."
+   mode, created, updated, assignee, parent, tags, external_refs,
+   acceptance. Optional keys are omitted when their value is
+   nil/blank/empty."
   [{:keys [id title status type priority assignee mode created updated
-           tags parent external-ref]}]
+           tags parent external-ref acceptance]}]
   (let [pairs [[:id            id]
                [:title         title]
                [:status        status]
@@ -71,7 +70,8 @@
                [:assignee      assignee]
                [:parent        parent]
                [:tags          (when (seq tags) (vec tags))]
-               [:external_refs (when (seq external-ref) (vec external-ref))]]]
+               [:external_refs (when (seq external-ref) (vec external-ref))]
+               [:acceptance    (when (seq acceptance) (vec acceptance))]]]
     (into (om/ordered-map)
           (filter (fn [[_ v]] (some? v)))
           pairs)))
@@ -126,7 +126,9 @@
                                :assignee     (or (:assignee opts) assignee)
                                :tags         (:tags opts)
                                :parent       (:parent opts)
-                               :external-ref (:external-ref opts)})
+                               :external-ref (:external-ref opts)
+                               :acceptance   (acceptance/from-titles
+                                              (:acceptance opts))})
                              :body body}})
         saved    (store/save-new! project-root tickets-dir gen-id build-fn
                                   {:now now :terminal-statuses terminal-statuses})]
@@ -571,9 +573,11 @@
 (defn- update-body
   "Apply the body-mutation flags from `opts` to `body`. `--body`
    replaces the whole body; the sectional flags
-   (`:description`/`:design`/`:acceptance`) replace named sections in
-   place (or append when missing). `--body` is mutually exclusive with
-   the sectional flags — the caller must validate that before calling."
+   (`:description`/`:design`) replace named sections in place (or
+   append when missing). `--body` is mutually exclusive with the
+   sectional flags — the caller must validate that before calling.
+   Acceptance criteria are not body content under v0.3; they live in
+   frontmatter and flip via `--ac --done/--undone`."
   [body opts]
   (cond
     (contains? opts :body)
@@ -582,18 +586,57 @@
     :else
     (cond-> body
       (contains? opts :description) (replace-section "Description" (:description opts))
-      (contains? opts :design)      (replace-section "Design" (:design opts))
-      (contains? opts :acceptance)  (replace-section "Acceptance Criteria"
-                                                     (:acceptance opts)))))
+      (contains? opts :design)      (replace-section "Design" (:design opts)))))
+
+(defn- validate-ac-flip-opts!
+  "Validate the `--ac` / `--done` / `--undone` flag triple. `--ac`
+   requires exactly one of `--done` or `--undone`; `--done` and
+   `--undone` each require `--ac`. Throws `ex-info` on misuse so
+   `update-cmd` can surface a clean message."
+  [opts]
+  (let [ac?     (contains? opts :ac)
+        done?   (boolean (:done opts))
+        undone? (boolean (:undone opts))]
+    (cond
+      (and done? undone?)
+      (throw (ex-info "--done and --undone are mutually exclusive"
+                      {:offending [:done :undone]}))
+
+      (and ac? (not (or done? undone?)))
+      (throw (ex-info "--ac requires --done or --undone"
+                      {:offending [:ac]}))
+
+      (and (or done? undone?) (not ac?))
+      (throw (ex-info (str "--" (if done? "done" "undone")
+                           " requires --ac \"<title>\"")
+                      {:offending [(if done? :done :undone)]})))))
+
+(defn- apply-ac-flip
+  "When `opts` carries `--ac`, flip the matching frontmatter entry on
+   `fm`. Returns the (possibly updated) frontmatter. Throws when the
+   title does not match any entry — the user named a criterion that
+   does not exist."
+  [fm opts]
+  (if-not (contains? opts :ac)
+    fm
+    (let [title    (:ac opts)
+          done?    (boolean (:done opts))
+          flipped  (acceptance/flip (:acceptance fm) title done?)]
+      (if flipped
+        (assoc fm :acceptance flipped)
+        (throw (ex-info (str "no acceptance criterion matching " (pr-str title))
+                        {:ac-not-found title}))))))
 
 (defn update-cmd
   "Apply non-interactive updates to the ticket whose id is `(:id opts)`
    (full or partial). Frontmatter flags (`:title`, `:type`, `:priority`,
    `:mode`, `:assignee`, `:parent`, `:tags`, `:external-ref`) set field
-   values; sectional body flags (`:description`, `:design`,
-   `:acceptance`) replace those `## ...` sections in place; `:body`
-   replaces the whole body and is mutually exclusive with the sectional
-   flags. Optional frontmatter fields (`:assignee`, `:parent`, `:tags`,
+   values; sectional body flags (`:description`, `:design`) replace
+   those `## ...` sections in place; `:body` replaces the whole body
+   and is mutually exclusive with the sectional flags. The acceptance
+   triple `(:ac \"<title>\" + :done|:undone)` flips the `:done` state
+   of one frontmatter `acceptance` entry; the title must match exactly.
+   Optional frontmatter fields (`:assignee`, `:parent`, `:tags`,
    `:external_refs`) are cleared when the supplied value is blank or
    empty. Returns the saved path, or nil when no ticket matches; throws
    on ambiguous partial ids. `:updated` bumps on every successful save
@@ -605,16 +648,19 @@
    bump."
   [ctx opts]
   (when (and (contains? opts :body)
-             (some #(contains? opts %) [:description :design :acceptance]))
+             (some #(contains? opts %) [:description :design]))
     (throw (ex-info (str "--body is mutually exclusive with "
-                         "--description / --design / --acceptance")
+                         "--description / --design")
                     {:offending (filter #(contains? opts %)
-                                        [:description :design :acceptance])})))
+                                        [:description :design])})))
+  (validate-ac-flip-opts! opts)
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
     (when-let [loaded (resolve-or-nil project-root tickets-dir (:id opts))]
       (let [full-id (get-in loaded [:frontmatter :id])
-            fm*     (update-frontmatter (:frontmatter loaded) opts)
+            fm*     (-> (:frontmatter loaded)
+                        (update-frontmatter opts)
+                        (apply-ac-flip opts))
             body*   (update-body (:body loaded) opts)
             ticket* (assoc loaded :frontmatter fm* :body body*)
             saved   (store/save! project-root tickets-dir full-id nil ticket*
@@ -633,7 +679,7 @@
         (keep (fn [k]
                 (when-let [v (get opts k)]
                   (when (seq v) [k v]))))
-        [:status :assignee :tag :type :mode]))
+        [:status :assignee :tag :type :mode :acceptance-complete]))
 
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
@@ -1088,6 +1134,33 @@
     (if json?
       (output/info-json data)
       (output/info-text data))))
+
+(defn migrate-ac-cmd
+  "One-shot v0.3 migration: walk every ticket file (live + archive),
+   lift the body's `## Acceptance Criteria` section into a frontmatter
+   `:acceptance` list, strip the body section. Tickets with nothing
+   to migrate are left untouched on disk so re-running is idempotent
+   and `:updated` is preserved for unchanged files. Returns
+   `{:migrated <n> :unchanged <n> :total <n>}`."
+  [ctx _opts]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)
+        scan-result (check/scan project-root tickets-dir)
+        tickets     (:tickets scan-result)
+        results     (vec (for [t tickets
+                               :let [migrated (acceptance/migrate-ticket t)
+                                     changed? (not= t migrated)]]
+                           {:ticket   t
+                            :migrated migrated
+                            :changed? changed?}))]
+    (doseq [{:keys [migrated changed?]} results
+            :when changed?]
+      (let [full-id (get-in migrated [:frontmatter :id])]
+        (store/save! project-root tickets-dir full-id nil migrated
+                     {:now now :terminal-statuses terminal-statuses})))
+    {:total     (count results)
+     :migrated  (count (filter :changed? results))
+     :unchanged (count (remove :changed? results))}))
 
 (defn- stub-config
   "Render a self-documenting `.knot.edn` stub with every known key present

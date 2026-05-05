@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-01T02:54:18.007748541Z'
-updated: '2026-05-04T12:51:18.830399477Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-04T12:51:18.830399477Z'
 tags:
 - v0.3
@@ -15,6 +15,15 @@ tags:
 - needs-triage
 links:
 - kno-01kqdaxz86nv
+acceptance:
+- title: Codebase grep run for each value class listed in the description
+  done: true
+- title: Findings recorded in this ticket's notes (file:line + value + remediation note)
+  done: true
+- title: Child ticket filed for each genuinely-hardcoded site not already covered
+  done: true
+- title: 'Optional: regression test or lint rule that fails CI if a `:statuses`/`:modes`/`:types` literal appears in non-data namespaces'
+  done: false
 ---
 
 ## Description
@@ -34,13 +43,6 @@ Three known sites of this pattern have already surfaced:
 - `--afk`/`--hitl` shortcut flags hardcode mode names (covered by separate v0.3 ticket)
 
 The goal of this ticket is to find any *additional* sites and file child tickets per finding. Bonus: write a regression discipline (test, lint rule, or `knot check` codebase rule) that catches future re-introduction.
-
-## Acceptance Criteria
-
-- [x] Codebase grep run for each value class listed in the description
-- [x] Findings recorded in this ticket's notes (file:line + value + remediation note)
-- [x] Child ticket filed for each genuinely-hardcoded site not already covered
-- [ ] Optional: regression test or lint rule that fails CI if a `:statuses`/`:modes`/`:types` literal appears in non-data namespaces
 
 ## Notes
 

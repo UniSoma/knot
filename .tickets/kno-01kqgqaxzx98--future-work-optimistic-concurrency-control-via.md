@@ -6,11 +6,22 @@ type: task
 priority: 4
 mode: hitl
 created: '2026-05-01T02:54:25.277798011Z'
-updated: '2026-05-01T02:54:25.277798011Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - future
 - concurrency
 - needs-triage
+acceptance:
+- title: Decision recorded once a real conflict is observed (or once parallelism scales)
+  done: false
+- title: '`--if-updated <ts>` flag added to all mutating commands'
+  done: false
+- title: 'Failure envelope shape implemented: `{ok: false, error: {code: "stale_write", current_updated: "..."}}`'
+  done: false
+- title: Tests cover both happy path (matching ts) and stale path (mismatched ts)
+  done: false
+- title: README "Concurrency" section updated to document the new opt-in path
+  done: false
 ---
 
 ## Description
@@ -24,11 +35,3 @@ Today knot does no locking and assumes one writer per ticket at a time. As multi
 - The JSON envelope adopted in the v0.3 cut already returns `updated` on every read, so the round-trip is naturally available.
 
 This is **not** for v0.3. Reopen this ticket once real conflicts surface in practice or once multi-agent parallelism becomes routine. Until then, the concurrency model is documented in README (per the v0.3 docs slice).
-
-## Acceptance Criteria
-
-- [ ] Decision recorded once a real conflict is observed (or once parallelism scales)
-- [ ] `--if-updated <ts>` flag added to all mutating commands
-- [ ] Failure envelope shape implemented: `{ok: false, error: {code: "stale_write", current_updated: "..."}}`
-- [ ] Tests cover both happy path (matching ts) and stale path (mismatched ts)
-- [ ] README "Concurrency" section updated to document the new opt-in path

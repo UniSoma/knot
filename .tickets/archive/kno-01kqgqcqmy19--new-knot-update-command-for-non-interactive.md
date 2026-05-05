@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-01T02:55:24.318439621Z'
-updated: '2026-05-02T19:28:38.459642999Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-02T19:28:38.459642999Z'
 parent: kno-01kqfaqw9bfk
 tags:
@@ -16,6 +16,23 @@ tags:
 deps:
 - kno-01kqgq9vhmvr
 - kno-01kqgqbjg012
+acceptance:
+- title: '`knot update <id>` command implemented'
+  done: false
+- title: 'Full flag set: `--title --tags --priority --type --mode --assignee --parent --external-ref --description --design --acceptance --body`'
+  done: false
+- title: '`--body` works without `--force`; CHANGELOG flags it as destructive'
+  done: false
+- title: '`--json` returns the post-update ticket via envelope'
+  done: false
+- title: '`:updated` bumps on every write'
+  done: false
+- title: No `--note` flag (append remains `add-note`'s job)
+  done: false
+- title: Tests cover frontmatter-only update, sectional body update, full-body replace, `--json` mode
+  done: false
+- title: Help text + README updated; AFK-agent path documented
+  done: false
 ---
 
 ## Description
@@ -47,17 +64,6 @@ Body (whole or sectional):
 `add-note` stays distinct and append-only — `update` is purely set/replace, not append. Do not add `--note` to `update`.
 
 `:updated` frontmatter timestamp bumps on every successful write (re-uses `store/save!`).
-
-## Acceptance Criteria
-
-- [ ] `knot update <id>` command implemented
-- [ ] Full flag set: `--title --tags --priority --type --mode --assignee --parent --external-ref --description --design --acceptance --body`
-- [ ] `--body` works without `--force`; CHANGELOG flags it as destructive
-- [ ] `--json` returns the post-update ticket via envelope
-- [ ] `:updated` bumps on every write
-- [ ] No `--note` flag (append remains `add-note`'s job)
-- [ ] Tests cover frontmatter-only update, sectional body update, full-body replace, `--json` mode
-- [ ] Help text + README updated; AFK-agent path documented
 
 ## Notes
 

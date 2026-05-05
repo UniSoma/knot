@@ -6,10 +6,19 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T14:53:31.601460483Z'
-updated: '2026-05-01T03:11:18.232581707Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 links:
 - kno-01kqgqafcxvv
 - kno-01kqgqfwk4h1
+acceptance:
+- title: All 14 listed Windows failures are resolved.
+  done: false
+- title: '`bb test` exits 0 on `windows-latest` in CI.'
+  done: false
+- title: '`continue-on-error: ${{ matrix.os == ''windows-latest'' }}` is removed from `.github/workflows/ci.yml`.'
+  done: false
+- title: No regressions on `ubuntu-latest` or `macos-latest`.
+  done: false
 ---
 
 ## Description
@@ -68,10 +77,3 @@ This is **environmental**, not a code fix. Options:
 - bb-specific: `BABASHKA_OPTS: '-Dfile.encoding=UTF-8'` or similar
 
 Try `JAVA_TOOL_OPTIONS` first — simplest, least invasive.
-
-## Acceptance Criteria
-
-- [ ] All 14 listed Windows failures are resolved.
-- [ ] `bb test` exits 0 on `windows-latest` in CI.
-- [ ] `continue-on-error: ${{ matrix.os == 'windows-latest' }}` is removed from `.github/workflows/ci.yml`.
-- [ ] No regressions on `ubuntu-latest` or `macos-latest`.

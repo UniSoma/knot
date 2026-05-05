@@ -6,13 +6,29 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-04-28T23:37:02.837973325Z'
-updated: '2026-04-29T13:57:33.353030723Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-04-29T13:57:33.353030723Z'
 tags:
 - release
 - infra
 - v0.1
+acceptance:
+- title: Version constant defined in a single agreed location and exposed so `knot --version` prints it
+  done: false
+- title: '`CHANGELOG.md` exists at the repo root in Keep a Changelog format with an initial 0.0.1 section'
+  done: false
+- title: '`/release` slash command updated to reference correct paths and project name, and to handle the no-prior-tag case'
+  done: false
+- title: Tag format (`vX.Y.Z`) documented in `/release` and/or CHANGELOG header
+  done: false
+- title: Decision recorded (in this ticket or a follow-up) on whether a GitHub Actions release workflow ships now
+  done: false
+- title: README distribution snippet reviewed for any version-pinning implications post-tag
+  done: false
+- title: First tag `v0.0.1` cut once the above land
+  done: false
 ---
+
 ## Description
 
 Trying to cut v0.0.1 surfaced gaps in release tooling:
@@ -40,16 +56,6 @@ Open questions to resolve before implementation:
 6. **Slash command refresh** — update `/release` to reference `src/knot/...`, the correct project name, and to handle the no-prior-tag case gracefully (`git describe` fails on an unreleased repo).
 
 7. **bbin coordinate** — does the bbin install command in the README need a version-pinned ref after the first tag, or does it follow main automatically? Document either way.
-
-## Acceptance Criteria
-
-- [ ] Version constant defined in a single agreed location and exposed so `knot --version` prints it
-- [ ] `CHANGELOG.md` exists at the repo root in Keep a Changelog format with an initial 0.0.1 section
-- [ ] `/release` slash command updated to reference correct paths and project name, and to handle the no-prior-tag case
-- [ ] Tag format (`vX.Y.Z`) documented in `/release` and/or CHANGELOG header
-- [ ] Decision recorded (in this ticket or a follow-up) on whether a GitHub Actions release workflow ships now
-- [ ] README distribution snippet reviewed for any version-pinning implications post-tag
-- [ ] First tag `v0.0.1` cut once the above land
 
 ## Notes
 

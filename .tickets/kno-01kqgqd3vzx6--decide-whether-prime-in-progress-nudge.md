@@ -6,7 +6,7 @@ type: task
 priority: 4
 mode: hitl
 created: '2026-05-01T02:55:36.831466844Z'
-updated: '2026-05-01T03:11:18.438838679Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - v0.3
 - cli
@@ -15,6 +15,15 @@ deps:
 - kno-01kqgqc2ks70
 links:
 - kno-01kqe7aka8q9
+acceptance:
+- title: Decision recorded with rationale
+  done: false
+- title: 'If consolidating: `stale_in_progress` warning code added to `knot check`; `prime-in-progress-nudge` removed; tests cover the new path'
+  done: false
+- title: 'If keeping separate: ticket closed with note; no code changes'
+  done: false
+- title: 'If both: justification documented for why two surfaces is the right call here'
+  done: false
 ---
 
 ## Description
@@ -33,10 +42,3 @@ Tradeoffs:
 - Duplication (option 3) is the worst-of-both-worlds shape via-negativa flagged on other questions.
 
 Recommendation likely: option 1 for surface discipline, but `prime`'s zero-call ergonomics is real — needs design judgment.
-
-## Acceptance Criteria
-
-- [ ] Decision recorded with rationale
-- [ ] If consolidating: `stale_in_progress` warning code added to `knot check`; `prime-in-progress-nudge` removed; tests cover the new path
-- [ ] If keeping separate: ticket closed with note; no code changes
-- [ ] If both: justification documented for why two surfaces is the right call here

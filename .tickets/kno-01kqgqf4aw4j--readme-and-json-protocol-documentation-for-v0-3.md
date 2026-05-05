@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-01T02:56:42.844118574Z'
-updated: '2026-05-05T00:36:17.924925191Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 tags:
 - v0.3
 - docs
@@ -16,6 +16,19 @@ deps:
 - kno-01kqgqegm782
 links:
 - kno-01kqts0qxbvx
+acceptance:
+- title: README has a "Concurrency" section explaining the no-locking model and pointing at git + kno-01kqgqaxzx98
+  done: false
+- title: '`docs/json-protocol.md` exists (or equivalent README section), covering envelope shape, ok discriminator, error-code catalogue, partial-id contract, schema versioning'
+  done: false
+- title: Per-command `data` shapes are NOT duplicated in docs — link to `knot schema`
+  done: false
+- title: 'At least one example per envelope variant: success / error / partial-id ambiguity / mutation with meta'
+  done: false
+- title: CHANGELOG v0.3 entry consolidates every breaking change in one place
+  done: false
+- title: CI badge / docs links in README still work
+  done: false
 ---
 
 ## Description
@@ -42,15 +55,6 @@ Cover the user-visible documentation surface for the v0.3 changes.
 - `dep cycle` removed (replaced by `knot check`)
 - Acceptance criteria migrated from body to frontmatter (one-shot migration runs on first invocation)
 - Hardcoded `"in_progress"` replaced with `:active-status` (already shipped via kno-01kqdat9xssc, but mention in v0.3 release notes)
-
-## Acceptance Criteria
-
-- [ ] README has a "Concurrency" section explaining the no-locking model and pointing at git + kno-01kqgqaxzx98
-- [ ] `docs/json-protocol.md` exists (or equivalent README section), covering envelope shape, ok discriminator, error-code catalogue, partial-id contract, schema versioning
-- [ ] Per-command `data` shapes are NOT duplicated in docs — link to `knot schema`
-- [ ] At least one example per envelope variant: success / error / partial-id ambiguity / mutation with meta
-- [ ] CHANGELOG v0.3 entry consolidates every breaking change in one place
-- [ ] CI badge / docs links in README still work
 
 ## Notes
 

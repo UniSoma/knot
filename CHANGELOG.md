@@ -16,6 +16,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Acceptance criteria are now structured frontmatter
+  (`acceptance: [{title, done}]`) instead of freeform `- [ ]` checkboxes
+  in the body. The `## Acceptance Criteria` section is **never stored**
+  on disk — `knot show` synthesizes it from frontmatter at display
+  time, between the body and the inverse sections, exactly like
+  `## Linked` / `## Blockers` are synthesized today. Single source of
+  truth; no positional-index ambiguity.
+  - `knot create --acceptance "<title>"` is now a repeatable
+    string flag (model: `--external-ref`). Each occurrence appends one
+    entry with `done: false`. The dash-prefixed body-flag pre-extraction
+    no longer covers `--acceptance` because criterion titles are short
+    strings, not multi-line markdown. Existing `--description` /
+    `--design` body flags are unchanged.
+  - `knot update --ac "<title>" --done` (or `--undone`) flips a single
+    frontmatter entry. The title must match exactly (case-sensitive).
+    `--done` and `--undone` are mutually exclusive; `--ac` requires
+    one of them; `--done` / `--undone` each require `--ac`. Adding /
+    removing AC entries is deferred — use `knot edit` for now.
+  - `knot list --acceptance-complete=false` (also on `ready`,
+    `blocked`, `closed`) keeps only tickets with at least one undone
+    AC. `=true` keeps tickets where every AC is done. Tickets with no
+    `:acceptance` list are excluded from both filters — the dimension
+    is "completion of structured acceptance work", and absent ACs
+    mean that dimension does not apply.
+  - `knot check` gains an `acceptance_invalid` validator that catches
+    malformed entries: non-list `:acceptance`, non-map entries, missing
+    or non-string `:title`, missing or non-boolean `:done`. One issue
+    per offending entry; the validator runs unconditionally.
+  - **Migration**: a one-shot `knot migrate-ac` command (hidden from
+    top-level `knot help`) lifts every body's `## Acceptance Criteria`
+    section into structured frontmatter, then strips the section.
+    Both checkbox bullets (`- [ ] / - [x] / - [X]`) and plain bullets
+    (`- title`) are lifted; plain bullets default to `done: false`.
+    Idempotent on already-migrated tickets — safe to re-run.
+
 - New `knot info` command reports the project's effective runtime
   configuration and allowed values for agents, scripts, and humans.
   Five fixed sections: `Project` (knot version, name, prefix,
@@ -49,10 +84,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values; passing a blank string (or empty repeated `--external-ref`
   list) clears `:assignee` / `:parent` / `:tags` / `:external_refs`.
   Body flags replace named sections in place: `--description`,
-  `--design`, `--acceptance`. `--body <text>` replaces the *whole*
-  body and is destructive — there is **no `--force` ceremony**; git is
-  the documented undo path. `--body` is mutually exclusive with the
-  sectional body flags. `--json` returns the v0.3 success envelope
+  `--design`. (Acceptance criteria are no longer body content under
+  v0.3 — see the structured-frontmatter entry above; flip a single
+  AC's done state with `--ac "<title>" --done|--undone`.) `--body
+  <text>` replaces the *whole* body and is destructive — there is
+  **no `--force` ceremony**; git is the documented undo path. `--body`
+  is mutually exclusive with the sectional body flags. `--json` returns the v0.3 success envelope
   wrapping the post-mutation ticket under `:data` (no `:meta` slot —
   `update` never archives). `:updated` bumps on every successful save
   via `store/save!`. `--note` is intentionally absent: append remains

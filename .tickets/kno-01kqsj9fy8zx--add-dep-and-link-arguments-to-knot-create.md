@@ -6,7 +6,30 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-04T13:19:25.128614479Z'
-updated: '2026-05-04T15:20:13.485212755Z'
+updated: '2026-05-05T01:38:54.088449090Z'
+acceptance:
+- title: '`knot create --help` documents repeatable long-form `--dep <id>` and `--link <id>` flags, one id per occurrence, and calls out that `--dep` is lenient on missing targets while `--link` is strict.'
+  done: false
+- title: '`knot create "T" --dep <existing> --dep <missing>` succeeds, canonicalizes resolved dep ids, preserves unresolved deps verbatim, and dedupes duplicates after resolution while preserving first-occurrence order.'
+  done: false
+- title: '`knot create "T" --link <a> --link <b>` succeeds, writes reciprocal links on every touched ticket, and leaves archived targets archived.'
+  done: false
+- title: '`knot create "T" --dep X --link X` is allowed and records both relationships.'
+  done: false
+- title: Repeating the same dep or link, including equivalent partial/full ids that resolve to the same ticket, does not create duplicate entries.
+  done: false
+- title: 'Any strict `--link` failure aborts the command before ticket creation. Plain-text mode reports `knot create: ...`; `--json` returns a structured error envelope.'
+  done: false
+- title: If several strict relationship inputs are bad, the surfaced error is the first failing one in left-to-right CLI order.
+  done: false
+- title: 'Basic create validation still wins: a missing title fails before relationship resolution.'
+  done: false
+- title: Successful plain-text `create` still prints only the new ticket path.
+  done: false
+- title: Successful `create --json` still returns only the created ticket, adds no new `meta`, and includes the final `deps` and `links` state.
+  done: false
+- title: A simulated multi-file write failure during reciprocal-link application fails loudly and attempts rollback rather than silently leaving success state.
+  done: false
 ---
 
 ## Description
@@ -67,17 +90,3 @@ Preserve the current `create` success contracts so scripts and agents can adopt 
 ## Likely touch points
 
 Expect changes in the `create` help/spec surface, CLI arg parsing, `cli/create-cmd`, and the related help/unit/integration coverage. Keep `.claude/skills/knot/SKILL.md` in sync with the shipped CLI contract.
-
-## Acceptance Criteria
-
-- `knot create --help` documents repeatable long-form `--dep <id>` and `--link <id>` flags, one id per occurrence, and calls out that `--dep` is lenient on missing targets while `--link` is strict.
-- `knot create "T" --dep <existing> --dep <missing>` succeeds, canonicalizes resolved dep ids, preserves unresolved deps verbatim, and dedupes duplicates after resolution while preserving first-occurrence order.
-- `knot create "T" --link <a> --link <b>` succeeds, writes reciprocal links on every touched ticket, and leaves archived targets archived.
-- `knot create "T" --dep X --link X` is allowed and records both relationships.
-- Repeating the same dep or link, including equivalent partial/full ids that resolve to the same ticket, does not create duplicate entries.
-- Any strict `--link` failure aborts the command before ticket creation. Plain-text mode reports `knot create: ...`; `--json` returns a structured error envelope.
-- If several strict relationship inputs are bad, the surfaced error is the first failing one in left-to-right CLI order.
-- Basic create validation still wins: a missing title fails before relationship resolution.
-- Successful plain-text `create` still prints only the new ticket path.
-- Successful `create --json` still returns only the created ticket, adds no new `meta`, and includes the final `deps` and `links` state.
-- A simulated multi-file write failure during reciprocal-link application fails loudly and attempts rollback rather than silently leaving success state.

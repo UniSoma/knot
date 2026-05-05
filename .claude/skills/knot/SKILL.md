@@ -145,7 +145,12 @@ candidates; relay them, don't guess.
 - `-a / --assignee`
 - `--mode afk` / `--mode hitl` (default `hitl`)
 - `--tags`, `--parent`, `--external-ref`
-- `-d / --description`, `--design`, `--acceptance` for body sections
+- `-d / --description`, `--design` for body sections
+- `--acceptance "<title>"` (repeatable) appends a structured
+  acceptance criterion to frontmatter. Each entry is stored as
+  `{title, done: false}`; `knot show` synthesizes a `## Acceptance
+  Criteria` checklist from these at display time. There is no body
+  section to author by hand.
 
 Always pass `--description` when there's any context worth saving — a
 title-only ticket forces the next reader to reconstruct intent from
@@ -215,7 +220,12 @@ Flag set on `knot update`:
   (repeatable). Pass `""` (or no values for `--external-ref`) on
   optional fields to clear them; `--tags ""` clears all tags.
 - Body sections (replace in place; create if missing):
-  `--description`, `--design`, `--acceptance`.
+  `--description`, `--design`.
+- Acceptance flip: `--ac "<title>" --done` (or `--undone`) toggles
+  the `:done` state of one frontmatter `acceptance` entry. The title
+  must match exactly. `--done` and `--undone` are mutually exclusive;
+  `--ac` requires one of them. Use `knot edit` to add or remove AC
+  entries on existing tickets.
 - Whole body: `--body <text>` — destructive, mutually exclusive with
   the sectional flags. There is **no `--force`**; git is the
   documented undo path.
@@ -389,13 +399,16 @@ check                                  project-integrity scan (cycles, dangling
 create                                 new ticket (-t -p -a --tags --mode
                                        -d --design --acceptance --parent
                                        --external-ref)
+                                       --acceptance is repeatable; appends
+                                       structured frontmatter entries
 start / status / close / reopen        lifecycle (--summary on close)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode
                                        --assignee --parent --tags
                                        --external-ref --description --design
-                                       --acceptance --body)
+                                       --body; flip one acceptance entry
+                                       with --ac "<title>" --done|--undone)
 dep / undep / dep tree                 directional graph; cycle-checked on add
 link / unlink                          symmetric graph
 ```

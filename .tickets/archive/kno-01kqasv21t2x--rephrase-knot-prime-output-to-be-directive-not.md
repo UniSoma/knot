@@ -6,13 +6,33 @@ type: feature
 priority: 1
 mode: afk
 created: '2026-04-28T19:42:44.282541599Z'
-updated: '2026-04-28T19:57:39.364009165Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-04-28T19:57:39.364009165Z'
 tags:
 - cli
 - prime
 - agent
+acceptance:
+- title: First non-blank line of `bb knot prime` output is a directive ("Use `knot` for...") rather than a description ("You are working in a Knot project...")
+  done: false
+- title: 'Output contains a "user-says/you-do" mapping covering at least: what''s-next, let''s-tackle, I''m-done, note-that, blocked-on'
+  done: false
+- title: Output explicitly tells the agent NOT to `cat` or hand-edit files under `.tickets/`
+  done: false
+- title: Commands cheatsheet appears before the schema reference in the text output
+  done: false
+- title: '`In Progress` and `Ready` sections each include a one-line behavioral nudge about when/how to act on them'
+  done: false
+- title: Existing `prime-end-to-end-test` integration tests still pass (section headings present, `--json` shape preserved, archive-only and empty-project paths unchanged)
+  done: false
+- title: New integration test asserts the directive opening line and the presence of the user-phrase → command mapping
+  done: false
+- title: '`knot prime --json` output is unchanged in shape (the directive prose is text-only — JSON consumers shouldn''t have a new key forced on them)'
+  done: false
+- title: 'Stretch: `knot prime` output length is not noticeably longer than today''s output. The new content replaces description, doesn''t pile onto it.'
+  done: false
 ---
+
 ## Description
 
 The current prime output reads as environment description ("You are working in a Knot project. Tickets are markdown files..."), so agents file it under background trivia rather than direction. Rephrase as directives — explicit user-says/you-do mappings, plus negative-space guidance — so agents reach for knot instead of cat/grep/hand-editing. Origin: session on 2026-04-28 where the agent went to the filesystem to inspect a ticket despite prime being injected at session start.
@@ -35,18 +55,6 @@ Apply the following changes to the prime renderer (text and `--json` should trac
 - Phrase commands pushily, like skill descriptions: "Use `knot ls` whenever the user references open work, even if they don't say 'ticket'."
 - Bias toward table/bullet shape over prose so the directive content survives transcript compaction.
 - Pick one canonical path per intent (don't list `knot edit` and "open the file in $EDITOR" as alternatives).
-
-## Acceptance Criteria
-
-- [ ] First non-blank line of `bb knot prime` output is a directive ("Use `knot` for...") rather than a description ("You are working in a Knot project...")
-- [ ] Output contains a "user-says/you-do" mapping covering at least: what's-next, let's-tackle, I'm-done, note-that, blocked-on
-- [ ] Output explicitly tells the agent NOT to `cat` or hand-edit files under `.tickets/`
-- [ ] Commands cheatsheet appears before the schema reference in the text output
-- [ ] `In Progress` and `Ready` sections each include a one-line behavioral nudge about when/how to act on them
-- [ ] Existing `prime-end-to-end-test` integration tests still pass (section headings present, `--json` shape preserved, archive-only and empty-project paths unchanged)
-- [ ] New integration test asserts the directive opening line and the presence of the user-phrase → command mapping
-- [ ] `knot prime --json` output is unchanged in shape (the directive prose is text-only — JSON consumers shouldn't have a new key forced on them)
-- [ ] Stretch: `knot prime` output length is not noticeably longer than today's output. The new content replaces description, doesn't pile onto it.
 
 ## Notes
 

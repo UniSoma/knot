@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-01T02:55:02.777819341Z'
-updated: '2026-05-02T17:10:29.598160307Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-02T17:10:29.598160307Z'
 tags:
 - v0.3
@@ -15,6 +15,33 @@ tags:
 - needs-triage
 deps:
 - kno-01kqgq9vhmvr
+acceptance:
+- title: '`knot check` command implemented; routes through the envelope from kno-01kqgq9vhmvr (extending its contract: `ok: false` may coexist with `data`)'
+  done: false
+- title: All initial check codes implemented (`dep_cycle`, `unknown_id`, `invalid_status/type/mode/priority`, `terminal_outside_archive`, `missing_required_field`, `frontmatter_parse_error`, `invalid_active_status`)
+  done: false
+- title: Per-ticket vs global tier split as documented in Design; `<id>...` argument narrows the per-ticket tier only
+  done: false
+- title: Each issue carries `severity`, `code`, `ids` (always vector), `message`; optional `path`, `field`, `value` per shape spec
+  done: false
+- title: '`--severity` and `--code` filter flags work (repeatable, OR within / AND across); unknown severity rejected, unknown code accepted; filter applied before exit-code decision'
+  done: false
+- title: 'Exit codes: 0 clean / 1 errors / 2 unable-to-scan; `invalid_active_status` is an issue (not exit 2)'
+  done: false
+- title: 'Issues sorted: severity desc → code asc → first-id asc → message asc, in both JSON and text output'
+  done: false
+- title: '`scanned` counts files attempted by glob (parse-error files included)'
+  done: false
+- title: 'Human output: table (`SEVERITY CODE IDS MESSAGE`) + footer summary line; clean run shows `knot check: ok — scanned: …`'
+  done: false
+- title: '`knot dep cycle` hard-removed (handler + cli/dep-cycle-cmd deleted, `cycle` line removed from `knot help dep`); falls through to existing unknown-subcommand error'
+  done: false
+- title: '`config/validate!` refactored to extract `active-status-issue` predicate without changing throwing behavior'
+  done: false
+- title: Tests cover at least one positive case per check code; integration tests cover all three exit codes and both JSON envelope shapes
+  done: false
+- title: CHANGELOG covers the new command, the `dep cycle` removal (BREAKING), and the envelope-contract extension
+  done: false
 ---
 
 ## Description
@@ -183,22 +210,6 @@ Line numbers are pre-implementation references — re-verify before deleting in 
 5. **CLI integration.** `check-cmd` in `cli.clj`, routing in `main.clj`, exit codes 0/1/2, JSON envelope (success and error variants), help entry in `help.clj`.
 6. **Remove `dep cycle`.** Delete `cli/dep-cycle-cmd`, `dep-cycle-handler`, the `"cycle"` case in `dep-handler`, and the `cycle` line in `knot help dep`. Update tests that referenced `dep cycle` (rewrite them against `knot check`).
 7. **CHANGELOG.** New section noting added `knot check`, the BREAKING removal of `knot dep cycle`, and the envelope-contract extension (`ok: false` may now coexist with `data`).
-
-## Acceptance Criteria
-
-- [ ] `knot check` command implemented; routes through the envelope from kno-01kqgq9vhmvr (extending its contract: `ok: false` may coexist with `data`)
-- [ ] All initial check codes implemented (`dep_cycle`, `unknown_id`, `invalid_status/type/mode/priority`, `terminal_outside_archive`, `missing_required_field`, `frontmatter_parse_error`, `invalid_active_status`)
-- [ ] Per-ticket vs global tier split as documented in Design; `<id>...` argument narrows the per-ticket tier only
-- [ ] Each issue carries `severity`, `code`, `ids` (always vector), `message`; optional `path`, `field`, `value` per shape spec
-- [ ] `--severity` and `--code` filter flags work (repeatable, OR within / AND across); unknown severity rejected, unknown code accepted; filter applied before exit-code decision
-- [ ] Exit codes: 0 clean / 1 errors / 2 unable-to-scan; `invalid_active_status` is an issue (not exit 2)
-- [ ] Issues sorted: severity desc → code asc → first-id asc → message asc, in both JSON and text output
-- [ ] `scanned` counts files attempted by glob (parse-error files included)
-- [ ] Human output: table (`SEVERITY CODE IDS MESSAGE`) + footer summary line; clean run shows `knot check: ok — scanned: …`
-- [ ] `knot dep cycle` hard-removed (handler + cli/dep-cycle-cmd deleted, `cycle` line removed from `knot help dep`); falls through to existing unknown-subcommand error
-- [ ] `config/validate!` refactored to extract `active-status-issue` predicate without changing throwing behavior
-- [ ] Tests cover at least one positive case per check code; integration tests cover all three exit codes and both JSON envelope shapes
-- [ ] CHANGELOG covers the new command, the `dep cycle` removal (BREAKING), and the envelope-contract extension
 
 ## Notes
 

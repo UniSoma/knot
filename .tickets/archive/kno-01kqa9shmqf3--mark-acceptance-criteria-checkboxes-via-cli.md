@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-04-28T15:02:17.495095855Z'
-updated: '2026-05-01T03:03:08.271456083Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-01T03:03:08.271456083Z'
 tags:
 - v0.1
@@ -14,6 +14,21 @@ tags:
 - body
 deps:
 - kno-01kqa804gmgx
+acceptance:
+- title: Design questions above are resolved and recorded under `## Design` (or in a follow-up note)
+  done: false
+- title: One or more CLI commands implemented for flipping AC items done and undone
+  done: false
+- title: Body round-trip preserves every byte outside the flipped checkbox (locked in by tests, mirroring `freeform-body-round-trip-test`)
+  done: false
+- title: 'Tests cover: chosen indexing scheme, idempotent re-flip, missing section, missing index, reverse op, multi-flip stability'
+  done: false
+- title: '`knot show` continues to render the body verbatim, including `[x]` markers, with no special formatting'
+  done: false
+- title: '`:updated` frontmatter timestamp bumps on every flip (re-uses the `store/save!` path so archive routing still works if the ticket is also closed)'
+  done: false
+- title: Usage text and any docs are updated
+  done: false
 ---
 
 ## Description
@@ -38,16 +53,6 @@ Open questions to resolve before implementation:
 5. **Behavior on missing section / missing index / already-checked item** — no-op vs `ex-info`? Mirror the `undep` idempotent-no-op precedent or the `link` missing-id error precedent?
 
 6. **Round-trip discipline** — must preserve the rest of the body verbatim. No reflow, no normalization of whitespace, no reordering of items. The freeform-body regression tests added in issue 0009 set the bar.
-
-## Acceptance Criteria
-
-- [ ] Design questions above are resolved and recorded under `## Design` (or in a follow-up note)
-- [ ] One or more CLI commands implemented for flipping AC items done and undone
-- [ ] Body round-trip preserves every byte outside the flipped checkbox (locked in by tests, mirroring `freeform-body-round-trip-test`)
-- [ ] Tests cover: chosen indexing scheme, idempotent re-flip, missing section, missing index, reverse op, multi-flip stability
-- [ ] `knot show` continues to render the body verbatim, including `[x]` markers, with no special formatting
-- [ ] `:updated` frontmatter timestamp bumps on every flip (re-uses the `store/save!` path so archive routing still works if the ticket is also closed)
-- [ ] Usage text and any docs are updated
 
 ## Notes
 

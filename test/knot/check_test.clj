@@ -46,6 +46,72 @@
   [result code]
   (filterv #(= code (:code %)) (:issues result)))
 
+(deftest run-flags-acceptance-invalid
+  (testing "well-formed :acceptance entries produce no issues"
+    (let [tickets [(ticket "a" "open" []
+                           :acceptance [{:title "x" :done false}
+                                        {:title "y" :done true}])]
+          result  (run-with tickets)]
+      (is (empty? (issues-of result :acceptance_invalid)))))
+
+  (testing "missing :acceptance key produces no issues (the field is optional)"
+    (let [tickets [(ticket "a" "open" [])]
+          result  (run-with tickets)]
+      (is (empty? (issues-of result :acceptance_invalid)))))
+
+  (testing ":acceptance must be a sequential collection (string flagged)"
+    (let [tickets [(ticket "a" "open" [] :acceptance "oops")]
+          result  (run-with tickets)
+          issues  (issues-of result :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :error (:severity (first issues))))
+      (is (= ["a"] (:ids (first issues))))))
+
+  (testing "entries that are not maps are flagged"
+    (let [tickets [(ticket "a" "open" [] :acceptance ["just a string"])]
+          result  (run-with tickets)
+          issues  (issues-of result :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= ["a"] (:ids (first issues))))))
+
+  (testing "entry missing :title is flagged"
+    (let [tickets [(ticket "a" "open" [] :acceptance [{:done false}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :title (:field (first issues))))))
+
+  (testing "entry missing :done is flagged"
+    (let [tickets [(ticket "a" "open" [] :acceptance [{:title "x"}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :done (:field (first issues))))))
+
+  (testing "non-string :title is flagged"
+    (let [tickets [(ticket "a" "open" [] :acceptance [{:title 42 :done false}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :title (:field (first issues))))))
+
+  (testing "blank :title is flagged"
+    (let [tickets [(ticket "a" "open" [] :acceptance [{:title "" :done false}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :title (:field (first issues))))))
+
+  (testing "non-boolean :done is flagged"
+    (let [tickets [(ticket "a" "open" []
+                           :acceptance [{:title "x" :done "yes"}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 1 (count issues)))
+      (is (= :done (:field (first issues))))))
+
+  (testing "multiple bad entries on one ticket each yield their own issue"
+    (let [tickets [(ticket "a" "open" []
+                           :acceptance [{:title 1 :done false}
+                                        {:title "ok" :done "no"}])]
+          issues  (issues-of (run-with tickets) :acceptance_invalid)]
+      (is (= 2 (count issues))))))
+
 (deftest run-empty-project
   (testing "no tickets -> no issues, scanned counts pass through"
     (let [result (check/run {:tickets [] :config default-config

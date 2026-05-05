@@ -319,7 +319,27 @@
           (is (str/includes? trimmed "\"schema_version\":1"))
           (is (str/includes? trimmed "\"ok\":true"))
           (is (str/includes? trimmed "\"data\":["))
-          (is (str/includes? trimmed "\"status\":\"open\"")))))))
+          (is (str/includes? trimmed "\"status\":\"open\""))))))
+
+  (testing "knot list --acceptance-complete=false keeps only tickets with at least one undone AC"
+    (with-tmp tmp
+      (run-knot tmp "create" "no-ac")
+      (let [{:keys [out]} (run-knot tmp "create" "all-done"
+                                    "--acceptance" "x")
+            done-id (->> (str (fs/file-name (str/trim out)))
+                         (re-matches #"(.+)--all-done\.md")
+                         second)]
+        (run-knot tmp "update" done-id "--ac" "x" "--done")
+        (run-knot tmp "create" "still-pending"
+                  "--acceptance" "x" "--acceptance" "y"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "list" "--acceptance-complete=false")]
+        (is (zero? exit) (str "list --acceptance-complete err=" err))
+        (is (str/includes? out "still-pending"))
+        (is (not (str/includes? out "no-ac"))
+            "tickets without acceptance criteria are excluded")
+        (is (not (str/includes? out "all-done"))
+            "tickets where every AC is done are excluded")))))
 
 (deftest show-json-end-to-end-test
   (testing "show --json emits a v0.3 success envelope wrapping the ticket"
@@ -589,32 +609,13 @@
             "help text must not describe any --mode shortcut")))))
 
 (deftest create-body-flags-with-dash-prefixed-values-end-to-end-test
-  (testing "--acceptance with a dash-prefixed bullet value writes the body verbatim"
+  (testing "--description and --design accept dash-prefixed values"
     ;; Regression: babashka.cli mis-parsed body-section flag values whose
     ;; first token began with `-`, treating each whitespace-split fragment
     ;; as its own flag and (depending on neighbouring flags) either crashing
-    ;; or silently writing garbage. `--description / --design / --acceptance`
-    ;; must consume their next argv slot verbatim.
-    (with-tmp tmp
-      (let [{:keys [exit out err]}
-            (run-knot tmp "create" "T"
-                      "--acceptance" "- [ ] some item")]
-        (is (zero? exit) (str "create err=" err))
-        (let [text (slurp (str/trim out))]
-          (is (str/includes? text "## Acceptance Criteria"))
-          (is (str/includes? text "- [ ] some item"))))))
-
-  (testing "--acceptance=<value> form also accepts dash-prefixed values"
-    (with-tmp tmp
-      (let [{:keys [exit out err]}
-            (run-knot tmp "create" "T"
-                      "--acceptance=- [ ] some item")]
-        (is (zero? exit) (str "create err=" err))
-        (let [text (slurp (str/trim out))]
-          (is (str/includes? text "## Acceptance Criteria"))
-          (is (str/includes? text "- [ ] some item"))))))
-
-  (testing "--description and --design accept dash-prefixed values"
+    ;; or silently writing garbage. `--description / --design` must consume
+    ;; their next argv slot verbatim. (`--acceptance` is no longer a body
+    ;; flag in v0.3 — see the structured-frontmatter sub-test below.)
     (with-tmp tmp
       (let [{:keys [exit out err]}
             (run-knot tmp "create" "T"
@@ -631,17 +632,19 @@
     (with-tmp tmp
       (let [{:keys [exit out err]}
             (run-knot tmp "create" "T"
-                      "--priority"  "1"
-                      "--type"      "bug"
-                      "--tags"      "auth,p0"
-                      "--acceptance" "- [ ] item")]
+                      "--priority" "1"
+                      "--type"     "bug"
+                      "--tags"     "auth,p0"
+                      "--acceptance" "Ship it")]
         (is (zero? exit) (str "create err=" err))
         (let [text (slurp (str/trim out))]
           (is (str/includes? text "priority: 1"))
           (is (str/includes? text "type: bug"))
           (is (str/includes? text "- auth"))
           (is (str/includes? text "- p0"))
-          (is (str/includes? text "- [ ] item")))))))
+          (is (str/includes? text "- title: Ship it")
+              "acceptance is stored as a frontmatter list of {title done} maps")
+          (is (str/includes? text "  done: false")))))))
 
 (deftest mode-missing-on-legacy-tickets-test
   (testing "tickets without :mode load and behave leniently"
@@ -1673,7 +1676,29 @@
         (is (str/blank? err)
             "json error envelope goes to stdout, not stderr")
         (is (= false (:ok parsed)))
-        (is (= "not_found" (get-in parsed [:error :code])))))))
+        (is (= "not_found" (get-in parsed [:error :code]))))))
+
+  (testing "update --ac \"<title>\" --done flips one frontmatter acceptance entry end-to-end"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--acceptance" "first"
+                                    "--acceptance" "second")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--ac" "second" "--done")]
+        (is (zero? exit) (str "update --ac err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- [ ] first"))
+          (is (str/includes? shown "- [x] second"))))))
+
+  (testing "update --ac with a non-matching title exits non-zero"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--acceptance" "real")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--ac" "ghost" "--done")]
+        (is (= 1 exit))
+        (is (str/includes? err "no acceptance criterion"))))))
 
 (deftest update-external-ref-clear-end-to-end-test
   (testing "update --external-ref \"\" clears external_refs from the CLI"

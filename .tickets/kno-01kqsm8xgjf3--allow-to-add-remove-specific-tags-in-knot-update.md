@@ -6,9 +6,54 @@ type: task
 priority: 2
 mode: afk
 created: '2026-05-04T13:54:03.410876783Z'
-updated: '2026-05-05T00:36:18.008306746Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 links:
 - kno-01kqts0qxbvx
+acceptance:
+- title: '`knot update <id> --add-tag <t>` adds `<t>` to the ticket''s tag set; idempotent if already present.'
+  done: false
+- title: '`knot update <id> --remove-tag <t>` removes `<t>`; idempotent if absent.'
+  done: false
+- title: Both flags are repeatable; same flag with the same value across repeats silently dedupes.
+  done: false
+- title: '`--add-tag <t1> --remove-tag <t1>` (overlap) → exit 1, descriptive stderr; `--json` emits `{ok:false, error:{code:"invalid_argument", message}}`.'
+  done: false
+- title: '`--tags ...` combined with `--add-tag ...` or `--remove-tag ...` → exit 1, descriptive stderr; same `invalid_argument` envelope under `--json`.'
+  done: false
+- title: '`--add-tag ""` (or whitespace-only) → exit 1, `invalid_argument`.'
+  done: false
+- title: '`--add-tag "p0,auth"` (comma in value) → exit 1, `invalid_argument`. Same for `--remove-tag`.'
+  done: false
+- title: Resulting tag list preserves existing order; removes drop in place; adds append at end in `--add-tag` flag order.
+  done: false
+- title: Empty resulting tag list clears the `:tags` frontmatter key (consistent with `--tags ""`).
+  done: false
+- title: Successful runs save the ticket and bump `:updated`, even when the tag set is unchanged (e.g. all ops were no-ops). Consistent with existing `save!` contract.
+  done: false
+- title: '`--json` returns the v0.3 touched-ticket envelope with the post-mutation `:tags`.'
+  done: false
+- title: 'Surfaces updated in the same commit:'
+  done: false
+- title: '`src/knot/cli.clj` — `update-frontmatter` / `update-cmd` honor the new flags and validations.'
+  done: false
+- title: '`src/knot/main.clj` — `:update` spec adds `:add-tag` / `:remove-tag` with `:coerce []`; handler normalizes (trim, blank-reject, comma-reject) and forwards.'
+  done: false
+- title: '`src/knot/help.clj` — `:update` registry entry: new flags documented, at least one example.'
+  done: false
+- title: '`.claude/skills/knot/SKILL.md` — Notes/Editing section updated to mention tag deltas.'
+  done: false
+- title: '`CHANGELOG.md` — entry under `[Unreleased]`.'
+  done: false
+- title: 'Tests (TDD; run `bb test`):'
+  done: false
+- title: 'cli_test: tag-set merge semantics (add, remove, idempotent add, idempotent remove, dedupe within direction, ordering preservation, clear-when-empty).'
+  done: false
+- title: 'integration_test: end-to-end CLI invocations covering each acceptance bullet, including stderr and `--json` envelope shapes for every error path.'
+  done: false
+- title: 'help_test: `:update` parity set still matches; new flags appear in help text.'
+  done: false
+- title: 'Lint baseline unchanged: `clj-kondo --lint src test` reports the existing 4 errors / 5 warnings only.'
+  done: false
 ---
 
 ## Description
@@ -51,28 +96,3 @@ Rejected alternatives:
 **Errors.** Mutual-exclusion conflict, cross-flag conflict, blank value, and comma-in-value all `throw` an `ex-info` from `update-cmd` with a descriptive message. The existing handler in `main.clj:540–582` surfaces this as either `die` (stderr + exit 1) or a `{ok:false, error:{code:"invalid_argument", message}}` envelope under `--json` — no new error code needed.
 
 **JSON envelope.** No change. Successful runs return the existing v0.3 touched-ticket envelope; the post-mutation `:tags` reflects the merged set.
-
-## Acceptance Criteria
-
-- `knot update <id> --add-tag <t>` adds `<t>` to the ticket's tag set; idempotent if already present.
-- `knot update <id> --remove-tag <t>` removes `<t>`; idempotent if absent.
-- Both flags are repeatable; same flag with the same value across repeats silently dedupes.
-- `--add-tag <t1> --remove-tag <t1>` (overlap) → exit 1, descriptive stderr; `--json` emits `{ok:false, error:{code:"invalid_argument", message}}`.
-- `--tags ...` combined with `--add-tag ...` or `--remove-tag ...` → exit 1, descriptive stderr; same `invalid_argument` envelope under `--json`.
-- `--add-tag ""` (or whitespace-only) → exit 1, `invalid_argument`.
-- `--add-tag "p0,auth"` (comma in value) → exit 1, `invalid_argument`. Same for `--remove-tag`.
-- Resulting tag list preserves existing order; removes drop in place; adds append at end in `--add-tag` flag order.
-- Empty resulting tag list clears the `:tags` frontmatter key (consistent with `--tags ""`).
-- Successful runs save the ticket and bump `:updated`, even when the tag set is unchanged (e.g. all ops were no-ops). Consistent with existing `save!` contract.
-- `--json` returns the v0.3 touched-ticket envelope with the post-mutation `:tags`.
-- Surfaces updated in the same commit:
-  - `src/knot/cli.clj` — `update-frontmatter` / `update-cmd` honor the new flags and validations.
-  - `src/knot/main.clj` — `:update` spec adds `:add-tag` / `:remove-tag` with `:coerce []`; handler normalizes (trim, blank-reject, comma-reject) and forwards.
-  - `src/knot/help.clj` — `:update` registry entry: new flags documented, at least one example.
-  - `.claude/skills/knot/SKILL.md` — Notes/Editing section updated to mention tag deltas.
-  - `CHANGELOG.md` — entry under `[Unreleased]`.
-- Tests (TDD; run `bb test`):
-  - cli_test: tag-set merge semantics (add, remove, idempotent add, idempotent remove, dedupe within direction, ordering preservation, clear-when-empty).
-  - integration_test: end-to-end CLI invocations covering each acceptance bullet, including stderr and `--json` envelope shapes for every error path.
-  - help_test: `:update` parity set still matches; new flags appear in help text.
-- Lint baseline unchanged: `clj-kondo --lint src test` reports the existing 4 errors / 5 warnings only.

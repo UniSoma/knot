@@ -62,17 +62,45 @@
         (is (str/includes? body "## Description"))
         (is (str/includes? body "Some text.")))))
 
-  (testing "supplied --design and --acceptance write their sections"
+  (testing "supplied --design writes its body section"
     (with-tmp tmp
       (let [path (cli/create-cmd (ctx tmp)
                                  {:title       "T"
-                                  :design      "Design notes."
-                                  :acceptance  "Pass when X."})
+                                  :design      "Design notes."})
             body (slurp path)]
         (is (str/includes? body "## Design"))
-        (is (str/includes? body "Design notes."))
-        (is (str/includes? body "## Acceptance Criteria"))
-        (is (str/includes? body "Pass when X.")))))
+        (is (str/includes? body "Design notes.")))))
+
+  (testing "--acceptance writes the frontmatter list (NOT a body section)"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp)
+                                   {:title      "T"
+                                    :acceptance ["First criterion"
+                                                 "Second criterion"]})
+            id     (->> (fs/file-name path)
+                        (re-matches #"(.+)--t\.md")
+                        second)
+            loaded (store/load-one tmp ".tickets" id)
+            fm     (:frontmatter loaded)
+            body   (:body loaded)]
+        (is (= [{:title "First criterion"  :done false}
+                {:title "Second criterion" :done false}]
+               (:acceptance fm))
+            "frontmatter carries the structured list, each entry done:false")
+        (is (not (str/includes? body "## Acceptance Criteria"))
+            "the body never carries an Acceptance Criteria section"))))
+
+  (testing "--acceptance synthesizes the section under `knot show`"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp)
+                                   {:title      "T"
+                                    :acceptance ["Ship it"]})
+            id     (->> (fs/file-name path)
+                        (re-matches #"(.+)--t\.md")
+                        second)
+            shown  (cli/show-cmd (ctx tmp) {:id id})]
+        (is (str/includes? shown "## Acceptance Criteria"))
+        (is (str/includes? shown "- [ ] Ship it")))))
 
   (testing "explicit --type/--priority/--assignee/--parent/--tags/--external-ref are stored"
     (with-tmp tmp
@@ -2278,38 +2306,28 @@ Restart the daemon.
         (is (str/includes? body "New design."))
         (is (not (str/includes? body "Old."))))))
 
-  (testing "update --acceptance replaces the Acceptance Criteria section"
-    (with-tmp tmp
-      (let [created (cli/create-cmd (ctx tmp)
-                                    {:title "T" :acceptance "Old AC."})
-            id      (id-of-created created "t")
-            _       (cli/update-cmd (ctx tmp)
-                                    {:id id :acceptance "- [ ] new item"})
-            loaded  (store/load-one tmp ".tickets" id)
-            body    (:body loaded)]
-        (is (str/includes? body "## Acceptance Criteria"))
-        (is (str/includes? body "- [ ] new item"))
-        (is (not (str/includes? body "Old AC."))))))
-
-  (testing "sectional update preserves other body sections (including Notes)"
+  (testing "sectional update preserves other body sections (including Notes) and frontmatter acceptance"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp)
                                     {:title "T"
                                      :description "Desc."
                                      :design "Design."
-                                     :acceptance "AC."})
+                                     :acceptance ["AC item"]})
             id      (id-of-created created "t")
-            ;; add a note so body has all four sections
+            ;; add a note so body has all sections
             _       (cli/add-note-cmd (ctx tmp) {:id id :text "kept"})
             _       (cli/update-cmd (ctx tmp)
                                     {:id id :description "Replaced desc."})
             loaded  (store/load-one tmp ".tickets" id)
-            body    (:body loaded)]
+            body    (:body loaded)
+            fm      (:frontmatter loaded)]
         (is (str/includes? body "Replaced desc."))
         (is (str/includes? body "## Design"))
         (is (str/includes? body "Design."))
-        (is (str/includes? body "## Acceptance Criteria"))
-        (is (str/includes? body "AC."))
+        (is (not (str/includes? body "## Acceptance Criteria"))
+            "AC lives in frontmatter under v0.3; never stored in the body")
+        (is (= [{:title "AC item" :done false}] (:acceptance fm))
+            "frontmatter acceptance survives sectional update")
         (is (str/includes? body "## Notes"))
         (is (str/includes? body "kept")
             "previous notes survive a sectional update")))))
@@ -2339,7 +2357,7 @@ Restart the daemon.
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "" (:body loaded))))))
 
-  (testing "update --body is mutually exclusive with --description / --design / --acceptance"
+  (testing "update --body is mutually exclusive with --description / --design"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp) {:title "T"})
             id      (id-of-created created "t")]
@@ -2348,10 +2366,103 @@ Restart the daemon.
                                               {:id id :body "x" :description "y"})))
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :body "x" :design "y"})))
+                                              {:id id :body "x" :design "y"})))))))
+
+(deftest update-cmd-ac-flip-test
+  (testing "update --ac \"<title>\" --done flips the matching entry to done"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["one" "two" "three"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :ac "two" :done true})
+            loaded  (store/load-one tmp ".tickets" id)
+            ac      (get-in loaded [:frontmatter :acceptance])]
+        (is (= [{:title "one"   :done false}
+                {:title "two"   :done true}
+                {:title "three" :done false}]
+               ac)
+            "only the matching entry is flipped; order and other entries preserved"))))
+
+  (testing "update --ac \"<title>\" --undone flips the matching entry to not done"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["only"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :ac "only" :done true})
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :ac "only" :undone true})
+            loaded  (store/load-one tmp ".tickets" id)
+            ac      (get-in loaded [:frontmatter :acceptance])]
+        (is (= [{:title "only" :done false}] ac)))))
+
+  (testing "update --ac matches by exact title (case-sensitive)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["ship it"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :ac "Ship It" :done true}))
+            "case mismatch is treated as no match"))))
+
+  (testing "update --ac with a non-existent title throws an :ac-not-found error"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["one"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :ac "ghost" :done true}))))))
+
+  (testing "update --done and --undone are mutually exclusive"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["x"]})
+            id      (id-of-created created "t")]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :body "x" :acceptance "y"})))))))
+                                              {:id id :ac "x"
+                                               :done true :undone true}))))))
+
+  (testing "update --ac requires exactly one of --done or --undone"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["x"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires --done or --undone"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :ac "x"}))))))
+
+  (testing "update --done without --ac is an error"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["x"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"--done.*requires --ac"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :done true}))))))
+
+  (testing "update --ac flip preserves untouched frontmatter and body"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :description "Body desc."
+                                     :tags ["a" "b"]
+                                     :acceptance ["x" "y"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :ac "y" :done true})
+            loaded  (store/load-one tmp ".tickets" id)
+            fm      (:frontmatter loaded)]
+        (is (= "T" (:title fm)))
+        (is (= ["a" "b"] (:tags fm)))
+        (is (str/includes? (:body loaded) "Body desc."))))))
 
 (deftest update-cmd-json-test
   (testing "update --json returns a v0.3 envelope wrapping the post-mutation ticket"
@@ -3469,3 +3580,68 @@ Restart the daemon.
         (is (= 3 (:live_count counts)) "all three live *.md files counted, including malformed ones")
         (is (= 1 (:archive_count counts)))
         (is (= 4 (:total_count counts)))))))
+
+(deftest migrate-ac-cmd-test
+  (testing "lifts every body's `## Acceptance Criteria` section into frontmatter and strips the body section"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--needs-migration.md"))
+            (str "---\n"
+                 "id: kno-01a\n"
+                 "title: Needs migration\n"
+                 "status: open\n"
+                 "---\n\n"
+                 "## Description\n\nDesc.\n\n"
+                 "## Acceptance Criteria\n\n"
+                 "- [ ] first\n"
+                 "- [x] second\n"))
+      (let [result (cli/migrate-ac-cmd (ctx tmp) {})
+            loaded (store/load-one tmp ".tickets" "kno-01a")
+            fm     (:frontmatter loaded)
+            body   (:body loaded)]
+        (is (= 1 (:migrated result)))
+        (is (= [{:title "first"  :done false}
+                {:title "second" :done true}]
+               (:acceptance fm)))
+        (is (not (str/includes? body "## Acceptance Criteria")))
+        (is (str/includes? body "## Description")
+            "other body sections survive the migration"))))
+
+  (testing "tickets without a `## Acceptance Criteria` section are not rewritten"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01b--no-ac.md"))
+            "---\nid: kno-01b\ntitle: No AC\nstatus: open\n---\n\n## Description\n\nD.\n")
+      (let [path  (str (fs/path tmp ".tickets" "kno-01b--no-ac.md"))
+            mtime-before (fs/last-modified-time path)
+            result       (cli/migrate-ac-cmd (ctx tmp) {})
+            mtime-after  (fs/last-modified-time path)]
+        (is (= 0 (:migrated result)))
+        (is (= 1 (:unchanged result)))
+        (is (= mtime-before mtime-after)
+            "tickets with nothing to migrate are not rewritten"))))
+
+  (testing "running migrate-ac twice is a no-op on the second run (idempotent)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--m.md"))
+            (str "---\nid: kno-01a\ntitle: M\nstatus: open\n---\n\n"
+                 "## Acceptance Criteria\n\n- [ ] one\n"))
+      (let [first-result  (cli/migrate-ac-cmd (ctx tmp) {})
+            second-result (cli/migrate-ac-cmd (ctx tmp) {})]
+        (is (= 1 (:migrated first-result)))
+        (is (= 0 (:migrated second-result))
+            "second run finds nothing to migrate"))))
+
+  (testing "migration walks both live and archive directories"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "kno-01a--live.md"))
+            (str "---\nid: kno-01a\ntitle: Live\nstatus: open\n---\n\n"
+                 "## Acceptance Criteria\n\n- [ ] live-item\n"))
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-01b--archived.md"))
+            (str "---\nid: kno-01b\ntitle: Archived\nstatus: closed\n---\n\n"
+                 "## Acceptance Criteria\n\n- [x] archived-item\n"))
+      (let [result (cli/migrate-ac-cmd (ctx tmp) {})]
+        (is (= 2 (:migrated result))
+            "both live and archived tickets get migrated")))))

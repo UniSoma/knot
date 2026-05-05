@@ -6,13 +6,66 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-05-04T13:20:11.622845040Z'
-updated: '2026-05-04T21:08:43.885241349Z'
+updated: '2026-05-05T01:38:54.088449090Z'
 closed: '2026-05-04T20:46:00.054701611Z'
 tags:
 - v0.3
 links:
 - kno-01kqtd2nmrdt
 - kno-01kqtd4qthd3
+acceptance:
+- title: '`knot info` exists as a read command with `--json` and `--no-color`'
+  done: false
+- title: 'Text output uses plain section headings plus `Label: value` lines with no ANSI color'
+  done: false
+- title: Text output always renders the full fixed field set
+  done: false
+- title: Unset text scalars render as `(none)`; `config_present` renders as `yes`/`no`
+  done: false
+- title: JSON output uses the standard v0.3 envelope and a nested `data` payload (`project`, `paths`, `defaults`, `allowed_values`, `counts`)
+  done: false
+- title: JSON uses snake_case keys, stable field presence, and fixed section/field ordering
+  done: false
+- title: '`project.knot_version`, `project.name`, `project.prefix`, and `project.config_present` are present'
+  done: false
+- title: '`paths.cwd`, `paths.project_root`, `paths.config_path`, `paths.tickets_dir`, `paths.tickets_path`, and `paths.archive_path` are present'
+  done: false
+- title: '`defaults.default_assignee`, `defaults.effective_create_assignee`, `defaults.default_type`, `defaults.default_priority`, and `defaults.default_mode` are present'
+  done: false
+- title: '`allowed_values.statuses`, `allowed_values.active_status`, `allowed_values.terminal_statuses`, `allowed_values.types`, `allowed_values.modes`, and `allowed_values.priority_range.{min,max}` are present'
+  done: false
+- title: '`counts.live_count`, `counts.archive_count`, and `counts.total_count` are present'
+  done: false
+- title: '`statuses`, `types`, and `modes` preserve configured/default order exactly'
+  done: false
+- title: '`terminal_statuses` is emitted as an ordered array in `statuses` order'
+  done: false
+- title: '`prefix` is the effective runtime prefix, including the derived fallback when config omits `:prefix`'
+  done: false
+- title: '`tickets_dir` is the effective runtime tickets-dir value, including `.tickets` when there is no config file'
+  done: false
+- title: '`project.name` stays unset when no project name is configured'
+  done: false
+- title: '`default_assignee` remains the config value only; `effective_create_assignee` reflects actual create-time behavior, including git fallback'
+  done: false
+- title: A discovered `.tickets/`-only project with no `.knot.edn` is treated as valid; `config_present` is false and defaults/effective values are still reported
+  done: false
+- title: A missing configured tickets dir is treated as valid and yields zero counts
+  done: false
+- title: Counts are on-disk top-level `*.md` file counts in live/archive dirs only; they do not recurse and do not depend on successful ticket parsing
+  done: false
+- title: Malformed ticket files do not block `knot info` and do not surface diagnostics in its output
+  done: false
+- title: Running outside a Knot project fails clearly instead of degrading like `prime`
+  done: false
+- title: Invalid `.knot.edn` fails the command completely (no partial output)
+  done: false
+- title: '`--json` reuses `no_project` and `config_invalid` error codes on those failure paths'
+  done: false
+- title: '`knot info` stays on ordinary 0/1 exit codes (no exit 2 contract)'
+  done: false
+- title: Help/docs describe `knot info` as effective runtime configuration / allowed-values reporting, not an integrity/debugging command
+  done: false
 ---
 
 ## Description
@@ -168,35 +221,6 @@ Recommended JSON shape:
 Notes on ordering:
 - Preserve configured/default order exactly for `statuses`, `types`, and `modes`.
 - Normalize `terminal_statuses` to an ordered array by filtering `statuses` in order.
-
-## Acceptance Criteria
-
-- [ ] `knot info` exists as a read command with `--json` and `--no-color`
-- [ ] Text output uses plain section headings plus `Label: value` lines with no ANSI color
-- [ ] Text output always renders the full fixed field set
-- [ ] Unset text scalars render as `(none)`; `config_present` renders as `yes`/`no`
-- [ ] JSON output uses the standard v0.3 envelope and a nested `data` payload (`project`, `paths`, `defaults`, `allowed_values`, `counts`)
-- [ ] JSON uses snake_case keys, stable field presence, and fixed section/field ordering
-- [ ] `project.knot_version`, `project.name`, `project.prefix`, and `project.config_present` are present
-- [ ] `paths.cwd`, `paths.project_root`, `paths.config_path`, `paths.tickets_dir`, `paths.tickets_path`, and `paths.archive_path` are present
-- [ ] `defaults.default_assignee`, `defaults.effective_create_assignee`, `defaults.default_type`, `defaults.default_priority`, and `defaults.default_mode` are present
-- [ ] `allowed_values.statuses`, `allowed_values.active_status`, `allowed_values.terminal_statuses`, `allowed_values.types`, `allowed_values.modes`, and `allowed_values.priority_range.{min,max}` are present
-- [ ] `counts.live_count`, `counts.archive_count`, and `counts.total_count` are present
-- [ ] `statuses`, `types`, and `modes` preserve configured/default order exactly
-- [ ] `terminal_statuses` is emitted as an ordered array in `statuses` order
-- [ ] `prefix` is the effective runtime prefix, including the derived fallback when config omits `:prefix`
-- [ ] `tickets_dir` is the effective runtime tickets-dir value, including `.tickets` when there is no config file
-- [ ] `project.name` stays unset when no project name is configured
-- [ ] `default_assignee` remains the config value only; `effective_create_assignee` reflects actual create-time behavior, including git fallback
-- [ ] A discovered `.tickets/`-only project with no `.knot.edn` is treated as valid; `config_present` is false and defaults/effective values are still reported
-- [ ] A missing configured tickets dir is treated as valid and yields zero counts
-- [ ] Counts are on-disk top-level `*.md` file counts in live/archive dirs only; they do not recurse and do not depend on successful ticket parsing
-- [ ] Malformed ticket files do not block `knot info` and do not surface diagnostics in its output
-- [ ] Running outside a Knot project fails clearly instead of degrading like `prime`
-- [ ] Invalid `.knot.edn` fails the command completely (no partial output)
-- [ ] `--json` reuses `no_project` and `config_invalid` error codes on those failure paths
-- [ ] `knot info` stays on ordinary 0/1 exit codes (no exit 2 contract)
-- [ ] Help/docs describe `knot info` as effective runtime configuration / allowed-values reporting, not an integrity/debugging command
 
 ## Notes
 

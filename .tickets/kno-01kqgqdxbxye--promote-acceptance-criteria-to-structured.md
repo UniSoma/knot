@@ -6,7 +6,7 @@ type: feature
 priority: 3
 mode: afk
 created: '2026-05-01T02:56:02.941680078Z'
-updated: '2026-05-01T02:57:45.617519664Z'
+updated: '2026-05-05T01:39:32.842514886Z'
 parent: kno-01kqa9shmqf3
 tags:
 - v0.3
@@ -18,6 +18,27 @@ deps:
 - kno-01kqgq9vhmvr
 - kno-01kqgqcqmy19
 - kno-01kqgqc2ks70
+acceptance:
+- title: 'Frontmatter schema gains `acceptance: [{title, done}]` list'
+  done: false
+- title: '`knot show` renders `## Acceptance Criteria` from frontmatter as `- [x]` / `- [ ]` markdown (no body section stored)'
+  done: false
+- title: One-shot migration script lifts existing body ACs to frontmatter and strips the section; idempotent on already-migrated tickets
+  done: false
+- title: Migration runs cleanly against this project's own tickets at v0.3 cut (verify in CI)
+  done: false
+- title: '`knot create --acceptance` writes to frontmatter (decide: repeated flag vs newline-delimited blob; document the choice)'
+  done: false
+- title: '`knot update --ac "<title>" --done` / `--undone` flips a single entry'
+  done: false
+- title: '`knot list --acceptance-complete=false` filter implemented'
+  done: false
+- title: '`acceptance_invalid` check code added to `knot check`'
+  done: false
+- title: 'Tests: schema round-trip, show-rendering, migration idempotence, filter, update --ac, check'
+  done: false
+- title: CHANGELOG covers schema change and migration
+  done: false
 ---
 
 ## Description
@@ -57,16 +78,3 @@ Add `acceptance_invalid` error code to `knot check` (kno-01kqgqc2ks70): catches 
 **Cost we accept:**
 
 Humans authoring an AC by typing `- [ ]` in `\$EDITOR` no longer works. They edit the frontmatter `acceptance` list instead — same way they edit `tags`. The freeform-body principle holds for prose sections (`## Description`, `## Design`, `## Notes`); ACs are the deliberate structured exception.
-
-## Acceptance Criteria
-
-- [ ] Frontmatter schema gains `acceptance: [{title, done}]` list
-- [ ] `knot show` renders `## Acceptance Criteria` from frontmatter as `- [x]` / `- [ ]` markdown (no body section stored)
-- [ ] One-shot migration script lifts existing body ACs to frontmatter and strips the section; idempotent on already-migrated tickets
-- [ ] Migration runs cleanly against this project's own tickets at v0.3 cut (verify in CI)
-- [ ] `knot create --acceptance` writes to frontmatter (decide: repeated flag vs newline-delimited blob; document the choice)
-- [ ] `knot update --ac "<title>" --done` / `--undone` flips a single entry
-- [ ] `knot list --acceptance-complete=false` filter implemented
-- [ ] `acceptance_invalid` check code added to `knot check`
-- [ ] Tests: schema round-trip, show-rendering, migration idempotence, filter, update --ac, check
-- [ ] CHANGELOG covers schema change and migration

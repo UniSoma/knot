@@ -99,6 +99,52 @@
       (is (str/includes? s "title: Alpha"))
       (is (not (str/includes? s "## Blockers"))))))
 
+(deftest show-text-acceptance-test
+  (testing "frontmatter :acceptance is synthesized as a `## Acceptance Criteria` checklist"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "first" :done false}
+                                             {:title "second" :done true}]}
+                  :body "Body text.\n"}
+          s (output/show-text ticket)]
+      (is (str/includes? s "## Acceptance Criteria"))
+      (is (str/includes? s "- [ ] first"))
+      (is (str/includes? s "- [x] second"))))
+
+  (testing "the synthesized AC section sits between the body and the inverse sections"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "ship it" :done false}]}
+                  :body "Body text.\n"}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [] :children [] :linked []}
+          s (output/show-text ticket inverses)
+          body-i (str/index-of s "Body text.")
+          ac-i   (str/index-of s "## Acceptance Criteria")
+          inv-i  (str/index-of s "## Blockers")]
+      (is (every? some? [body-i ac-i inv-i]))
+      (is (< body-i ac-i inv-i)
+          "AC section comes after body, before inverse sections")))
+
+  (testing "no :acceptance key in frontmatter -> no `## Acceptance Criteria` header"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body text.\n"}
+          s (output/show-text ticket)]
+      (is (not (str/includes? s "## Acceptance Criteria")))))
+
+  (testing "empty :acceptance vector -> no header"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance []}
+                  :body "Body text.\n"}
+          s (output/show-text ticket)]
+      (is (not (str/includes? s "## Acceptance Criteria")))))
+
+  (testing "single-arity show-text also synthesizes the AC section"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "only" :done false}]}
+                  :body ""}
+          s (output/show-text ticket)]
+      (is (str/includes? s "## Acceptance Criteria"))
+      (is (str/includes? s "- [ ] only")))))
+
 (deftest color-enabled-test
   (testing "TTY with no overrides — color enabled"
     (is (true? (output/color-enabled? {:tty? true
@@ -384,6 +430,19 @@
           out (output/show-json ticket)]
       (is (str/includes? out "\"body\""))
       (is (str/includes? out "Body content")))))
+
+(deftest show-json-acceptance-test
+  (testing ":acceptance frontmatter list is preserved verbatim under :data"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "first" :done false}
+                                             {:title "second" :done true}]}
+                  :body ""}
+          parsed (json/parse-string (output/show-json ticket) true)
+          ac     (get-in parsed [:data :acceptance])]
+      (is (= [{:title "first"  :done false}
+              {:title "second" :done true}]
+             ac)
+          "acceptance entries pass through unchanged through the JSON envelope"))))
 
 (deftest show-json-inverses-test
   (testing "show-json with inverses adds blockers/blocking/children/linked arrays"
