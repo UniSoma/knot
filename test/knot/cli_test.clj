@@ -847,6 +847,50 @@
         (is (not (contains? parsed :meta))
             "reopen never targets terminal — no :archived_to")))))
 
+(deftest create-and-reopen-intake-status-from-config-test
+  (testing "create-cmd derives the initial status from config (default → \"open\")"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Default intake"})
+            id     (id-of-created path "default-intake")
+            loaded (store/load-one tmp ".tickets" id)]
+        (is (= "open" (get-in loaded [:frontmatter :status]))
+            "default :statuses ⇒ first non-active, non-terminal is \"open\""))))
+
+  (testing "create-cmd derives initial status from a custom :statuses lane"
+    ;; Custom config with no "open" anywhere in :statuses — proves the
+    ;; create-cmd path is config-driven and not coincidentally the literal "open".
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["todo" "active" "done"]
+                              :terminal-statuses #{"done"}
+                              :active-status     "active")
+            path   (cli/create-cmd custom-ctx {:title "Custom intake"})
+            id     (id-of-created path "custom-intake")
+            loaded (store/load-one tmp ".tickets" id)]
+        (is (= "todo" (get-in loaded [:frontmatter :status]))
+            "custom :statuses ⇒ first non-active, non-terminal is \"todo\"")
+        (is (not= "open" (get-in loaded [:frontmatter :status]))
+            "the literal \"open\" must not leak through when not in :statuses"))))
+
+  (testing "reopen-cmd restores the same config-derived intake under custom :statuses"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :statuses          ["todo" "active" "done"]
+                              :terminal-statuses #{"done"}
+                              :active-status     "active")
+            path    (cli/create-cmd custom-ctx {:title "Reopen target"})
+            id      (id-of-created path "reopen-target")
+            _       (cli/close-cmd custom-ctx {:id id})
+            after-close (store/load-one tmp ".tickets" id)
+            _       (is (= "done" (get-in after-close [:frontmatter :status]))
+                        "sanity: close lands on the configured terminal")
+            _       (cli/reopen-cmd custom-ctx {:id id})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "todo" (get-in loaded [:frontmatter :status]))
+            "reopen restores the config-derived intake, not literal \"open\"")
+        (is (not (contains? (:frontmatter loaded) :closed))
+            "reopen still clears :closed")))))
+
 (deftest summary-on-close-test
   (testing "close --summary appends a closure note under ## Notes and closes"
     (with-tmp tmp

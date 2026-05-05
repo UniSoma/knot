@@ -76,6 +76,16 @@
           (filter (fn [[_ v]] (some? v)))
           pairs)))
 
+(defn- first-intake-status
+  "Return the first status from `statuses` that is neither the active
+   status nor in `terminal-statuses` — the project's intake lane that
+   `knot create` and `knot reopen` should target. Returns nil when no
+   such status exists in the configured `:statuses`."
+  [statuses active-status terminal-statuses]
+  (first (remove (some-fn #{active-status}
+                          (set terminal-statuses))
+                 statuses)))
+
 (defn- resolve-ctx
   "Fill in defaults and lazy lookups (git user.name, current time) when the
    caller did not provide them. Assignee precedence: explicit ctx
@@ -104,20 +114,23 @@
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the new ticket under `:data` instead of the saved path."
   [ctx opts]
-  (let [{:keys [project-root prefix tickets-dir terminal-statuses
-                default-type default-priority default-mode now assignee]}
+  (let [{:keys [project-root prefix tickets-dir statuses active-status
+                terminal-statuses default-type default-priority default-mode
+                now assignee]}
         (resolve-ctx ctx)
         title    (:title opts)
         slug     (ticket/derive-slug title)
         body     (build-body opts)
         gen-id   #(ticket/generate-id prefix)
+        intake   (or (first-intake-status statuses active-status terminal-statuses)
+                     "open")
         build-fn (fn [id]
                    {:slug   slug
                     :ticket {:frontmatter
                              (build-frontmatter
                               {:id           id
                                :title        title
-                               :status       "open"
+                               :status       intake
                                :type         (or (:type opts) default-type)
                                :priority     (or (:priority opts) default-priority)
                                :mode         (or (:mode opts) default-mode)
@@ -259,11 +272,16 @@
     (status-cmd ctx (assoc opts :status target))))
 
 (defn reopen-cmd
-  "Sugar for `status-cmd`: transition `(:id opts)` to `open`. The
-   `:closed` frontmatter key is cleared by `knot.store/save!` because
-   `open` is non-terminal."
+  "Sugar for `status-cmd`: transition `(:id opts)` to the project's
+   intake status — the first entry in `:statuses` that is neither
+   `:active-status` nor in `:terminal-statuses`. Falls back to `\"open\"`
+   when no such status is configured. The `:closed` frontmatter key is
+   cleared by `knot.store/save!` because the intake lane is non-terminal."
   [ctx opts]
-  (status-cmd ctx (assoc opts :status "open")))
+  (let [{:keys [statuses active-status terminal-statuses]} (resolve-ctx ctx)
+        target (or (first-intake-status statuses active-status terminal-statuses)
+                   "open")]
+    (status-cmd ctx (assoc opts :status target))))
 
 (defn- format-cycle-path
   "Format a cycle path `[a b c a]` as `a → b → c → a` for human messages."
