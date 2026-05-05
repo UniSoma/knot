@@ -6,7 +6,9 @@ type: task
 priority: 2
 mode: afk
 created: '2026-05-04T13:54:03.410876783Z'
-updated: '2026-05-04T23:52:19.078313394Z'
+updated: '2026-05-05T00:36:18.008306746Z'
+links:
+- kno-01kqts0qxbvx
 ---
 
 ## Description

@@ -6,7 +6,7 @@ type: feature
 priority: 3
 mode: hitl
 created: '2026-05-01T02:56:22.663087106Z'
-updated: '2026-05-01T02:57:46.838932264Z'
+updated: '2026-05-05T00:36:17.845651157Z'
 tags:
 - v0.3
 - cli
@@ -18,6 +18,8 @@ deps:
 - kno-01kqgqbjg012
 - kno-01kqgqcqmy19
 - kno-01kqgqc2ks70
+links:
+- kno-01kqts0qxbvx
 ---
 
 ## Description

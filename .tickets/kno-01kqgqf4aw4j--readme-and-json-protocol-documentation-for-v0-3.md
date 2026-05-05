@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-05-01T02:56:42.844118574Z'
-updated: '2026-05-02T21:18:54.163951281Z'
+updated: '2026-05-05T00:36:17.924925191Z'
 tags:
 - v0.3
 - docs
@@ -14,6 +14,8 @@ tags:
 deps:
 - kno-01kqgq9vhmvr
 - kno-01kqgqegm782
+links:
+- kno-01kqts0qxbvx
 ---
 
 ## Description
