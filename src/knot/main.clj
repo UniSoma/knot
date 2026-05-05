@@ -684,7 +684,10 @@
                  (bcli/parse-args argv (spec :info))
                  (catch Exception e e))]
     (if (instance? Exception parsed)
-      (info-emit-error! false "invalid_argument" (.getMessage ^Exception parsed))
+      ;; Parse-args failed, so `(:json opts)` is not available — sniff
+      ;; `--json` directly from argv to keep the v0.3 envelope contract.
+      (info-emit-error! (boolean (some #{"--json"} argv))
+                        "invalid_argument" (.getMessage ^Exception parsed))
       (let [{:keys [opts]} parsed
             json?      (boolean (:json opts))
             cwd        (str (fs/cwd))

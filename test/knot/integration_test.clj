@@ -1819,3 +1819,30 @@
         (is (= 1 (:archive_count counts)))
         (is (= 3 (:total_count counts)))))))
 
+(deftest info-parse-error-json-envelope-test
+  (testing "knot info --bogus --json emits an invalid_argument JSON envelope on stdout"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "info" "--bogus" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "JSON consumers parse stdout — error envelope goes there, not stderr")
+        (is (= 1 (:schema_version parsed)))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"(?i)bogus" (get-in parsed [:error :message] ""))
+            "the parser message should name the offending flag")
+        (is (not (contains? parsed :data))))))
+
+  (testing "knot info --bogus (no --json) still emits the plain stderr message"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "info" "--bogus")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "knot info: ")
+            "stderr keeps the existing plain-text framing")
+        (is (str/includes? err "Unknown option")
+            "stderr names the unknown-option failure")))))
+

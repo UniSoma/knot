@@ -76,6 +76,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (no project root, invalid `.knot.edn`). Issues sort severity desc →
   code asc → first-id asc → message asc, identical in JSON and text.
 
+### Fixed
+
+- `knot info --bogus --json` (any unknown flag with `--json`) now emits
+  the v0.3 `invalid_argument` error envelope on stdout instead of
+  printing plain stderr text. Plain `knot info --bogus` (no `--json`)
+  still emits the existing `knot info: Unknown option: ...` stderr
+  message. Exit code stays at `1` on both paths. Brings `info` in line
+  with the rest of the JSON-aware error contract.
+
 ### Changed (BREAKING)
 
 - `knot create` no longer accepts the `--afk` and `--hitl` shortcut
