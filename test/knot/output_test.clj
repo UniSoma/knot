@@ -2,6 +2,7 @@
   (:require [cheshire.core :as json]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [knot.config :as config]
             [knot.output :as output]))
 
 (deftest show-text-test
@@ -395,6 +396,21 @@
     (let [out (output/ls-table sample-ls-tickets {:color? true :tty? true :width 200})]
       (is (re-find #"\[33min_progress" out)
           "defaults preserve the in_progress=yellow color"))))
+
+(deftest ls-table-fallback-sources-from-config-defaults-test
+  (testing "without status options, ls-table fallback follows knot.config/defaults — no baked literals"
+    (with-redefs [config/defaults (constantly
+                                   {:statuses          ["open" "active" "review" "closed"]
+                                    :terminal-statuses #{"closed"}
+                                    :active-status     "active"})]
+      (let [out (output/ls-table custom-statuses-tickets
+                                 {:color? true :tty? true :width 200})]
+        (is (re-find #"\[33mactive" out)
+            "active lane derived from config/defaults wraps in :yellow SGR (33)")
+        (is (re-find #"\[2mclosed" out)
+            "terminal lane derived from config/defaults wraps in :dim SGR (2)")
+        (is (re-find #"\[36mopen" out)
+            "first non-active non-terminal lane derived from config/defaults wraps in :cyan SGR (36)")))))
 
 (deftest show-json-test
   (testing "renders a v0.3 success envelope wrapping the ticket"

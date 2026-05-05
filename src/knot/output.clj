@@ -5,6 +5,7 @@
             [cheshire.core :as json]
             [clojure.string :as str]
             [knot.acceptance :as acceptance]
+            [knot.config :as config]
             [knot.ticket :as ticket]))
 
 (defn- ticket-title
@@ -429,19 +430,15 @@
    Status colors are role-based (terminal → :dim, active → :yellow,
    intake/open lane → :cyan). The role is resolved per ticket from
    `:statuses`, `:terminal-statuses`, and `:active-status` so projects
-   with custom `:statuses` get matching colors. Defaults match the v0
-   schema for callers that do not pass a status context:
-     :statuses          [\"open\" \"in_progress\" \"closed\"]
-     :terminal-statuses #{\"closed\"}
-     :active-status     \"in_progress\""
+   with custom `:statuses` get matching colors. When any of those keys
+   is missing from `opts`, the fallback comes from `config/defaults` —
+   the single source of truth for the v0 schema."
   [tickets {:keys [color? tty? width statuses terminal-statuses active-status]
-            :or {color? false tty? false width 80
-                 statuses          ["open" "in_progress" "closed"]
-                 terminal-statuses #{"closed"}
-                 active-status     "in_progress"}}]
-  (let [status-ctx       {:statuses          statuses
-                          :terminal-statuses terminal-statuses
-                          :active-status     active-status}
+            :or {color? false tty? false width 80}}]
+  (let [defaults         (config/defaults)
+        status-ctx       {:statuses          (or statuses          (:statuses defaults))
+                          :terminal-statuses (or terminal-statuses (:terminal-statuses defaults))
+                          :active-status     (or active-status     (:active-status defaults))}
         non-title        (vec (butlast ls-columns))
         title-col        (last ls-columns)
         non-title-widths (mapv (fn [{:keys [key header]}]
