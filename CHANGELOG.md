@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `knot update` gains `--add-tag <t>` and `--remove-tag <t>`
+  (repeatable) for per-tag deltas, complementing the existing
+  whole-list `--tags <comma-list>`. Mutually exclusive with `--tags`
+  and with each other on the same value (overlap rejected as
+  `invalid_argument`). Per-tag idempotent: adding a present tag or
+  removing an absent one is a no-op. Existing order is preserved;
+  removes drop in place; adds append at the end in flag order. An
+  empty resulting set clears the `:tags` key (consistent with
+  `--tags ""`). Values are trimmed; blank or comma-bearing values
+  are rejected to preserve the round-trip invariant that any tag can
+  be expressed via `--tags`.
 - Acceptance criteria are now structured frontmatter
   (`acceptance: [{title, done}]`) instead of freeform `- [ ]` checkboxes
   in the body. The `## Acceptance Criteria` section is **never stored**

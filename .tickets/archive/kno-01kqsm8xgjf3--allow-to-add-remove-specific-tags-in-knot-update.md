@@ -1,12 +1,13 @@
 ---
 id: kno-01kqsm8xgjf3
 title: Allow to add/remove specific tags in `knot update`
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-04T13:54:03.410876783Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-05T16:12:40.720428847Z'
+closed: '2026-05-05T16:12:40.720428847Z'
 links:
 - kno-01kqts0qxbvx
 acceptance:
@@ -96,3 +97,9 @@ Rejected alternatives:
 **Errors.** Mutual-exclusion conflict, cross-flag conflict, blank value, and comma-in-value all `throw` an `ex-info` from `update-cmd` with a descriptive message. The existing handler in `main.clj:540–582` surfaces this as either `die` (stderr + exit 1) or a `{ok:false, error:{code:"invalid_argument", message}}` envelope under `--json` — no new error code needed.
 
 **JSON envelope.** No change. Successful runs return the existing v0.3 touched-ticket envelope; the post-mutation `:tags` reflects the merged set.
+
+## Notes
+
+**2026-05-05T16:12:40.720428847Z**
+
+Add --add-tag <t> / --remove-tag <t> to knot update for per-tag deltas, complementing the existing whole-list --tags <comma-list>. Both flags are repeatable and singular (model: --external-ref). Validator placement mirrors existing precedent: shape invariants (--tags mutex, cross-flag overlap) live in cli.clj's update-cmd alongside the --body ⊥ --description/--design block; CLI-string normalization (trim, blank-reject, comma-reject) lives in main.clj's update-handler alongside --external-ref's blank-strip. The update-handler was restructured to wrap the opts-build inside the existing try/catch so normalization throws route through the ExceptionInfo clause and surface as die (stderr + exit 1) or {ok:false, error:{code:"invalid_argument", message}} under --json. The merge helper apply-tag-deltas in cli.clj implements the spec algorithm: removes drop in place; adds append at end in flag order, deduped against the post-remove set; repeated values within a single direction silently dedupe; an empty resulting set clears the :tags key (consistent with --tags ""). Per-tag idempotency falls out naturally — adding a present tag or removing an absent one is a silent no-op on the set, but the save still happens and :updated still bumps via the existing store/save! contract. Comma-rejection on values preserves the round-trip invariant that any tag is expressible via --tags. Surfaces touched: src/knot/cli.clj (apply-tag-deltas, validate-tag-delta-opts!, [clojure.set :as set] require), src/knot/main.clj (normalize-tag-delta-values, update-handler restructure so normalization throws reach the ExceptionInfo catch), src/knot/help.clj (:update flags + delta example, descriptions note idempotency), .claude/skills/knot/SKILL.md (Notes/Editing block lists tag-delta flags), CHANGELOG.md ([Unreleased] / Added entry). Tests (TDD; 15 vertical RED→GREEN slices): cli_test/update-cmd-tag-deltas-test (11 testing blocks pinning add, remove, idempotency × 2, compose, clear-when-empty, dedupe, overlap, two --tags-mutex blocks, no-op-still-bumps, json-envelope); help_test/update-tag-delta-flags-registered-test (registry shape with :coerce []); integration_test/update-tag-deltas-end-to-end-test (happy path) + update-tag-delta-errors-end-to-end-test (every error envelope: overlap, --tags mutex, blank "", whitespace-only "   ", comma-in-value for both directions, plus --remove-tag "" blank). Code review (READY verdict, no blockers): 5 Minor items flagged; M2 (whitespace-only end-to-end test), M3 (--remove-tag "" symmetric blank test), M4 (help text mentions idempotency) applied; M1 (helper bypass-case) skipped per reviewer's own self-resolution; M5 (docstring warning against future early-return) skipped — the slice-10 no-op-bump test pins the actual contract, and apply-tag-deltas operates upstream of save! so any in-helper short-circuit cannot break the bump invariant. Tests: 296/2730/0 (was 292/2684/0; +4 deftests, +46 assertions). Lint baseline unchanged: 4 errors / 5 warnings, all pre-existing.

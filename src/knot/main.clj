@@ -120,6 +120,31 @@
          (remove str/blank?)
          vec)))
 
+(defn- normalize-tag-delta-values
+  "Normalize a vector of values from `--add-tag` / `--remove-tag`: trim
+   surrounding whitespace, reject blanks, reject comma-bearing values.
+   Throws `ex-info` with the offending flag named so `update-handler`'s
+   existing catch surfaces the error as `die` (stderr + exit 1) or
+   `{ok:false, error:{code:\"invalid_argument\", …}}` under `--json`.
+   The comma-rejection preserves the round-trip invariant that every
+   tag value can be expressed via `--tags <comma-list>`."
+  [flag-key vs]
+  (vec
+   (for [v vs
+         :let [trimmed (str/trim v)]]
+     (cond
+       (str/blank? trimmed)
+       (throw (ex-info (str "--" (name flag-key) " value must not be blank")
+                       {:offending flag-key}))
+
+       (str/includes? trimmed ",")
+       (throw (ex-info (str "--" (name flag-key) " value must not contain "
+                            "',' (use a repeated --" (name flag-key)
+                            " flag instead): " (pr-str v))
+                       {:offending flag-key :value v}))
+
+       :else trimmed))))
+
 (defn- println-out
   "Print a string to stdout. Adds a trailing newline only when `s` does
    not already end in one — keeps `>/dev/null` clean and ensures the
@@ -551,41 +576,54 @@
         id    (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot update: an id is required"))
-    (let [opts* (cond-> (-> opts
-                            (merge body-opts)
-                            (dissoc :json)
-                            (assoc :id id :json? json?))
-                  (contains? opts :tags)
-                  (assoc :tags (split-tags (:tags opts)))
+    (try
+      (let [opts* (cond-> (-> opts
+                              (merge body-opts)
+                              (dissoc :json)
+                              (assoc :id id :json? json?))
+                    (contains? opts :tags)
+                    (assoc :tags (split-tags (:tags opts)))
 
-                  ;; `--external-ref ""` from the CLI yields [""] from
-                  ;; babashka.cli's `:coerce []`. (empty? [""]) is
-                  ;; false, so the cli-layer dissoc-on-empty branch
-                  ;; would never fire and the user would end up with a
-                  ;; literal blank ref instead of a cleared field.
-                  ;; Normalize blanks to drop them (mirrors split-tags).
-                  (contains? opts :external-ref)
-                  (assoc :external-ref
-                         (vec (remove str/blank? (:external-ref opts)))))]
-      (try
-        (let [out (cli/update-cmd (discover-ctx) opts*)]
+                    ;; `--external-ref ""` from the CLI yields [""] from
+                    ;; babashka.cli's `:coerce []`. (empty? [""]) is
+                    ;; false, so the cli-layer dissoc-on-empty branch
+                    ;; would never fire and the user would end up with a
+                    ;; literal blank ref instead of a cleared field.
+                    ;; Normalize blanks to drop them (mirrors split-tags).
+                    (contains? opts :external-ref)
+                    (assoc :external-ref
+                           (vec (remove str/blank? (:external-ref opts))))
+
+                    ;; Tag-delta normalization throws on blank or
+                    ;; comma-bearing values; the throw must reach the
+                    ;; ex-info catch below so `--json` callers get the
+                    ;; `invalid_argument` envelope, hence the let lives
+                    ;; inside the `try`.
+                    (contains? opts :add-tag)
+                    (assoc :add-tag (normalize-tag-delta-values
+                                     :add-tag (:add-tag opts)))
+
+                    (contains? opts :remove-tag)
+                    (assoc :remove-tag (normalize-tag-delta-values
+                                        :remove-tag (:remove-tag opts))))
+            out   (cli/update-cmd (discover-ctx) opts*)]
+        (cond
+          out   (println-out (str out))
+          json? (emit-not-found-envelope! id)
+          :else (die (str "knot update: no ticket matching " id))))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
           (cond
-            out   (println-out (str out))
-            json? (emit-not-found-envelope! id)
-            :else (die (str "knot update: no ticket matching " id))))
-        (catch clojure.lang.ExceptionInfo e
-          (let [data (ex-data e)]
-            (cond
-              (and json? (= :ambiguous (:kind data)))
-              (emit-ambiguous-envelope! e data)
+            (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
 
-              json?
-              (emit-error-envelope! {:code    "invalid_argument"
-                                     :message (.getMessage e)})
+            json?
+            (emit-error-envelope! {:code    "invalid_argument"
+                                   :message (.getMessage e)})
 
-              (= :ambiguous (:kind data)) (throw e)
+            (= :ambiguous (:kind data)) (throw e)
 
-              :else (die (str "knot update: " (.getMessage e))))))))))
+            :else (die (str "knot update: " (.getMessage e)))))))))
 
 (defn- migrate-ac-handler
   "Handle `knot migrate-ac`. One-shot v0.3 migration: lifts every

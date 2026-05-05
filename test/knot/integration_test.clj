@@ -1700,6 +1700,111 @@
         (is (= 1 exit))
         (is (str/includes? err "no acceptance criterion"))))))
 
+(deftest update-tag-deltas-end-to-end-test
+  (testing "update --add-tag and --remove-tag round-trip via the real CLI"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--tags" "a,b")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--add-tag" "c" "--add-tag" "d"
+                      "--remove-tag" "a" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "update tag deltas err=" err))
+        (is (= true (:ok parsed)))
+        (is (= ["b" "c" "d"] (vec (get-in parsed [:data :tags]))))))))
+
+(deftest update-tag-delta-errors-end-to-end-test
+  (testing "--add-tag and --remove-tag overlap exits 1 with invalid_argument JSON envelope"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--add-tag" "x" "--remove-tag" "x" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"overlap" (get-in parsed [:error :message]))))))
+
+  (testing "--add-tag and --remove-tag overlap exits 1 with descriptive stderr (no --json)"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--add-tag" "x" "--remove-tag" "x")]
+        (is (= 1 exit))
+        (is (re-find #"overlap" err)))))
+
+  (testing "--tags combined with --add-tag exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--tags" "p0" "--add-tag" "stale" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"mutually exclusive" (get-in parsed [:error :message]))))))
+
+  (testing "--add-tag \"\" (blank value) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--add-tag" "" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "--add-tag \"   \" (whitespace-only) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--add-tag" "   " "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "--remove-tag \"\" (blank value) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--remove-tag" "" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "--add-tag \"p0,auth\" (comma in value) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--add-tag" "p0,auth" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "--remove-tag \"p0,auth\" (comma in value) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out]}
+            (run-knot tmp "update" id "--remove-tag" "p0,auth" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))))))
+
 (deftest update-external-ref-clear-end-to-end-test
   (testing "update --external-ref \"\" clears external_refs from the CLI"
     (with-tmp tmp

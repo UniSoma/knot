@@ -2335,6 +2335,114 @@ Restart the daemon.
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"ambiguous id"
                             (cli/update-cmd (ctx tmp) {:id "kno-" :title "X"}))))))
 
+(deftest update-cmd-tag-deltas-test
+  (testing "--add-tag appends a new tag to the existing list in flag order"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :add-tag ["c"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["a" "b" "c"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--remove-tag drops in place, preserves remaining order"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-tag ["b"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["a" "c"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--add-tag is idempotent when the tag is already present"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :add-tag ["b"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["a" "b"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--remove-tag is idempotent when the tag is absent"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-tag ["z"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["a" "b"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--add-tag and --remove-tag compose: removes drop in place, adds append at end"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :add-tag ["c"] :remove-tag ["a"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["b" "c"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--remove-tag that empties the resulting set clears the :tags key"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-tag ["a"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (not (contains? (:frontmatter loaded) :tags))
+            "empty resulting tag list should drop the YAML key"))))
+
+  (testing "repeated values within a single direction silently dedupe"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :add-tag ["x" "x" "y"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["x" "y"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "same tag in --add-tag and --remove-tag throws ex-info (overlap)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--add-tag.*--remove-tag.*overlap|overlap.*--add-tag"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :add-tag ["x"] :remove-tag ["x"]}))))))
+
+  (testing "--tags combined with --add-tag throws ex-info (mutex)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--tags.*mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :tags ["x"] :add-tag ["y"]}))))))
+
+  (testing "--tags combined with --remove-tag throws ex-info (mutex)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--tags.*mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id :tags ["x"] :remove-tag ["y"]}))))))
+
+  (testing "no-op tag delta still saves and bumps :updated"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a"]})
+            id      (id-of-created created "t")
+            later   (assoc (ctx tmp) :now "2026-05-04T10:00:00Z")
+            _       (cli/update-cmd later {:id id :add-tag ["a"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "2026-05-04T10:00:00Z" (get-in loaded [:frontmatter :updated]))
+            "save! must bump :updated even when the tag set is unchanged")
+        (is (= ["a"] (vec (get-in loaded [:frontmatter :tags])))))))
+
+  (testing "--json envelope reflects post-mutation :tags"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :tags ["a" "b"]})
+            id      (id-of-created created "t")
+            out     (cli/update-cmd (ctx tmp)
+                                    {:id id :add-tag ["c"] :remove-tag ["a"]
+                                     :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= ["b" "c"] (vec (get-in parsed [:data :tags]))))))))
+
 (deftest update-cmd-body-sectional-test
   (testing "update --description replaces the Description section in place"
     (with-tmp tmp

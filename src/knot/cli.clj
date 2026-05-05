@@ -2,6 +2,7 @@
   "Per-command argument specs and handlers. Wired by knot.main via
    babashka.cli/dispatch."
   (:require [babashka.fs :as fs]
+            [clojure.set :as set]
             [clojure.string :as str]
             [flatland.ordered.map :as om]
             [knot.acceptance :as acceptance]
@@ -565,6 +566,25 @@
             sep  (if (str/blank? head) "" "\n\n")]
         (str head sep "## " heading "\n\n" content "\n")))))
 
+(defn- apply-tag-deltas
+  "Apply `--add-tag` / `--remove-tag` deltas from `opts` to `fm`'s
+   `:tags`. Existing order is preserved; removes drop in place; adds
+   append at the end in flag order, deduped against the post-remove
+   set. Repeated values within a single direction silently dedupe.
+   An empty resulting set clears the `:tags` key (consistent with
+   `--tags \"\"`). Caller guarantees `:tags` and `:add-tag`/`:remove-tag`
+   are not both present."
+  [fm opts]
+  (let [existing (vec (:tags fm))
+        removes  (set (:remove-tag opts))
+        kept     (vec (remove removes existing))
+        present  (set kept)
+        appends  (->> (:add-tag opts) (remove present) distinct vec)
+        result   (vec (concat kept appends))]
+    (if (empty? result)
+      (dissoc fm :tags)
+      (assoc fm :tags result))))
+
 (defn- update-frontmatter
   "Project `opts` onto `fm`. Keys absent from `opts` leave `fm`
    unchanged; keys present with a non-empty value set the field; keys
@@ -585,6 +605,8 @@
       (contains? opts :assignee)     (clear-when :assignee str/blank? assignee)
       (contains? opts :parent)       (clear-when :parent   str/blank? parent)
       (contains? opts :tags)         (clear-when :tags  empty? (vec tags))
+      (or (contains? opts :add-tag)
+          (contains? opts :remove-tag)) (apply-tag-deltas opts)
       (contains? opts :external-ref) (clear-when :external_refs
                                                  empty? (vec external-ref)))))
 
@@ -629,6 +651,28 @@
                            " requires --ac \"<title>\"")
                       {:offending [(if done? :done :undone)]})))))
 
+(defn- validate-tag-delta-opts!
+  "Validate the `--add-tag` / `--remove-tag` flag pair. Throws `ex-info`
+   when the call mixes `--tags` (replace) with either delta flag, or
+   when the same value appears in both directions on the same call.
+   `update-cmd` surfaces the message as either a `die` or a
+   `{ok:false, error:{code:\"invalid_argument\", …}}` envelope under
+   `--json`."
+  [opts]
+  (let [delta-keys (filter #(contains? opts %) [:add-tag :remove-tag])]
+    (when (and (contains? opts :tags) (seq delta-keys))
+      (throw (ex-info (str "--tags is mutually exclusive with "
+                           "--add-tag / --remove-tag")
+                      {:offending (vec (cons :tags delta-keys))}))))
+  (let [adds    (set (:add-tag opts))
+        removes (set (:remove-tag opts))
+        overlap (set/intersection adds removes)]
+    (when (seq overlap)
+      (throw (ex-info (str "--add-tag and --remove-tag overlap on: "
+                           (str/join ", " (sort overlap)))
+                      {:offending [:add-tag :remove-tag]
+                       :overlap   (vec (sort overlap))})))))
+
 (defn- apply-ac-flip
   "When `opts` carries `--ac`, flip the matching frontmatter entry on
    `fm`. Returns the (possibly updated) frontmatter. Throws when the
@@ -671,6 +715,7 @@
                          "--description / --design")
                     {:offending (filter #(contains? opts %)
                                         [:description :design])})))
+  (validate-tag-delta-opts! opts)
   (validate-ac-flip-opts! opts)
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]

@@ -376,6 +376,21 @@
       (is (contains? help/registry sk)
           (str k " references missing subcommand: " sk)))))
 
+(deftest update-tag-delta-flags-registered-test
+  ;; Pins the registry-level contract for the new tag-delta flags. The
+  ;; derived babashka.cli spec is what update-handler reads, so getting
+  ;; :coerce [] (vector accumulation across repeats) here is what makes
+  ;; `--add-tag x --add-tag y` parse to `["x" "y"]` instead of "y".
+  (testing ":update declares --add-tag and --remove-tag with :coerce []"
+    (let [flags (->> (get-in help/registry [:update :flags])
+                     (filter #(#{:add-tag :remove-tag} (:name %)))
+                     (map (juxt :name :coerce))
+                     (into {}))]
+      (is (= [] (get flags :add-tag))
+          ":update must declare --add-tag with :coerce [] for repeatability")
+      (is (= [] (get flags :remove-tag))
+          ":update must declare --remove-tag with :coerce [] for repeatability"))))
+
 (deftest create-has-no-mode-shortcut-flags-test
   ;; --mode <value> is the only path to set mode on `knot create`. Per-mode
   ;; shortcut flags (--afk, --hitl) bake canonical mode names into CLI

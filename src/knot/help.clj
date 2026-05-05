@@ -391,6 +391,10 @@
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}
                   {:name :parent       :desc "Set or clear (\"\") the parent id."}
                   {:name :tags         :desc "Replace tags (comma-list); pass \"\" to clear."}
+                  {:name :add-tag      :coerce []
+                   :desc "Add a single tag (repeatable; idempotent). Mutually exclusive with --tags."}
+                  {:name :remove-tag   :coerce []
+                   :desc "Remove a single tag (repeatable; idempotent). Mutually exclusive with --tags."}
                   {:name :external-ref :coerce []
                    :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
                   {:name :ac
@@ -409,6 +413,8 @@
                    :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design."}]
     :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
                    :note "Bump priority and replace the tag list."}
+                  {:cmd "knot update kno-01abc --add-tag stale --remove-tag wip"
+                   :note "Apply tag deltas (mutually exclusive with --tags)."}
                   {:cmd "knot update kno-01abc --description \"New desc.\""
                    :note "Replace just the Description section."}
                   {:cmd "knot update kno-01abc --ac \"Ship it\" --done"

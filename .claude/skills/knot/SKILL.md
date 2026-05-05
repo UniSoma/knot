@@ -219,6 +219,11 @@ Flag set on `knot update`:
   `--assignee`, `--parent`, `--tags` (comma-list), `--external-ref`
   (repeatable). Pass `""` (or no values for `--external-ref`) on
   optional fields to clear them; `--tags ""` clears all tags.
+- Tag deltas: `--add-tag <t>` / `--remove-tag <t>` apply per-tag
+  changes without round-tripping the full list (repeatable; mutually
+  exclusive with `--tags`). Idempotent per tag; existing order is
+  preserved, removes drop in place, adds append at the end. An empty
+  resulting set clears `:tags`.
 - Body sections (replace in place; create if missing):
   `--description`, `--design`.
 - Acceptance flip: `--ac "<title>" --done` (or `--undone`) toggles
