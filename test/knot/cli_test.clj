@@ -1211,8 +1211,8 @@
             out       (cli/undep-cmd (ctx tmp) {:from from-id :to to-id :json? true})
             parsed    (cheshire/parse-string out true)]
         (is (= true (:ok parsed)))
-        (is (not (contains? (:data parsed) :deps))
-            "removing the last dep drops :deps from the JSON envelope")))))
+        (is (= [] (get-in parsed [:data :deps]))
+            "removing the last dep emits :deps as [] in the JSON envelope (disk YAML still pruned)")))))
 
 (deftest ready-cmd-test
   (testing "ready-cmd lists open tickets with all-terminal deps"
@@ -1945,8 +1945,8 @@ Restart the daemon.
         (is (= 2 (count (:data parsed))))
         (is (= #{a-id b-id} (set (map :id (:data parsed)))))
         (let [a-entry (first (filter #(= a-id (:id %)) (:data parsed)))]
-          (is (not (contains? a-entry :links))
-              "removed last link drops :links from envelope")))))
+          (is (= [] (:links a-entry))
+              "removed last link emits :links as [] in envelope (disk YAML still pruned)")))))
 
   (testing "unlink-cmd with :json? returns just the from ticket when to does not exist"
     (with-tmp tmp

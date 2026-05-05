@@ -169,6 +169,14 @@
               :ok             false
               :error          error)))
 
+(def ^:private json-vector-default-keys
+  "Frontmatter vector fields that `jsonify-ticket` always emits as `[]`
+   when absent. Disk YAML still prunes empty seqs at write time; the
+   default is injected at the JSON boundary so `jq '.data[].tags[]'`
+   works uniformly. Extend here when adding future optional vector
+   fields (e.g. `:acceptance_criteria`)."
+  [:tags :deps :links :external_refs])
+
 (defn- jsonify-ticket
   "Project a `{:frontmatter ... :body ...}` map into the JSON shape used by
    `show --json` and `ls --json`. Keeps frontmatter keys at the top level
@@ -177,10 +185,15 @@
    The frontmatter map is passed through unchanged so the ordered-map type
    produced by `clj-yaml` survives into Cheshire — keys serialize in the
    on-disk order. `(into {} ordered-map)` would silently rebuild as a
-   hash-map past 8 entries and scramble the order."
+   hash-map past 8 entries and scramble the order. Missing
+   `json-vector-default-keys` are appended as `[]` at the end of the map
+   (JSON object key order is non-semantic) so consumers can iterate
+   without `null[]` errors."
   [{:keys [frontmatter body] :as _ticket} {:keys [include-body?]
                                            :or {include-body? true}}]
-  (cond-> frontmatter
+  (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
+                  frontmatter
+                  json-vector-default-keys)
     include-body? (assoc :body body)))
 
 (defn- jsonify-inverse-entry

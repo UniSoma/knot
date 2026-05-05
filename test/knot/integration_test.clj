@@ -1548,8 +1548,8 @@
             parsed (json/parse-string (str/trim out) true)]
         (is (zero? exit))
         (is (= true (:ok parsed)))
-        (is (not (contains? (:data parsed) :deps))
-            "removing the last dep drops :deps in the envelope"))))
+        (is (= [] (get-in parsed [:data :deps]))
+            "removing the last dep emits :deps as [] in the envelope (disk YAML still pruned)"))))
 
   (testing "link --json emits an array of post-mutation tickets (no body)"
     (with-tmp tmp
@@ -1686,8 +1686,8 @@
             parsed (json/parse-string (str/trim out) true)]
         (is (zero? exit) (str "update --external-ref \"\" err=" err))
         (is (= true (:ok parsed)))
-        (is (not (contains? (:data parsed) :external_refs))
-            "blank --external-ref must clear external_refs, not store [\"\"]")))))
+        (is (= [] (get-in parsed [:data :external_refs]))
+            "blank --external-ref must clear external_refs to [] in the envelope, not store [\"\"]")))))
 
 (deftest create-body-flag-not-consumed-end-to-end-test
   ;; Regression guard for kno-01kqgqcqmy19 review: --body is `update`'s
@@ -1845,4 +1845,49 @@
             "stderr keeps the existing plain-text framing")
         (is (str/includes? err "Unknown option")
             "stderr names the unknown-option failure")))))
+
+(deftest json-vector-defaults-end-to-end-test
+  (let [vector-keys [:tags :deps :links :external_refs]]
+    (testing "knot list --json emits tags/deps/links/external_refs as [] for a tagless ticket"
+      (with-tmp tmp
+        (let [{create-out :out} (run-knot tmp "create" "Bare")
+              {:keys [exit out]} (run-knot tmp "list" "--json")
+              parsed (json/parse-string (str/trim out) true)
+              entry  (first (filter #(= "Bare" (:title %)) (:data parsed)))]
+          (is (zero? exit))
+          (is (some? entry) (str "tagless ticket should appear in list output: " create-out))
+          (doseq [k vector-keys]
+            (is (= [] (get entry k))
+                (str "list --json must emit " k " as [] for a tagless ticket"))))))
+    (testing "knot show --json emits tags/deps/links/external_refs as [] for a tagless ticket"
+      (with-tmp tmp
+        (let [{create-out :out} (run-knot tmp "create" "Bare")
+              id (id-of create-out "bare")
+              {:keys [exit out]} (run-knot tmp "show" id "--json")
+              parsed (json/parse-string (str/trim out) true)]
+          (is (zero? exit))
+          (doseq [k vector-keys]
+            (is (= [] (get-in parsed [:data k]))
+                (str "show --json must emit " k " as [] for a tagless ticket"))))))
+    (testing "on-disk YAML pruning is preserved: tagless ticket has no tags/deps/links/external_refs lines"
+      (with-tmp tmp
+        (let [{create-out :out} (run-knot tmp "create" "Bare")
+              md-path (str/trim create-out)
+              md-body (slurp md-path)]
+          (doseq [field-name ["tags:" "deps:" "links:" "external_refs:"]]
+            (is (not (str/includes? md-body field-name))
+                (str "tagless .md must not contain `" field-name "` line"))))))
+    (testing "present vector values pass through unchanged in --json"
+      (with-tmp tmp
+        (let [{create-out :out} (run-knot tmp "create" "Tagged"
+                                          "--tags" "alpha,beta"
+                                          "--external-ref" "JIRA-1")
+              id (id-of create-out "tagged")
+              {:keys [exit out]} (run-knot tmp "show" id "--json")
+              parsed (json/parse-string (str/trim out) true)]
+          (is (zero? exit))
+          (is (= ["alpha" "beta"] (get-in parsed [:data :tags])))
+          (is (= ["JIRA-1"]       (get-in parsed [:data :external_refs])))
+          (is (= [] (get-in parsed [:data :deps])))
+          (is (= [] (get-in parsed [:data :links]))))))))
 

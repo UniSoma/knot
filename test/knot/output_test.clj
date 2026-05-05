@@ -1452,6 +1452,48 @@
       (is (= true (:ok parsed)))
       (is (= [] (:data parsed))))))
 
+(deftest jsonify-vector-defaults-test
+  (let [vector-keys [:tags :deps :links :external_refs]
+        bare-ticket {:frontmatter {:id "kno-A" :status "open"} :body ""}]
+    (testing "show-json injects [] for absent vector keys"
+      (let [parsed (envelope-of (output/show-json bare-ticket))]
+        (doseq [k vector-keys]
+          (is (= [] (get-in parsed [:data k]))
+              (str "show-json must emit " k " as [] when absent")))))
+    (testing "ls-json injects [] for absent vector keys, per entry"
+      (let [parsed (envelope-of (output/ls-json [bare-ticket]))]
+        (doseq [k vector-keys]
+          (is (= [] (get-in parsed [:data 0 k]))
+              (str "ls-json must emit " k " as [] when absent")))))
+    (testing "touched-ticket-json injects [] for absent vector keys"
+      (let [parsed (envelope-of (output/touched-ticket-json bare-ticket))]
+        (doseq [k vector-keys]
+          (is (= [] (get-in parsed [:data k]))
+              (str "touched-ticket-json must emit " k " as [] when absent")))))
+    (testing "touched-tickets-json injects [] for absent vector keys, per entry"
+      (let [parsed (envelope-of (output/touched-tickets-json [bare-ticket]))]
+        (doseq [k vector-keys]
+          (is (= [] (get-in parsed [:data 0 k]))
+              (str "touched-tickets-json must emit " k " as [] when absent")))))
+    (testing "present vector values pass through unchanged (no override)"
+      (let [full-ticket {:frontmatter {:id "kno-A"
+                                       :status "open"
+                                       :tags ["x" "y"]
+                                       :deps ["kno-B"]
+                                       :links ["kno-C"]
+                                       :external_refs ["JIRA-1"]}
+                         :body ""}
+            parsed (envelope-of (output/show-json full-ticket))]
+        (is (= ["x" "y"]   (get-in parsed [:data :tags])))
+        (is (= ["kno-B"]   (get-in parsed [:data :deps])))
+        (is (= ["kno-C"]   (get-in parsed [:data :links])))
+        (is (= ["JIRA-1"]  (get-in parsed [:data :external_refs])))))
+    (testing "optional scalars stay absent (no null emitted)"
+      (let [parsed (envelope-of (output/show-json bare-ticket))]
+        (is (not (contains? (:data parsed) :parent)))
+        (is (not (contains? (:data parsed) :assignee)))
+        (is (not (contains? (:data parsed) :closed)))))))
+
 (deftest ls-json-envelope-test
   (testing "ls-json wraps the ticket array in the v0.3 envelope"
     (let [tickets [{:frontmatter {:id "a" :status "open"} :body ""}

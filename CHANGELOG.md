@@ -85,6 +85,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message. Exit code stays at `1` on both paths. Brings `info` in line
   with the rest of the JSON-aware error contract.
 
+- `--json` ticket payloads always include `tags`, `deps`, `links`, and
+  `external_refs` as arrays — empty (`[]`) when the ticket has no
+  value, populated otherwise. Previously these keys were absent for
+  tickets that never set them, breaking `jq` pipelines like
+  `knot list --json | jq -r '[.data[].tags[]]'` with `null[]` errors.
+  Affects every command whose `--json` payload carries a ticket: read
+  side (`list`, `show`) and mutating side
+  (`create`/`start`/`status`/`close`/`reopen`/`add-note`/`update`/`dep`/`undep`/`link`/`unlink`).
+  On-disk YAML pruning is unchanged: `.md` files for tickets without
+  values still omit the field — the default is injected only at the
+  JSON boundary.
+
 ### Changed (BREAKING)
 
 - `knot create` no longer accepts the `--afk` and `--hitl` shortcut

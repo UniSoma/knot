@@ -322,6 +322,12 @@ missing ids emit `{ok:false, error:{code:"not_found", ...}}`
 `candidates` array; `dep --json` cycle rejection emits `code:
 "cycle"` with the offending path under `error.cycle`.
 
+Ticket payloads always carry `tags`, `deps`, `links`, and
+`external_refs` as arrays — `[]` when unset, populated otherwise — so
+`jq -r '.data[].tags[]'` is safe regardless of which tickets have
+tags. On-disk YAML still omits these fields when empty; the `[]`
+default is injected at the JSON boundary only.
+
 ```sh
 knot list --json           | jq '.data[] | select(.priority <= 1)'
 knot ready --json --mode afk
