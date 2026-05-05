@@ -141,64 +141,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (no project root, invalid `.knot.edn`). Issues sort severity desc →
   code asc → first-id asc → message asc, identical in JSON and text.
 
-### Fixed
+- New top-level `Concurrency` section in the README explains the
+  no-locking model, points at git as the conflict-detection / undo
+  path, and links to the optimistic-concurrency placeholder ticket
+  for projects that need multi-writer coordination later.
 
-- `knot info --bogus --json` (any unknown flag with `--json`) now emits
-  the v0.3 `invalid_argument` error envelope on stdout instead of
-  printing plain stderr text. Plain `knot info --bogus` (no `--json`)
-  still emits the existing `knot info: Unknown option: ...` stderr
-  message. Exit code stays at `1` on both paths. Brings `info` in line
-  with the rest of the JSON-aware error contract.
-
-- `--json` ticket payloads always include `tags`, `deps`, `links`, and
-  `external_refs` as arrays — empty (`[]`) when the ticket has no
-  value, populated otherwise. Previously these keys were absent for
-  tickets that never set them, breaking `jq` pipelines like
-  `knot list --json | jq -r '[.data[].tags[]]'` with `null[]` errors.
-  Affects every command whose `--json` payload carries a ticket: read
-  side (`list`, `show`) and mutating side
-  (`create`/`start`/`status`/`close`/`reopen`/`add-note`/`update`/`dep`/`undep`/`link`/`unlink`).
-  On-disk YAML pruning is unchanged: `.md` files for tickets without
-  values still omit the field — the default is injected only at the
-  JSON boundary.
-
-### Changed (BREAKING)
-
-- `knot create` no longer accepts the `--afk` and `--hitl` shortcut
-  flags. `--mode <value>` is the only path to set the mode at create
-  time. The shortcuts baked the canonical mode names `"afk"` and
-  `"hitl"` into CLI parsing — projects that customize `:modes` (e.g.
-  `["solo" "team"]`) would expose shortcuts referencing modes they did
-  not have. `:create` is also now a strict-parsing command: unknown
-  flags (`--afk`, `--hitl`, `--body`, anything mistyped) exit non-zero
-  with `knot: Unknown option: :<name>` on stderr, matching the
-  behavior already in place on `prime`/`ready`/`blocked`/`closed`. The
-  init stub documents the per-mode-shortcut invariant under `:modes`
-  for future contributors. Pre-1.0 break window — no deprecation
-  cycle. Migration: replace `--afk` with `--mode afk` and `--hitl`
-  with `--mode hitl`.
-- `knot dep cycle` is **removed**; its role is subsumed by `knot check
-  --code dep_cycle`. The semantic shift: `dep cycle` previously scanned
-  only non-terminal tickets, while `knot check` scans the whole project
-  (live + archive). Cycles among archived tickets now surface as issues
-  — they are real data-integrity problems if a ticket is later reopened.
-- The v0.3 envelope contract is **extended**: `knot check --json` is the
-  first command where `ok` mirrors a *health verdict*, so `ok: false`
-  may now coexist with a `data` slot when errors are present
-  (`{schema_version: 1, ok: false, data: {issues: [...], scanned:
-  {...}}}`). The earlier rule (`ok: false` ↔ `error` slot, no `data`)
-  still holds for the cannot-scan case (exit 2). Argument-parse errors
-  for `knot check` stay on stderr with exit 2 in both modes — matches
-  the arg-parsing-stays-on-stderr policy.
-- All `--json` read commands now wrap their output in a tagged envelope
-  `{schema_version: 1, ok: true, data: <payload>}` instead of returning a
-  bare object/array. `knot list/ready/blocked/closed --json` change from
-  `[ ... ]` to `{"schema_version": 1, "ok": true, "data": [ ... ]}`;
-  `knot show --json`, `knot dep tree --json`, and `knot prime --json`
-  change from `{ ... }` to `{"schema_version": 1, "ok": true,
-  "data": { ... }}`. The `data` payload is unchanged from prior shapes.
-
-### Added
+- New `.claude/skills/knot/references/json-protocol.md` is the
+  canonical reference for the v0.3 `--json` envelope: envelope shape,
+  `ok` discriminator (with the `knot check` carve-out), `meta` slot,
+  schema versioning, partial-id contract (strict vs soft resolution),
+  error-code catalogue (`not_found`, `ambiguous_id`, `cycle`,
+  `invalid_argument`, `no_project`, `config_invalid`), per-command
+  `data` shape tables (read + mutating), `knot check` issue-code
+  catalogue, and worked examples for each envelope variant. Lives
+  under the bundled skill folder so projects that copy the skill
+  inherit the protocol contract alongside it. Mirrors the contract
+  pinned by `test/knot/json_contract_test.clj` so prose drift is
+  caught at `bb test` time. README's JSON paragraph and
+  `SKILL.md`'s JSON section both link here.
 
 - Error path for `--json` read commands now emits a structured error
   envelope on stdout with exit code 1 instead of a stderr message:
@@ -236,6 +196,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (exit 1). Partial-id ambiguity emits `code: "ambiguous_id"` with a
   `candidates` array. `dep --json` cycle rejection emits `code:
   "cycle"` with the offending path under `error.cycle`.
+
+### Changed (BREAKING)
+
+- All `--json` read commands now wrap their output in a tagged envelope
+  `{schema_version: 1, ok: true, data: <payload>}` instead of returning a
+  bare object/array. `knot list/ready/blocked/closed --json` change from
+  `[ ... ]` to `{"schema_version": 1, "ok": true, "data": [ ... ]}`;
+  `knot show --json`, `knot dep tree --json`, and `knot prime --json`
+  change from `{ ... }` to `{"schema_version": 1, "ok": true,
+  "data": { ... }}`. The `data` payload is unchanged from prior shapes.
+- Acceptance criteria are now structured frontmatter
+  (`acceptance: [{title, done}]`) instead of freeform `- [ ]`
+  checkboxes in the body. The on-disk file format changes
+  accordingly: the `## Acceptance Criteria` section is **never
+  stored** on disk — `knot show` synthesizes it from frontmatter at
+  display time, alongside the inverse sections. A one-shot
+  `knot migrate-ac` command (hidden from top-level help) lifts every
+  body's existing `## Acceptance Criteria` checklist into structured
+  frontmatter and strips the section; idempotent on already-migrated
+  tickets, safe to re-run. Existing acceptance bullets in body
+  content will not appear in `knot show` until migrated.
+- The v0.3 envelope contract is **extended**: `knot check --json` is the
+  first command where `ok` mirrors a *health verdict*, so `ok: false`
+  may now coexist with a `data` slot when errors are present
+  (`{schema_version: 1, ok: false, data: {issues: [...], scanned:
+  {...}}}`). The earlier rule (`ok: false` ↔ `error` slot, no `data`)
+  still holds for the cannot-scan case (exit 2). Argument-parse errors
+  for `knot check` stay on stderr with exit 2 in both modes — matches
+  the arg-parsing-stays-on-stderr policy.
+- The active (in-progress) status is now derived from the project's
+  `:active-status` config key instead of the hardcoded string
+  `"in_progress"`. Default behavior is unchanged because
+  `:active-status` defaults to `"in_progress"`. Projects that
+  customize `:statuses` (e.g. `["open" "review" "shipped"]`) can now
+  define their own active status; `knot start`, `knot ready`'s
+  blocked-ness check, and the ls-table render colors all read from
+  the same source of truth. `knot check` validates `:active-status`
+  via the `invalid_active_status` issue code.
+
+### Removed
+
+- `knot create` no longer accepts the `--afk` and `--hitl` shortcut
+  flags. `--mode <value>` is the only path to set the mode at create
+  time. The shortcuts baked the canonical mode names `"afk"` and
+  `"hitl"` into CLI parsing — projects that customize `:modes` (e.g.
+  `["solo" "team"]`) would expose shortcuts referencing modes they did
+  not have. `knot create` is also now a strict-parsing command:
+  unknown flags (`--afk`, `--hitl`, `--body`, anything mistyped) exit
+  non-zero with `knot: Unknown option: :<name>` on stderr, matching
+  the behavior already in place on
+  `prime`/`ready`/`blocked`/`closed`. The init stub documents the
+  per-mode-shortcut invariant under `:modes` for future contributors.
+  Pre-1.0 break window — no deprecation cycle. Migration: replace
+  `--afk` with `--mode afk` and `--hitl` with `--mode hitl`.
+- `knot dep cycle` is removed; its role is subsumed by `knot check
+  --code dep_cycle`. The semantic shift: `dep cycle` previously scanned
+  only non-terminal tickets, while `knot check` scans the whole project
+  (live + archive). Cycles among archived tickets now surface as issues
+  — they are real data-integrity problems if a ticket is later
+  reopened.
+
+### Fixed
+
+- `knot info --bogus --json` (any unknown flag with `--json`) now emits
+  the v0.3 `invalid_argument` error envelope on stdout instead of
+  printing plain stderr text. Plain `knot info --bogus` (no `--json`)
+  still emits the existing `knot info: Unknown option: ...` stderr
+  message. Exit code stays at `1` on both paths. Brings `info` in line
+  with the rest of the JSON-aware error contract.
+
+- `--json` ticket payloads always include `tags`, `deps`, `links`, and
+  `external_refs` as arrays — empty (`[]`) when the ticket has no
+  value, populated otherwise. Previously these keys were absent for
+  tickets that never set them, breaking `jq` pipelines like
+  `knot list --json | jq -r '[.data[].tags[]]'` with `null[]` errors.
+  Affects every command whose `--json` payload carries a ticket: read
+  side (`list`, `show`) and mutating side
+  (`create`/`start`/`status`/`close`/`reopen`/`add-note`/`update`/`dep`/`undep`/`link`/`unlink`).
+  On-disk YAML pruning is unchanged: `.md` files for tickets without
+  values still omit the field — the default is injected only at the
+  JSON boundary.
 
 ## [0.2.0] - 2026-04-30
 

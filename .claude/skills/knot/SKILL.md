@@ -302,7 +302,11 @@ authorizes that ticket. The mode is the contract.
 
 Every read AND mutating command accepts `--json` and emits a tagged
 envelope on stdout with snake_case keys. Warnings and errors go to
-stderr.
+stderr. The canonical contract lives in
+[`references/json-protocol.md`](references/json-protocol.md) — per-command
+`data` shapes, the full error-code catalogue, the `knot check`
+issue-code catalogue, and the partial-id contract are pinned there
+(and in the knot repo, exercised by `test/knot/json_contract_test.clj`).
 
 ```json
 {"schema_version": 1, "ok": true, "data": <payload>}
@@ -335,7 +339,13 @@ Mutating-command error envelopes mirror the read-side contract:
 missing ids emit `{ok:false, error:{code:"not_found", ...}}`
 (exit 1); partial-id ambiguity emits `code: "ambiguous_id"` with a
 `candidates` array; `dep --json` cycle rejection emits `code:
-"cycle"` with the offending path under `error.cycle`.
+"cycle"` with the offending path under `error.cycle`. `info --json`
+adds `invalid_argument` (unknown flag), and both `info --json` and
+`check --json` add `no_project` / `config_invalid` for discovery
+failures (exit 1 / exit 2 respectively). For most other commands,
+argument-parsing errors stay on stderr — see
+[`references/json-protocol.md`](references/json-protocol.md) for the
+full code catalogue.
 
 Ticket payloads always carry `tags`, `deps`, `links`, and
 `external_refs` as arrays — `[]` when unset, populated otherwise — so

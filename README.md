@@ -105,6 +105,12 @@ knot check --json              # envelope + sorted issues, exit 0/1/2
 Every read command (`show`, `ls`, `ready`, `blocked`, `closed`,
 `dep tree`, `check`, `prime`) accepts `--json` and emits snake_case
 keys. Stdout carries data only; warnings and errors go to stderr.
+See the bundled skill's reference at
+[`.claude/skills/knot/references/json-protocol.md`](.claude/skills/knot/references/json-protocol.md)
+for the full envelope shape, per-command `data` payloads, and the
+error-code catalogue. The reference travels with the skill, so any
+project that copies `.claude/skills/knot/` gets the protocol contract
+alongside it.
 
 Listing commands (`list` / `ls`, `ready`, `blocked`, `closed`) emit
 ANSI color when stdout is a TTY; piping disables it automatically.
@@ -279,6 +285,31 @@ cp -r "$KNOT_REPO/.claude/skills/knot" ~/.claude/skills/knot
 
 The skill is plain markdown; nothing in it is project-specific, so the
 same file works in every knot-tracked project.
+
+## Concurrency
+
+Knot does no locking. There is no `.knot.lock`, no fcntl, no MVCC, no
+optimistic-concurrency check. Every write reads the ticket file, mutates it
+in memory, and writes it back. The model assumes one writer per ticket at
+a time — typical of a solo developer driving the CLI from a single shell,
+or a single agent working through `knot ready --mode afk` end to end.
+
+Git is the conflict-detection and undo path. Tickets are plain markdown
+files committed alongside the code that motivates them, so two writers who
+race to the same ticket produce a normal merge conflict at the next pull
+or rebase. Treat `git diff .tickets/` and `git log -p .tickets/<id>--*.md`
+as the authoritative history; nothing knot does is invisible to git.
+There is also no force flag for destructive `update --body` rewrites —
+git is the documented undo path there too.
+
+If your workflow puts multiple writers on the same ticket concurrently —
+for example, parallel agents that pick up unblocked work without
+coordinating — the last-writer-wins semantics will eventually drop a
+write. The placeholder for an optimistic-concurrency check (read-modify-write
+with `:updated` as a CAS token) lives at
+[`.tickets/kno-01kqgqaxzx98--future-work-optimistic-concurrency-control-via.md`](.tickets/kno-01kqgqaxzx98--future-work-optimistic-concurrency-control-via.md).
+File a bug against your usage pattern there if you hit the issue in
+practice; the design space is open until then.
 
 ## Philosophy
 
