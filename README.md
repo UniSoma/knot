@@ -37,7 +37,7 @@ an editor, shell, git, and agent can all understand, use Knot.
 Knot is distributed as a bbin-compatible babashka script:
 
 ```sh
-bbin install https://github.com/UniSoma/knot --as knot
+bbin install https://github.com/UniSoma/knot.git
 ```
 
 That's it. bbin reads `:bbin/bin` from `bb.edn`, drops a babashka shim
