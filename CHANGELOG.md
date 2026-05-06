@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-05-06
+
 ### Added
 
 - `knot create` gains repeatable `--dep <id>` and `--link <id>` flags
@@ -213,6 +215,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `candidates` array. `dep --json` cycle rejection emits `code:
   "cycle"` with the offending path under `error.cycle`.
 
+- `knot update` gains `--add-ac <title>` and `--remove-ac <title>`
+  for non-flip AC list management. Both repeatable, idempotent, and
+  match by exact title. Composes with `--ac <title> --done|--undone`
+  in apply order add → flip → remove, so a single `update` call can
+  add a new AC, flip an existing one, and remove a third in the same
+  edit. `--body` now warns that the `## Acceptance Criteria` section
+  is display-only on write; `--ac` points to the new deltas for
+  non-flip ops. Bundled skill kept in sync.
+
 ### Changed
 
 - Every command is now a strict-parsing command: unknown flags
@@ -233,6 +244,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `create`) gets a loud failure instead of silent argv theft.
   Migration: run `knot <cmd> --help` to see the canonical flag
   names. Bundled skill kept in sync.
+
+- The intake status used by `knot create` and `knot reopen` is now
+  derived from the project's `:statuses` / `:active-status` /
+  `:terminal-statuses` config (the first non-active, non-terminal
+  status) instead of the hardcoded `"open"`. Default behavior is
+  unchanged — default `:statuses` puts `"open"` first. Projects
+  that customize statuses (e.g. `["todo" "active" "done"]`) get
+  intake at `"todo"` automatically; no separate config key needed.
+
+- The agent preamble emitted by `knot prime` for AFK mode is now
+  selected via a new `:afk-mode` config key (default `"afk"`)
+  instead of the hardcoded literal `"afk"`. Projects that rename
+  the AFK mode (e.g. `:modes ["solo" "team"]` with
+  `:afk-mode "solo"`) get the preamble on the renamed mode;
+  `:afk-mode nil` opts out entirely. `knot info` surfaces the
+  effective value under `allowed_values.afk_mode`; the `init`
+  stub writes a documented `:afk-mode "afk"` line.
 
 ### Changed (BREAKING)
 
@@ -334,6 +362,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   document the path-policy and test rules. CI now treats
   `windows-latest` as a blocking gate; `continue-on-error` was dropped
   from the matrix.
+
+- `knot create` no longer produces colliding ticket ids when two
+  tickets are minted in the same millisecond. Id generation now
+  follows the standard ULID monotonic spec — same-ms (or
+  backward-clock) calls reuse the prior timestamp and increment
+  the random component by 1; on the (astronomically rare) overflow
+  at 1024 same-ms tickets, the timestamp bumps by 1 and the random
+  component resets. The atomic-create path uses `Files/write
+  CREATE_NEW`, so even a millisecond collision that *did* slip
+  through writes a fresh ticket via retry rather than overwriting
+  an existing file. Eliminates the `prime-cmd-json-test` truncation
+  flake (verified: 100/100 consecutive `bb test` runs green).
 
 ## [0.2.0] - 2026-04-30
 
