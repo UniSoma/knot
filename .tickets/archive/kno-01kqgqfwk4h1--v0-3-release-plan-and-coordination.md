@@ -1,12 +1,13 @@
 ---
 id: kno-01kqgqfwk4h1
 title: v0.3 release plan and coordination
-status: open
+status: closed
 type: task
 priority: 3
 mode: hitl
 created: '2026-05-01T02:57:07.684531365Z'
-updated: '2026-05-06T20:55:00.534314929Z'
+updated: '2026-05-06T21:28:45.503663828Z'
+closed: '2026-05-06T21:28:45.503663828Z'
 tags:
 - v0.3
 - release
@@ -33,15 +34,15 @@ acceptance:
 - title: AC migration timing decided (first-invocation auto-run / explicit `knot init --migrate` / bash script)
   done: true
 - title: Single CHANGELOG entry drafted covering every v0.3 breaking change
-  done: false
+  done: true
 - title: Release notes drafted with migration guidance for v0.2 users
-  done: false
+  done: true
 - title: All v0.3-tagged blockers closed before tag push
   done: true
 - title: '`bb test` green on all platforms (or Windows ticket kno-01kqcvp72htb explicitly resolved or deferred)'
   done: true
 - title: v0.3 tag pushed; bbin install verified end-to-end
-  done: false
+  done: true
 ---
 
 ## Description
@@ -86,6 +87,24 @@ Coordinate the v0.3 release once the v0.3 implementation slices are done. This i
 **2026-05-06T20:55:00.534314929Z**
 
 Grilling outcomes — design decisions for the cut and 12-step manual cut sequence.
+
+**2026-05-06T21:28:45.503663828Z**
+
+v0.3.0 cut and shipped. Tag v0.3.0 (annotated, with migration prose) pushed to origin/main; bbin install verified end-to-end on the public tag (--version=0.3.0, init/create/ls/--json envelope shape, migrate-ac idempotent, check ok).
+
+Cut breakdown:
+- Manual 12-step sequence (`/release` slash command was v0.2-shaped and not used; modernization filed as kno-01kqzh2vhhrz)
+- Coverage audit at cut time backfilled 4 missed slices into [Unreleased] before the rename: --add-ac/--remove-ac (kno-01kqxchq706w), monotonic ULID id-collision fix (kno-01kqjavvr89d), config-driven intake status (kno-01kqsgmey8dm), config-driven AFK preamble via :afk-mode (kno-01kqsgmey9ew). Two other closed v0.3 tickets were intentionally not added: schema command (kno-01kqgqegm782, won't-do — absorbed into docs slice + JSON contract test suite) and archive-subdir constant (kno-01kqtd4qthd3, internal refactor with no user-visible behavior change).
+- Release-notes prose drafted to a temp release-notes-v0.3.txt at repo root; used as both annotated tag body (`git tag -a -F` with --cleanup=verbatim — default 'strip' mode eats markdown ## headings) and copy source for the GitHub Release body. File deleted post-tag.
+- Pre-push smoke (`bbin install . --as knot-rc`) caught nothing (clean); post-push smoke from public tag (`bbin install https://github.com/UniSoma/knot.git --as knot-v030` in /tmp/knot-smoke) ran the full golden path.
+
+Settled decisions captured in this ticket's prior 'Grilling outcomes' notes block (8 decisions; sequence; follow-up IDs).
+
+v0.4 follow-ups linked and filed: kno-01kqzh1tadw8 (knot check legacy AC body warning), kno-01kqzh2vhhrz (modernize /release), kno-01kqzh3jgwf0 (release-tag smoke CI).
+
+Linked v0.3 prerequisites both closed: kno-01kqcvp72htb (Windows green) and the JSON-envelope/structured-AC slices that make up v0.3's user-visible value. Distribution refinement (kno-01kqcpb0t5s7) intentionally not blocked on; v0.3 ships on the existing bbin model.
+
+Final state: tests 326/4187/0; lint baseline preserved (4 errors / 5 warnings, all pre-existing). Commits: c469c27 (chore: follow-ups + grilling), 4d48da1 (Release v0.3.0). Tag: v0.3.0 (annotated, 66-line body, --cleanup=verbatim).
 
 ## Decisions settled
 
