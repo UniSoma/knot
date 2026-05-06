@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-04T13:19:25.128614479Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-06T00:56:46.957286855Z'
 acceptance:
 - title: '`knot create --help` documents repeatable long-form `--dep <id>` and `--link <id>` flags, one id per occurrence, and calls out that `--dep` is lenient on missing targets while `--link` is strict.'
   done: false
@@ -30,6 +30,8 @@ acceptance:
   done: false
 - title: A simulated multi-file write failure during reciprocal-link application fails loudly and attempts rollback rather than silently leaving success state.
   done: false
+links:
+- kno-01kqxchq706w
 ---
 
 ## Description

@@ -6,9 +6,11 @@ type: task
 priority: 2
 mode: hitl
 created: '2026-05-02T18:54:04.603784207Z'
-updated: '2026-05-02T21:18:46.761399166Z'
+updated: '2026-05-06T01:04:04.198143747Z'
 tags:
 - refine
+links:
+- kno-01kqxd0amhnb
 ---
 
 ## Notes
