@@ -2443,6 +2443,116 @@ Restart the daemon.
         (is (= true (:ok parsed)))
         (is (= ["b" "c"] (vec (get-in parsed [:data :tags]))))))))
 
+(deftest update-cmd-ac-deltas-test
+  (testing "--add-ac appends a new criterion with done: false"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :add-ac ["A"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "A" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--remove-ac drops the matching criterion in place"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-ac ["b"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done false}
+                {:title "c" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--add-ac is idempotent against an existing title (preserves done state and order)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            _       (cli/update-cmd (ctx tmp) {:id id :add-ac ["a" "c"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done true}
+                {:title "b" :done false}
+                {:title "c" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))
+            "existing 'a' must not be re-added or have its done flipped to false"))))
+
+  (testing "--add-ac dedupes repeated values within one call"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :add-ac ["x" "x" "y"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "x" :done false}
+                {:title "y" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--remove-ac is a no-op when no title matches"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-ac ["ghost"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--remove-ac that empties the list drops the YAML key"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-ac ["a"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (not (contains? (:frontmatter loaded) :acceptance))
+            "empty resulting list should drop the YAML key"))))
+
+  (testing "compose: --add-ac + --ac --done + --remove-ac apply in order add → flip → remove"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["keep" "drop"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :add-ac ["new"]
+                                     :ac "new"
+                                     :done true
+                                     :remove-ac ["drop"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "keep" :done false}
+                {:title "new"  :done true}]
+               (vec (get-in loaded [:frontmatter :acceptance])))
+            "add appended 'new'; flip toggled the just-added 'new' to done; remove dropped 'drop'"))))
+
+  (testing "same title in --add-ac and --remove-ac throws ex-info (overlap)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--add-ac.*--remove-ac.*overlap|overlap.*--add-ac"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id
+                                               :add-ac ["x"]
+                                               :remove-ac ["x"]}))))))
+
+  (testing "--json envelope reflects post-mutation :acceptance"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a"]})
+            id      (id-of-created created "t")
+            out     (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :add-ac ["b"]
+                                     :remove-ac ["a"]
+                                     :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= [{:title "b" :done false}]
+               (vec (get-in parsed [:data :acceptance]))))))))
+
 (deftest update-cmd-body-sectional-test
   (testing "update --description replaces the Description section in place"
     (with-tmp tmp

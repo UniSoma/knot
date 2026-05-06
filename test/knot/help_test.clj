@@ -391,6 +391,36 @@
       (is (= [] (get flags :remove-tag))
           ":update must declare --remove-tag with :coerce [] for repeatability"))))
 
+(deftest update-ac-delta-flags-registered-test
+  (testing ":update declares --add-ac and --remove-ac with :coerce []"
+    (let [flags (->> (get-in help/registry [:update :flags])
+                     (filter #(#{:add-ac :remove-ac} (:name %)))
+                     (map (juxt :name :coerce))
+                     (into {}))]
+      (is (= [] (get flags :add-ac))
+          ":update must declare --add-ac with :coerce [] for repeatability")
+      (is (= [] (get flags :remove-ac))
+          ":update must declare --remove-ac with :coerce [] for repeatability")))
+
+  (testing "--ac desc points to --add-ac / --remove-ac for non-flip operations"
+    (let [ac-desc (->> (get-in help/registry [:update :flags])
+                       (some #(when (= :ac (:name %)) (:desc %))))]
+      (is (string? ac-desc))
+      (is (re-find #"--add-ac" ac-desc)
+          "--ac help should mention --add-ac")
+      (is (re-find #"--remove-ac" ac-desc)
+          "--ac help should mention --remove-ac")))
+
+  (testing "--body desc warns the ## Acceptance Criteria section is display-only on write"
+    (let [body-desc (->> (get-in help/registry [:update :flags])
+                         (some #(when (= :body (:name %)) (:desc %))))]
+      (is (string? body-desc))
+      (is (re-find #"(?i)acceptance criteria" body-desc)
+          "--body help should reference the ## Acceptance Criteria section")
+      (is (re-find #"(?i)display-only|display only|read-only|not.*synced|not.*written|does not.*sync"
+                   body-desc)
+          "--body help should warn the AC section is not written back to frontmatter"))))
+
 (deftest create-has-no-mode-shortcut-flags-test
   ;; --mode <value> is the only path to set mode on `knot create`. Per-mode
   ;; shortcut flags (--afk, --hitl) bake canonical mode names into CLI

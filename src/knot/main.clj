@@ -120,6 +120,23 @@
          (remove str/blank?)
          vec)))
 
+(defn- normalize-ac-delta-values
+  "Normalize a vector of values from `--add-ac` / `--remove-ac`: trim
+   surrounding whitespace and reject blanks. Unlike tag deltas, comma
+   characters are allowed (AC titles legitimately contain commas; there
+   is no comma-list replace flag to round-trip against). Throws
+   `ex-info` so `update-handler`'s catch surfaces the error as `die`
+   (stderr + exit 1) or `{ok:false, error:{code:\"invalid_argument\", …}}`
+   under `--json`."
+  [flag-key vs]
+  (vec
+   (for [v vs
+         :let [trimmed (str/trim v)]]
+     (if (str/blank? trimmed)
+       (throw (ex-info (str "--" (name flag-key) " value must not be blank")
+                       {:offending flag-key}))
+       trimmed))))
+
 (defn- normalize-tag-delta-values
   "Normalize a vector of values from `--add-tag` / `--remove-tag`: trim
    surrounding whitespace, reject blanks, reject comma-bearing values.
@@ -605,7 +622,18 @@
 
                     (contains? opts :remove-tag)
                     (assoc :remove-tag (normalize-tag-delta-values
-                                        :remove-tag (:remove-tag opts))))
+                                        :remove-tag (:remove-tag opts)))
+
+                    ;; AC-delta normalization: blank-reject only (no
+                    ;; comma-reject — AC titles can contain commas, and
+                    ;; there is no comma-list replace flag to round-trip).
+                    (contains? opts :add-ac)
+                    (assoc :add-ac (normalize-ac-delta-values
+                                    :add-ac (:add-ac opts)))
+
+                    (contains? opts :remove-ac)
+                    (assoc :remove-ac (normalize-ac-delta-values
+                                       :remove-ac (:remove-ac opts))))
             out   (cli/update-cmd (discover-ctx) opts*)]
         (cond
           out   (println-out (str out))

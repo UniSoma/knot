@@ -398,7 +398,11 @@
                   {:name :external-ref :coerce []
                    :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
                   {:name :ac
-                   :desc "Acceptance criterion title to flip (exact match). Use with --done or --undone."}
+                   :desc "Acceptance criterion title to flip (exact match). Use with --done or --undone. Use --add-ac / --remove-ac to add or remove criteria."}
+                  {:name :add-ac    :coerce []
+                   :desc "Add an acceptance criterion with done: false (repeatable; idempotent on exact-match title)."}
+                  {:name :remove-ac :coerce []
+                   :desc "Remove an acceptance criterion by exact title (repeatable; idempotent — missing match is a no-op)."}
                   {:name :done   :coerce :boolean
                    :desc "Mark the --ac criterion as done."}
                   {:name :undone :coerce :boolean
@@ -410,7 +414,7 @@
                   {:name :design       :body? true
                    :desc "Replace the ## Design section."}
                   {:name :body         :body? true
-                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design."}]
+                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design. The ## Acceptance Criteria section is display-only on write — use --add-ac / --remove-ac / --ac to mutate criteria."}]
     :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
                    :note "Bump priority and replace the tag list."}
                   {:cmd "knot update kno-01abc --add-tag stale --remove-tag wip"
@@ -419,6 +423,8 @@
                    :note "Replace just the Description section."}
                   {:cmd "knot update kno-01abc --ac \"Ship it\" --done"
                    :note "Flip the matching frontmatter acceptance criterion to done."}
+                  {:cmd "knot update kno-01abc --add-ac \"Ship it\" --remove-ac \"old\""
+                   :note "Add and/or remove acceptance criteria by exact-match title (apply order: add → flip → remove)."}
                   {:cmd "knot update kno-01abc --body \"Plain body.\""
                    :note "Destructive whole-body replace (use git to recover)."}]
     :exit-codes  [{:code 0 :when "ticket saved"}

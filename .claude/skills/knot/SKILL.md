@@ -229,11 +229,20 @@ Flag set on `knot update`:
 - Acceptance flip: `--ac "<title>" --done` (or `--undone`) toggles
   the `:done` state of one frontmatter `acceptance` entry. The title
   must match exactly. `--done` and `--undone` are mutually exclusive;
-  `--ac` requires one of them. Use `knot edit` to add or remove AC
-  entries on existing tickets.
+  `--ac` requires one of them.
+- Acceptance deltas: `--add-ac "<title>"` / `--remove-ac "<title>"`
+  add or remove AC entries (repeatable; idempotent on exact-match
+  title). Adds append with `done: false`; removes drop in place;
+  emptying the list clears the `:acceptance` key. Composes with
+  `--ac --done/--undone` in a single call — apply order is
+  **add → flip → remove**, so a flip can target a just-added title.
+  The same title in both directions exits 1 `invalid_argument`.
 - Whole body: `--body <text>` — destructive, mutually exclusive with
   the sectional flags. There is **no `--force`**; git is the
-  documented undo path.
+  documented undo path. The `## Acceptance Criteria` section in the
+  body is **display-only on write** — `--body` does not sync the
+  section back to frontmatter; use `--add-ac` / `--remove-ac` / `--ac`
+  to mutate criteria.
 - `--json` returns the v0.3 envelope wrapping the post-mutation
   ticket (no `:meta` slot — `update` never archives).
 

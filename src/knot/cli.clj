@@ -673,6 +673,52 @@
                       {:offending [:add-tag :remove-tag]
                        :overlap   (vec (sort overlap))})))))
 
+(defn- validate-ac-delta-opts!
+  "Validate the `--add-ac` / `--remove-ac` flag pair. Throws `ex-info`
+   when the same title appears in both directions on the same call.
+   `update-cmd` surfaces the message as either a `die` or a
+   `{ok:false, error:{code:\"invalid_argument\", …}}` envelope under
+   `--json`."
+  [opts]
+  (let [adds    (set (:add-ac opts))
+        removes (set (:remove-ac opts))
+        overlap (set/intersection adds removes)]
+    (when (seq overlap)
+      (throw (ex-info (str "--add-ac and --remove-ac overlap on: "
+                           (str/join ", " (sort overlap)))
+                      {:offending [:add-ac :remove-ac]
+                       :overlap   (vec (sort overlap))})))))
+
+(defn- apply-ac-adds
+  "Apply `--add-ac` from `opts` to `fm`'s `:acceptance`. Each new title
+   is appended in flag order as `{:title <s> :done false}`. Existing
+   entries are kept untouched (preserving their `:done` state); repeated
+   values within a single direction silently dedupe."
+  [fm opts]
+  (if-not (contains? opts :add-ac)
+    fm
+    (let [existing (vec (or (:acceptance fm) []))
+          present  (set (map :title existing))
+          appends  (->> (:add-ac opts)
+                        (remove present)
+                        distinct
+                        (mapv (fn [t] {:title t :done false})))]
+      (assoc fm :acceptance (vec (concat existing appends))))))
+
+(defn- apply-ac-removes
+  "Apply `--remove-ac` from `opts` to `fm`'s `:acceptance`. Drops every
+   entry whose `:title` matches a removal value (exact match). Missing
+   matches are no-ops. An empty resulting list drops the YAML key."
+  [fm opts]
+  (if-not (contains? opts :remove-ac)
+    fm
+    (let [removes (set (:remove-ac opts))
+          kept    (vec (remove (fn [e] (contains? removes (:title e)))
+                               (or (:acceptance fm) [])))]
+      (if (empty? kept)
+        (dissoc fm :acceptance)
+        (assoc fm :acceptance kept)))))
+
 (defn- apply-ac-flip
   "When `opts` carries `--ac`, flip the matching frontmatter entry on
    `fm`. Returns the (possibly updated) frontmatter. Throws when the
@@ -716,6 +762,7 @@
                     {:offending (filter #(contains? opts %)
                                         [:description :design])})))
   (validate-tag-delta-opts! opts)
+  (validate-ac-delta-opts! opts)
   (validate-ac-flip-opts! opts)
   (let [{:keys [project-root tickets-dir terminal-statuses now]}
         (resolve-ctx ctx)]
@@ -723,7 +770,9 @@
       (let [full-id (get-in loaded [:frontmatter :id])
             fm*     (-> (:frontmatter loaded)
                         (update-frontmatter opts)
-                        (apply-ac-flip opts))
+                        (apply-ac-adds opts)
+                        (apply-ac-flip opts)
+                        (apply-ac-removes opts))
             body*   (update-body (:body loaded) opts)
             ticket* (assoc loaded :frontmatter fm* :body body*)
             saved   (store/save! project-root tickets-dir full-id nil ticket*

@@ -1700,6 +1700,85 @@
         (is (= 1 exit))
         (is (str/includes? err "no acceptance criterion"))))))
 
+(deftest update-ac-deltas-end-to-end-test
+  (testing "update --add-ac round-trips via the real CLI"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--add-ac" "First" "--add-ac" "Second" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "update --add-ac err=" err))
+        (is (= true (:ok parsed)))
+        (is (= [{:title "First"  :done false}
+                {:title "Second" :done false}]
+               (mapv (fn [e] {:title (:title e) :done (:done e)})
+                     (get-in parsed [:data :acceptance])))))))
+
+  (testing "update --remove-ac round-trips via the real CLI"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--acceptance" "first"
+                                    "--acceptance" "second")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--remove-ac" "first" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "update --remove-ac err=" err))
+        (is (= true (:ok parsed)))
+        (is (= [{:title "second" :done false}]
+               (mapv (fn [e] {:title (:title e) :done (:done e)})
+                     (get-in parsed [:data :acceptance])))))))
+
+  (testing "update --add-ac + --ac --done compose in one CLI call"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id
+                      "--add-ac" "Ship it"
+                      "--ac" "Ship it" "--done")]
+        (is (zero? exit) (str "compose err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- [x] Ship it")))))))
+
+(deftest update-ac-delta-errors-end-to-end-test
+  (testing "--add-ac and --remove-ac overlap exits 1 with invalid_argument JSON envelope"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--add-ac" "x" "--remove-ac" "x" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"overlap" (get-in parsed [:error :message]))))))
+
+  (testing "--add-ac \"\" (blank value) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--add-ac" "" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "--remove-ac \"   \" (whitespace-only) exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id "--remove-ac" "   " "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))))))
+
 (deftest update-tag-deltas-end-to-end-test
   (testing "update --add-tag and --remove-tag round-trip via the real CLI"
     (with-tmp tmp

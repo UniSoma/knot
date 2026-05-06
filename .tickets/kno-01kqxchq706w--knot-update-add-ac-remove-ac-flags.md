@@ -1,32 +1,33 @@
 ---
 id: kno-01kqxchq706w
 title: 'knot update: add --add-ac / --remove-ac for AC list management'
-status: open
+status: in_progress
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-06T00:56:00.992161805Z'
-updated: '2026-05-06T01:10:20.782586801Z'
+updated: '2026-05-06T01:37:05.329298772Z'
 tags:
 - refine
+- v0.3
 links:
 - kno-01kqsj9fy8zx
 - kno-01kqxd0amhnb
 acceptance:
 - title: '`knot update --help` documents `--add-ac` and `--remove-ac` with semantics matching `--add-tag` / `--remove-tag` (repeatable, idempotent, exact-match).'
-  done: false
+  done: true
 - title: '`knot update <id> --add-ac "A" --add-ac "B"` appends both criteria with `done: false`, dedupes by exact title, preserves first-occurrence order.'
-  done: false
+  done: true
 - title: '`knot update <id> --remove-ac "A"` removes the matching criterion; a missing match is a no-op (exit 0).'
-  done: false
+  done: true
 - title: '`--add-ac` / `--remove-ac` compose with `--ac --done/--undone` in a single call; documented apply order is add → flip → remove.'
-  done: false
+  done: true
 - title: '`--body`''s help text warns the `## Acceptance Criteria` markdown section is display-only on write.'
-  done: false
+  done: true
 - title: '`--ac`''s help text points to `--add-ac` / `--remove-ac` for non-flip operations.'
-  done: false
+  done: true
 - title: Coverage in `cli_test.clj` (option-spec/unit) and `integration_test.clj` (end-to-end via `bb`).
-  done: false
+  done: true
 ---
 
 ## Description
