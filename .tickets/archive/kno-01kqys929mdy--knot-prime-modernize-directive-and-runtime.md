@@ -1,12 +1,13 @@
 ---
 id: kno-01kqys929mdy
 title: 'knot prime: modernize directive and runtime sections'
-status: open
+status: closed
 type: chore
 priority: 2
 mode: afk
 created: '2026-05-06T13:57:43.336891533Z'
-updated: '2026-05-06T21:36:53.255370654Z'
+updated: '2026-05-06T22:46:27.072313158Z'
+closed: '2026-05-06T22:46:27.072313158Z'
 tags:
 - p2
 - v0.4
@@ -183,3 +184,31 @@ needs no edits (verify on the way out).
   the new output against the design.
 - Manual: `knot prime --json | jq keys` shows the same key set as
   before.
+
+## Notes
+
+**2026-05-06T22:46:27.072313158Z**
+
+knot prime directive and runtime sections modernized end-to-end against v0.3.
+
+Preambles:
+- HITL: 7-row 'When the user says...' table → 8-row mapping that adds the agent-write verb (knot update) and an explicit show/list/dep tree row, with inline filter annotations on the read-row (--mode afk, --tag, etc.). Closing pointer rephrased to 'For less-common ops (info / check / link / reopen / --json shapes / partial-id contract), invoke the knot skill' so the directive frames the skill as the long-tail reference rather than duplicating its contents.
+- AFK: knot update step inserted between add-note and close, tagged with 'never use knot edit, opens $EDITOR, fails without TTY' anti-pattern. Skill pointer drops 'lifecycle' (subsumed by the autonomous-flow checklist).
+
+## Commands cheatsheet retired entirely (function + section). Preamble's intent table plus bundled knot skill cover the same ground without per-session token cost.
+
+Row formats:
+- In Progress: id  type  mode  pri  age  title (6 cols). New output/format-age-days helper renders relative :updated as Nd (<14d), Nw (14d-6w, floor by 7), or Nm (>6w, floor by 30); missing :updated renders as -. The binary [stale] text prefix is retired; the age column carries the staleness signal in human-readable form. cli.clj's prime-in-progress-tickets now decorates each ticket with :prime-age-days alongside :prime-stale?.
+- Ready: id  type  mode  pri  title (5 cols), type column inserted. Missing fields render as -.
+
+Recently Closed summaries truncate at the first paragraph boundary (\n\n) at display time, with a 280-char hard cap on long single paragraphs. When truncation fires, the line ends with ' (see knot show <id>)'. prime --json data.recently_closed[].summary keeps the full untruncated string (text/JSON asymmetry is intentional).
+
+Per-section nudges are mode-conditioned. HITL unchanged. AFK drops the Ready nudge entirely and rephrases the In Progress nudge to 'Finish your in-progress work before grabbing new tickets.' (drops the 'user' reference).
+
+prime --json payload shape unchanged: same keys on data.in_progress[] / data.ready[] / data.recently_closed[], no schema_version bump, no new fields. stale:true preserved on JSON in_progress entries (asymmetry documented).
+
+Implementation: split prime-ticket-line into prime-ready-line + prime-in-progress-line; prime-section now takes a row-fn parameter. New truncate-prime-summary helper. .pi/extensions/knot-prime.ts and test/knot/json_contract_test.clj not modified (markdown-only consumer + no JSON shape change).
+
+TDD via 9 vertical slices (RED→GREEN per slice): hitl preamble, afk preamble, drop cheatsheet, ready row, age formatter, in-progress row, summary truncation, mode-conditioned nudges, docs+CHANGELOG. New tests: prime-text-hitl-preamble-rows-test, prime-text-afk-preamble-shape-test, prime-text-commands-cheatsheet-removed-test, prime-text-ready-row-format-test, format-age-days-test, prime-text-in-progress-row-format-test, prime-text-recently-closed-section-test (truncation cases), prime-text-mode-conditioned-nudges-test. Existing prime-cmd-stale-in-progress-test rewritten to assert age column instead of [stale]. Two cheatsheet-only tests removed (prime-text-active-status-cheatsheet-test, prime-text-close-shows-summary-flag-test). Section-delimiter sites updated from ## Commands → ## Recently Closed / (count out). README.md prime prose refreshed; CHANGELOG entry under [Unreleased]/Changed; SKILL.md scanned (no drift — [stale] prefix and ## Commands shape were not referenced).
+
+bb test 329/4234/0; src/ lint clean (0 errors / 1 pre-existing warning); test/ lint baseline preserved (4 pre-existing errors / 4 warnings, 1 fewer than baseline). Manual smoke (knot prime, knot prime --mode afk, knot prime --json | jq keys) confirms preamble shifts, 6/5-col rows, no Commands section, mode-conditioned nudges, and unchanged JSON envelope. Commit: 9d6ad3b.
