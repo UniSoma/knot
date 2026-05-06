@@ -1,12 +1,13 @@
 ---
 id: kno-01kqxchq706w
 title: 'knot update: add --add-ac / --remove-ac for AC list management'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-06T00:56:00.992161805Z'
-updated: '2026-05-06T01:37:05.329298772Z'
+updated: '2026-05-06T01:39:14.199103362Z'
+closed: '2026-05-06T01:39:14.199103362Z'
 tags:
 - refine
 - v0.3
@@ -77,3 +78,9 @@ Out of scope: bidirectional body↔frontmatter AC sync (a separate design call a
 - [ ] `--body`'s help text warns the `## Acceptance Criteria` markdown section is display-only on write.
 - [ ] `--ac`'s help text points to `--add-ac` / `--remove-ac` for non-flip operations.
 - [ ] Coverage in `cli_test.clj` (option-spec/unit) and `integration_test.clj` (end-to-end via `bb`).
+
+## Notes
+
+**2026-05-06T01:39:14.199103362Z**
+
+Shipped --add-ac / --remove-ac on knot update (repeatable, idempotent, exact-match), composing with --ac --done/--undone in apply order add -> flip -> remove. --body now warns the ## Acceptance Criteria section is display-only on write; --ac points to the new deltas for non-flip ops. Coverage: cli_test/integration_test/help_test. Bundled skill in sync. Commit d3795bb.
