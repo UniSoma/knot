@@ -171,6 +171,24 @@
         (is (= 1 exit))
         (is (str/includes? err "no ticket matching"))))))
 
+(deftest show-rejects-unknown-flag-test
+  ;; Smoke test for the project-wide strict-parsing contract: every
+  ;; command in `help/registry` carries `:restrict? true`, so unknown
+  ;; flags exit 1 with `Unknown option: :<name>` on stderr instead of
+  ;; being silently absorbed. `:show` is the canary — the same contract
+  ;; applies to every command; the registry-invariant test in
+  ;; `knot.help-test/registry-shape-test` pins the rule across the
+  ;; whole registry.
+  (testing "knot show <id> --bogus exits 1 with Unknown option on stderr"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "show" "no-such-id" "--bogus")]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (str/includes? err "Unknown option")
+            "stderr must name the unknown-option failure")
+        (is (re-find #"(?i)bogus" err)
+            "stderr must name the offending flag")))))
+
 (deftest read-cmd-error-envelope-test
   (testing "show --json on a missing id emits the v0.3 error envelope on stdout (exit 1)"
     (with-tmp tmp

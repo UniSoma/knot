@@ -145,6 +145,7 @@
    {:group       :project
     :description "Write .knot.edn stub and create the tickets dir."
     :args        []
+    :restrict?   true
     :flags       [{:name :prefix      :desc "Override the auto-derived ticket id prefix."}
                   {:name :tickets-dir :desc "Override the default tickets directory name."}
                   {:name :force :coerce :boolean
@@ -204,6 +205,7 @@
    {:group       :listing
     :description "Render the ticket with the given id."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of text."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}]
     :examples    [{:cmd "knot show kno-01abc"
@@ -214,6 +216,7 @@
     :aliases     ["ls"]
     :description "List live (non-terminal) tickets."
     :args        []
+    :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of a table."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
@@ -233,6 +236,7 @@
    {:group       :lifecycle
     :description "Transition a ticket to a new status."
     :args        [{:name "id" :required true} {:name "new-status" :required true}]
+    :restrict?   true
     :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
@@ -242,6 +246,7 @@
    {:group       :lifecycle
     :description "Transition a ticket to the project's active status (default: in_progress)."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot start kno-01abc"
                    :note "Mark a ticket as active (in_progress by default)."}]}
@@ -250,6 +255,7 @@
    {:group       :lifecycle
     :description "Transition a ticket to the first terminal status."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
@@ -259,6 +265,7 @@
    {:group       :lifecycle
     :description "Transition a ticket back to open."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot reopen kno-01abc"
                    :note "Reopen a closed ticket."}]}
@@ -267,6 +274,7 @@
    {:group       :graph
     :description "Add <to> to <from>'s :deps (cycle-checked)."
     :args        [{:name "from" :required true} {:name "to" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the from ticket post-mutation) instead of the saved path."}]
     :subcommands [:dep/tree]
     :examples    [{:cmd "knot dep kno-01abc kno-01def"
@@ -278,6 +286,7 @@
    {:group       :graph
     :description "Render the deps subtree (--full to expand duplicates)."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit JSON instead of text."}
                   {:name :full :coerce :boolean
                    :desc "Expand duplicate subtrees instead of marking them seen."}]
@@ -288,6 +297,7 @@
    {:group       :graph
     :description "Remove <to> from <from>'s :deps."
     :args        [{:name "from" :required true} {:name "to" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the from ticket post-mutation) instead of the saved path."}]
     :examples    [{:cmd "knot undep kno-01abc kno-01def"
                    :note "Drop the edge from kno-01abc to kno-01def."}]}
@@ -298,6 +308,7 @@
     :args        [{:name "a" :required true}
                   {:name "b" :required true}
                   {:name "rest" :variadic true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (array of touched tickets) instead of saved paths."}]
     :examples    [{:cmd "knot link kno-01abc kno-01def kno-01ghi"
                    :note "Link three tickets pairwise."}]}
@@ -306,6 +317,7 @@
    {:group       :graph
     :description "Remove the symmetric link between two ids."
     :args        [{:name "from" :required true} {:name "to" :required true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (array of touched tickets) instead of saved paths."}]
     :examples    [{:cmd "knot unlink kno-01abc kno-01def"
                    :note "Drop the link between two tickets."}]}
@@ -373,6 +385,7 @@
     :description "Append a timestamped note (text arg, stdin, or editor)."
     :args        [{:name "id" :required true}
                   {:name "text" :variadic true}]
+    :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}]
     :examples    [{:cmd "knot add-note kno-01abc \"Tested locally\""
                    :note "Append a one-line note."}
@@ -385,6 +398,7 @@
    {:group       :notes
     :description "Open the ticket file in $VISUAL/$EDITOR."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       []
     :examples    [{:cmd "knot edit kno-01abc"
                    :note "Edit the ticket's frontmatter and body."}]}
@@ -393,6 +407,7 @@
    {:group       :notes
     :description "Apply non-interactive frontmatter and body updates to a ticket."
     :args        [{:name "id" :required true}]
+    :restrict?   true
     :flags       [{:name :title        :desc "Replace the title."}
                   {:name :type         :desc "Replace the type."}
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
@@ -470,6 +485,7 @@
    {:group       :project
     :description "Validate project integrity (cycles, schema, dangling refs)."
     :args        [{:name "id" :variadic true}]
+    :restrict?   true
     :flags       [{:name :json     :coerce :boolean
                    :desc "Emit a JSON envelope instead of a text table."}
                   {:name :severity :coerce []

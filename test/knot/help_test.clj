@@ -362,7 +362,17 @@
     (doseq [[k entry] help/registry
             :let [aliases (->> (:flags entry) (keep :alias))]]
       (is (= (count aliases) (count (set aliases)))
-          (str k " has duplicate flag aliases: " aliases)))))
+          (str k " has duplicate flag aliases: " aliases))))
+
+  (testing "every entry has :restrict? true (no command silently absorbs unknown flags)"
+    ;; Pins the v0.3 strict-parsing contract: every command rejects unknown
+    ;; flags loudly. New entries must opt in explicitly. Without :restrict?
+    ;; true on an entry, a typo like `--tag` (instead of `--tags`) is
+    ;; silently dropped by the parser, leaving the user with no signal that
+    ;; the flag was misspelled.
+    (doseq [[k entry] help/registry]
+      (is (true? (:restrict? entry))
+          (str k " must declare :restrict? true")))))
 
 (deftest command-order-parity-test
   (testing "every key in command-order has a registry entry"

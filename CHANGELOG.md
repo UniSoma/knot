@@ -213,6 +213,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `candidates` array. `dep --json` cycle rejection emits `code:
   "cycle"` with the offending path under `error.cycle`.
 
+### Changed
+
+- Every command is now a strict-parsing command: unknown flags
+  (`--tag` instead of `--tags`, `--bogus`, anything mistyped) exit
+  non-zero with `knot: Unknown option: :<name>` on stderr instead of
+  being silently absorbed by the parser. The `:restrict?` mechanism
+  was already in place on `prime`/`ready`/`blocked`/`closed`/`info`/
+  `migrate-ac`/`create`; this flips it on the remaining sixteen
+  entries (`init`/`show`/`list`/`status`/`start`/`close`/`reopen`/
+  `dep`/`dep tree`/`undep`/`link`/`unlink`/`add-note`/`edit`/
+  `update`/`check`) so the contract is uniform across the CLI. A
+  registry-invariant test pins the rule (`every?` `:restrict?` true
+  on `help/registry`); a new entry that omits it fails `bb test`.
+  Bundled with a small `edit-handler` cleanup so the `:edit` entry
+  flows through `(spec :edit)` like every other command — no more
+  hard-coded `{:spec {}}`. Pre-1.0 break window: anyone scripting
+  `knot` with stale or misspelled flag names (e.g. `--tag` on
+  `create`) gets a loud failure instead of silent argv theft.
+  Migration: run `knot <cmd> --help` to see the canonical flag
+  names. Bundled skill kept in sync.
+
 ### Changed (BREAKING)
 
 - All `--json` read commands now wrap their output in a tagged envelope

@@ -468,3 +468,9 @@ supports `--json` — the envelope's `data` is the touched ticket(s);
 `knot check` uses its own filters: `--severity` (error|warning,
 closed enum) and `--code` (open enum), both repeatable; OR within a
 flag, AND across flags.
+
+Every command rejects unknown flags: `knot <cmd> --bogus` exits 1 with
+`Unknown option: :bogus` on stderr rather than silently absorbing the
+typo. If a flag you expect to work errors this way, consult `knot <cmd>
+--help` for the canonical name (e.g. `--tag` vs `--tags` differs by
+command).

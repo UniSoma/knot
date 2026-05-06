@@ -716,7 +716,7 @@
 (defn- edit-handler
   "Handle `knot edit <id>`."
   [argv]
-  (let [{:keys [args]} (bcli/parse-args argv {:spec {}})
+  (let [{:keys [args]} (bcli/parse-args argv (spec :edit))
         id (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot edit: an id is required"))
