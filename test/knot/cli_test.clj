@@ -3935,19 +3935,23 @@ Restart the daemon.
         (is (= true (:config_present project)))))))
 
 (deftest info-cmd-paths-block-test
+  ;; --json `paths.*` are POSIX-normalized regardless of platform — the
+  ;; expected side wraps in `fs/unixify` so the test pins the wire-shape
+  ;; contract on Windows too. See docs/agents/testing.md "Cross-platform
+  ;; considerations".
   (testing "paths carries cwd, project_root, config_path, tickets_dir, tickets_path, archive_path"
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (let [c     (assoc (ctx tmp) :cwd tmp :tickets-dir ".tickets")
             out   (cli/info-cmd c {:json? true})
             paths (get-in (cheshire/parse-string out true) [:data :paths])]
-        (is (= tmp (:cwd paths)))
-        (is (= tmp (:project_root paths)))
+        (is (= (fs/unixify tmp) (:cwd paths)))
+        (is (= (fs/unixify tmp) (:project_root paths)))
         (is (= ".tickets" (:tickets_dir paths)))
-        (is (= (str (fs/path tmp ".knot.edn"))   (:config_path paths))
+        (is (= (fs/unixify (fs/path tmp ".knot.edn"))   (:config_path paths))
             "config_path is the expected effective absolute path even when missing")
-        (is (= (str (fs/path tmp ".tickets"))    (:tickets_path paths)))
-        (is (= (str (fs/path tmp ".tickets" "archive")) (:archive_path paths))))))
+        (is (= (fs/unixify (fs/path tmp ".tickets"))    (:tickets_path paths)))
+        (is (= (fs/unixify (fs/path tmp ".tickets" "archive")) (:archive_path paths))))))
 
   (testing "paths uses :tickets-dir from config (not the literal default) when overridden"
     (with-tmp tmp
@@ -3956,8 +3960,8 @@ Restart the daemon.
             out   (cli/info-cmd c {:json? true})
             paths (get-in (cheshire/parse-string out true) [:data :paths])]
         (is (= "issues" (:tickets_dir paths)))
-        (is (= (str (fs/path tmp "issues"))            (:tickets_path paths)))
-        (is (= (str (fs/path tmp "issues" "archive"))  (:archive_path paths)))))))
+        (is (= (fs/unixify (fs/path tmp "issues"))            (:tickets_path paths)))
+        (is (= (fs/unixify (fs/path tmp "issues" "archive"))  (:archive_path paths)))))))
 
 (deftest info-cmd-defaults-block-test
   (testing "defaults carries default_type, default_priority, default_mode (from config)"

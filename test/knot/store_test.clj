@@ -25,13 +25,16 @@
   (:frontmatter (ticket/parse (slurp path))))
 
 (deftest ticket-path-test
+  ;; ticket-path returns native-shape paths (stdout consumers expect that
+  ;; — the path is round-trippable through the local shell). The expected
+  ;; side builds via `(fs/path ...)` so it matches the platform separator.
   (testing "with a slug, the path is <tickets-dir>/<id>--<slug>.md"
-    (is (= "/p/.tickets/kno-01abc--my-title.md"
+    (is (= (str (fs/path "/p" ".tickets" "kno-01abc--my-title.md"))
            (store/ticket-path "/p" ".tickets" "kno-01abc" "my-title"))))
   (testing "with empty slug, the path is the bare <id>.md"
-    (is (= "/p/.tickets/kno-01abc.md"
+    (is (= (str (fs/path "/p" ".tickets" "kno-01abc.md"))
            (store/ticket-path "/p" ".tickets" "kno-01abc" "")))
-    (is (= "/p/.tickets/kno-01abc.md"
+    (is (= (str (fs/path "/p" ".tickets" "kno-01abc.md"))
            (store/ticket-path "/p" ".tickets" "kno-01abc" nil)))))
 
 (deftest save-and-load-test
@@ -157,7 +160,7 @@
         (is (fs/exists? archive-path))
         (is (not (fs/exists? live-path))
             "old live-directory file should be removed after archive move")
-        (is (str/includes? archive-path "/archive/")))))
+        (is (some #{"archive"} (map str (fs/components archive-path)))))))
 
   (testing "save! transition to non-terminal moves the file from archive to live"
     (with-tmp tmp
@@ -168,7 +171,7 @@
         (is (fs/exists? live-path))
         (is (not (fs/exists? archive-path))
             "old archive-directory file should be removed after restore")
-        (is (not (str/includes? live-path "/archive/"))))))
+        (is (not (some #{"archive"} (map str (fs/components live-path))))))))
 
   (testing "slug suffix is preserved across archive moves"
     (with-tmp tmp
@@ -191,7 +194,7 @@
         ;; Now save through Knot; the file should be relocated to archive.
         (let [path (store/save! tmp ".tickets" "kno-01" "t"
                                 (mk-ticket "kno-01" "closed") save-opts)]
-          (is (str/includes? path "/archive/"))
+          (is (some #{"archive"} (map str (fs/components path))))
           (is (fs/exists? path))
           (is (not (fs/exists? stale-live))
               "stale live-directory file should be removed by self-heal")))))
@@ -205,7 +208,7 @@
                {:frontmatter {:id "kno-01" :status "open"} :body ""}))
         (let [path (store/save! tmp ".tickets" "kno-01" "t"
                                 (mk-ticket "kno-01" "open") save-opts)]
-          (is (not (str/includes? path "/archive/")))
+          (is (not (some #{"archive"} (map str (fs/components path)))))
           (is (fs/exists? path))
           (is (not (fs/exists? stale-archive))
               "stale archive file should be removed by self-heal")))))
