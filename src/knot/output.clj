@@ -719,8 +719,10 @@ before issuing other Knot commands.")
      4. `## Ready` ticket lines (with behavioral nudge and optional footer)
      5. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
-   Each ticket line is `id  mode  pri  title`. Caller controls sort and
-   limit — this function does not reorder or truncate."
+   Ready rows are `id  type  mode  pri  title` (5 cols); In Progress
+   rows are `id  type  mode  pri  age  title` (6 cols, age replacing
+   the retired `[stale]` text prefix). Caller controls sort and limit
+   — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
            recently-closed mode afk-mode]
     :or {afk-mode (:afk-mode (config/defaults))}}]

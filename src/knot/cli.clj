@@ -1144,8 +1144,12 @@
    most-recently-touched work surfaces first. Tickets without `:updated`
    sort last in stable input order. Each returned map carries
    `:prime-stale?` — true when `:updated` is `prime-stale-days` or more
-   older than `now-iso`. The flag drives the `[stale]` prefix in the
-   renderer and the `\"stale\":true` field in the JSON projection.
+   older than `now-iso` — and `:prime-age-days` (or nil when `:updated`
+   is missing/unparseable). The renderer reads `:prime-age-days` for
+   the age column; `:prime-stale?` only drives the `\"stale\":true`
+   field in the JSON projection. The text/JSON asymmetry is
+   intentional: human readers get a relative-age signal, JSON
+   consumers keep the binary flag they already depend on.
 
    Named `prime-`-prefixed because the result is decorated specifically
    for `prime`'s consumption — not a generic in-progress selector."
