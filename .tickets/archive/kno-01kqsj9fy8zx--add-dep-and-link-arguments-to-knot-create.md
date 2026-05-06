@@ -1,12 +1,13 @@
 ---
 id: kno-01kqsj9fy8zx
 title: Add --dep and --link arguments to `knot create`
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-04T13:19:25.128614479Z'
-updated: '2026-05-06T02:43:38.878009118Z'
+updated: '2026-05-06T02:45:58.322240209Z'
+closed: '2026-05-06T02:45:58.322240209Z'
 acceptance:
 - title: '`knot create --help` documents repeatable long-form `--dep <id>` and `--link <id>` flags, one id per occurrence, and calls out that `--dep` is lenient on missing targets while `--link` is strict.'
   done: true
@@ -94,3 +95,9 @@ Preserve the current `create` success contracts so scripts and agents can adopt 
 ## Likely touch points
 
 Expect changes in the `create` help/spec surface, CLI arg parsing, `cli/create-cmd`, and the related help/unit/integration coverage. Keep `.claude/skills/knot/SKILL.md` in sync with the shipped CLI contract.
+
+## Notes
+
+**2026-05-06T02:45:58.322240209Z**
+
+Shipped --dep and --link on knot create. Both repeatable, accept partial ids, dedupe by canonicalized id (first wins). --dep lenient on missing (verbatim forward ref); --link strict (every target must resolve uniquely or the command fails before any write). --dep X --link X records both. Strict failures honor left-to-right CLI order via a rel-order extracted from argv in main/create-handler. Reciprocal-link writes wrap in try/catch with best-effort rollback (revert applied recip links, delete the new ticket file). --json returns the standard not_found / ambiguous_id / invalid_argument envelope; plain text uses the 'knot create:' prefix. Bundled SKILL.md + CHANGELOG synced. Tests 325/4160/0; lint baseline preserved (4 errors / 5 warnings, all pre-existing). Commit 2fff3d2.
