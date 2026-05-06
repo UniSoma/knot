@@ -4,9 +4,9 @@ title: 'Release-tag smoke CI workflow: bbin install + golden-path check on tag p
 status: open
 type: feature
 priority: 3
-mode: afk
+mode: hitl
 created: '2026-05-06T20:54:09.174084540Z'
-updated: '2026-05-06T21:36:48.975272046Z'
+updated: '2026-05-06T23:42:46.921708809Z'
 tags:
 - v0.4
 - ci
@@ -25,7 +25,6 @@ acceptance:
   done: false
 links:
 - kno-01kqgqfwk4h1
-- kno-01kqzkhpc244
 ---
 
 ## Description

@@ -6,7 +6,7 @@ type: chore
 priority: 2
 mode: afk
 created: '2026-05-06T13:57:43.336891533Z'
-updated: '2026-05-06T22:46:27.072313158Z'
+updated: '2026-05-06T23:42:47.019716552Z'
 closed: '2026-05-06T22:46:27.072313158Z'
 tags:
 - p2
@@ -49,7 +49,6 @@ acceptance:
 links:
 - kno-01kqe9ytd40z
 - kno-01kqn3swv94c
-- kno-01kqzkhpc244
 ---
 
 ## Description

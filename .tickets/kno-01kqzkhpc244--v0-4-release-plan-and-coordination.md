@@ -6,11 +6,11 @@ type: chore
 priority: 2
 mode: hitl
 created: '2026-05-06T21:36:48.975272046Z'
-updated: '2026-05-06T21:36:48.975272046Z'
+updated: '2026-05-06T23:42:47.365543405Z'
 tags:
 - v0.4
 - release
-links:
+deps:
 - kno-01kqzh1tadw8
 - kno-01kqzh2vhhrz
 - kno-01kqzh3jgwf0

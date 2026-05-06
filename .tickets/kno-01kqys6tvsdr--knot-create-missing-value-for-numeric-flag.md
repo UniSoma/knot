@@ -6,7 +6,7 @@ type: bug
 priority: 3
 mode: hitl
 created: '2026-05-06T13:56:30.190644893Z'
-updated: '2026-05-06T21:36:56.101051713Z'
+updated: '2026-05-06T23:42:47.365543405Z'
 tags:
 - refine
 - v0.4
@@ -24,7 +24,6 @@ acceptance:
 links:
 - kno-01kqxd0amhnb
 - kno-01kqn0mtsvpq
-- kno-01kqzkhpc244
 ---
 
 ## Description
