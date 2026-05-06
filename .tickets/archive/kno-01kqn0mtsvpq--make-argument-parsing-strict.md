@@ -1,12 +1,13 @@
 ---
 id: kno-01kqn0mtsvpq
 title: Make argument parsing strict
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-02T18:54:04.603784207Z'
-updated: '2026-05-06T14:37:17.271600478Z'
+updated: '2026-05-06T17:19:23.259727992Z'
+closed: '2026-05-06T17:19:23.259727992Z'
 tags:
 - refine
 - v0.3
@@ -15,19 +16,19 @@ links:
 - kno-01kqys6tvsdr
 acceptance:
 - title: :restrict? true set on every value of help/registry (the 16 currently lenient entries flipped)
-  done: false
+  done: true
 - title: edit-handler routes through (spec :edit) instead of literal {:spec {}}
-  done: false
+  done: true
 - title: Registry-invariant test asserts (every? :restrict? (vals help/registry))
-  done: false
+  done: true
 - title: 'Smoke test: knot show <id> --bogus exits 1 with Unknown option on stderr'
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md states that every command rejects unknown flags
-  done: false
+  done: true
 - title: CHANGELOG [Unreleased] -> Changed entry added, mirroring the v0.3 :create strict-flip paragraph
-  done: false
+  done: true
 - title: bb test passes; clj-kondo --lint src test baseline preserved (no new errors/warnings)
-  done: false
+  done: true
 ---
 
 ## Notes
@@ -39,6 +40,10 @@ For example, `--tag` passed to `knot create` does not errors
 **2026-05-02T21:18:46.761399166Z**
 
 `:create` was made strict in kno-01kqgqa7wnep (--afk/--hitl removal), since silent absorption was the load-bearing failure mode the removal needed to address. One fewer surface for this ticket to convert. Remaining unrestricted commands per `grep -L "restrict?" src/knot/help.clj`-ish: `:list`, `:show`, `:status`, `:start`, `:close`, `:reopen`, `:dep`, `:dep/tree`, `:undep`, `:link`, `:unlink`, `:add-note`, `:edit`, `:update`, `:check`, `:init` — verify and tighten as the ticket prescribes.
+
+**2026-05-06T17:19:23.259727992Z**
+
+Shipped strict-parsing across the CLI. Flipped :restrict? true on the 16 lenient registry entries (init, show, list, status, start, close, reopen, dep, dep/tree, undep, link, unlink, add-note, edit, update, check) — every command now rejects unknown flags with exit 1 and 'Unknown option: :<name>' on stderr instead of silently absorbing typos. Bundled fix: edit-handler routes through (spec :edit) instead of the literal {:spec {}} so the entry's :restrict? actually fires. Coverage: registry-invariant subtest in help-test/registry-shape-test pins (every? :restrict? (vals help/registry)); show-rejects-unknown-flag-test covers the end-to-end smoke path on knot show <id> --bogus. Bundled SKILL.md + CHANGELOG synced. Tests 326/4186/0; lint baseline preserved (4 errors / 5 warnings, all pre-existing). Commit 6df6f82.
 
 ## Description
 
