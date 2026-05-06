@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: hitl
 created: '2026-05-06T20:53:45.642991424Z'
-updated: '2026-05-06T20:53:45.642991424Z'
+updated: '2026-05-06T21:36:48.975272046Z'
 tags:
 - v0.4
 - tooling
@@ -29,6 +29,7 @@ acceptance:
   done: false
 links:
 - kno-01kqgqfwk4h1
+- kno-01kqzkhpc244
 ---
 
 ## Description

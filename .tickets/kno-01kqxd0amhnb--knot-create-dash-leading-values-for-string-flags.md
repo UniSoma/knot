@@ -6,9 +6,10 @@ type: bug
 priority: 3
 mode: hitl
 created: '2026-05-06T01:03:59.633375082Z'
-updated: '2026-05-06T13:56:36.725464523Z'
+updated: '2026-05-06T21:36:55.636992640Z'
 tags:
 - refine
+- v0.4
 acceptance:
 - title: Root cause documented (parser, rule, line).
   done: false
@@ -26,6 +27,7 @@ links:
 - kno-01kqn0mtsvpq
 - kno-01kqxchq706w
 - kno-01kqys6tvsdr
+- kno-01kqzkhpc244
 ---
 
 ## Description

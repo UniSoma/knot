@@ -6,7 +6,7 @@ type: feature
 priority: 3
 mode: afk
 created: '2026-05-06T20:53:11.623411501Z'
-updated: '2026-05-06T20:53:11.623411501Z'
+updated: '2026-05-06T21:36:48.975272046Z'
 tags:
 - v0.4
 - check
@@ -23,6 +23,7 @@ acceptance:
   done: false
 links:
 - kno-01kqgqfwk4h1
+- kno-01kqzkhpc244
 ---
 
 ## Description

@@ -6,9 +6,10 @@ type: chore
 priority: 2
 mode: afk
 created: '2026-05-06T13:57:43.336891533Z'
-updated: '2026-05-06T13:57:43.336891533Z'
+updated: '2026-05-06T21:36:53.255370654Z'
 tags:
 - p2
+- v0.4
 acceptance:
 - title: Hitl preamble replaces the current 'When the user says...' block with the 8-row intent table (ready / show / list / start / add-note / update / close / dep) plus the modernized 'for less-common ops (info / check / link / reopen / --json shapes / partial-id contract)' skill pointer.
   done: false
@@ -47,6 +48,7 @@ acceptance:
 links:
 - kno-01kqe9ytd40z
 - kno-01kqn3swv94c
+- kno-01kqzkhpc244
 ---
 
 ## Description
