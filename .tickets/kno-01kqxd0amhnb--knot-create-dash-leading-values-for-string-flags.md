@@ -6,7 +6,7 @@ type: bug
 priority: 3
 mode: hitl
 created: '2026-05-06T01:03:59.633375082Z'
-updated: '2026-05-06T01:04:04.290305278Z'
+updated: '2026-05-06T13:56:36.725464523Z'
 tags:
 - refine
 acceptance:
@@ -25,6 +25,7 @@ acceptance:
 links:
 - kno-01kqn0mtsvpq
 - kno-01kqxchq706w
+- kno-01kqys6tvsdr
 ---
 
 ## Description
@@ -76,3 +77,9 @@ Investigation ticket — root cause not yet pinned. Branches:
    - **(c) File upstream issue / patch** with `babashka.cli`. Slowest but cleanest.
 
 Decision criterion: if `babashka.cli` already supports `--<flag>=<value>` form (no shell-token boundary), (a) is sufficient — just document it. If not, (b) or (c) become more attractive.
+
+## Notes
+
+**2026-05-06T13:56:36.725464523Z**
+
+External user reproed the dash-leading parse bug with a multi-line value: `--acceptance "- one\n- two\n- three"` errors with `Unknown option: :`. Same root cause as the single-line dash-leading repros already documented; logging here so the failure-surface map captures the multi-line shape too. See kno-01kqys6tvsdr for the related (but distinct) numeric-missing-value variant from the same report.
