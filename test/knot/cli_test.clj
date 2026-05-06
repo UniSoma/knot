@@ -3120,7 +3120,7 @@ Restart the daemon.
      project-name (assoc :project-name project-name))))
 
 (deftest prime-cmd-text-shape-test
-  (testing "prime-cmd emits Project + Ready + Commands when a project is found and tickets exist"
+  (testing "prime-cmd emits Project + In Progress + Ready when a project is found and tickets exist"
     (with-tmp tmp
       (let [c (ctx tmp)
             a (cli/create-cmd c {:title "Live ticket"})
@@ -3132,7 +3132,8 @@ Restart the daemon.
         (is (str/includes? out "## In Progress")
             "started ticket triggers In Progress section")
         (is (str/includes? out "## Ready"))
-        (is (str/includes? out "## Commands"))
+        (is (not (str/includes? out "## Commands"))
+            "Commands cheatsheet retired in v0.4 — preamble + skill carry the verb mappings")
         (is (not (str/includes? out "## Schema"))
             "schema cheatsheet is retired"))))
 
@@ -3200,7 +3201,7 @@ Restart the daemon.
                         {:title "P0 ticket" :priority 0})
         (let [out (cli/prime-cmd (prime-ctx tmp) {})
               start (str/index-of out "## Ready")
-              end   (str/index-of out "## Commands")
+              end   (or (str/index-of out "## Recently Closed") (count out))
               section (subs out start end)
               p0-i  (str/index-of section "P0 ticket")
               newer-i (str/index-of section "P2 newer")
@@ -3216,7 +3217,7 @@ Restart the daemon.
       (cli/create-cmd (ctx tmp) {:title "Hitl job" :mode "hitl"})
       (let [out (cli/prime-cmd (prime-ctx tmp) {:mode "afk"})
             start (str/index-of out "## Ready")
-            end   (str/index-of out "## Commands")
+            end   (or (str/index-of out "## Recently Closed") (count out))
             section (subs out start end)]
         (is (str/includes? section "Afk job"))
         (is (not (str/includes? section "Hitl job"))
@@ -3230,7 +3231,7 @@ Restart the daemon.
           (cli/create-cmd c {:title (str "Ticket-" n)}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {})
               start (str/index-of out "## Ready")
-              end   (str/index-of out "## Commands")
+              end   (or (str/index-of out "## Recently Closed") (count out))
               section (subs out start end)
               ticket-lines (->> (str/split-lines section)
                                 (filter #(str/starts-with? % "kno-")))]
@@ -3253,7 +3254,7 @@ Restart the daemon.
           (cli/create-cmd c {:title (str "Ticket-" n)}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {:limit 2})
               start (str/index-of out "## Ready")
-              end   (str/index-of out "## Commands")
+              end   (or (str/index-of out "## Recently Closed") (count out))
               section (subs out start end)
               ticket-lines (->> (str/split-lines section)
                                 (filter #(str/starts-with? % "kno-")))]
@@ -3269,7 +3270,7 @@ Restart the daemon.
         (dotimes [n 4] (cli/create-cmd c {:title (str "Afk-" n)  :mode "afk"}))
         (let [out (cli/prime-cmd (prime-ctx tmp) {:mode "afk" :limit 2})
               start (str/index-of out "## Ready")
-              end   (str/index-of out "## Commands")
+              end   (or (str/index-of out "## Recently Closed") (count out))
               section (subs out start end)
               afk-hits  (count (re-seq #"Afk-" section))
               hitl-hits (count (re-seq #"Hitl-" section))]
@@ -3287,10 +3288,7 @@ Restart the daemon.
             _    (cli/close-cmd c {:id a-id})
             out  (cli/prime-cmd (prime-ctx tmp) {})
             rd-start (str/index-of out "## Ready")
-            ;; Slice Ready up to whichever section follows it: Recently
-            ;; Closed appears when archive has entries, Commands otherwise.
-            rd-end   (or (str/index-of out "## Recently Closed")
-                         (str/index-of out "## Commands"))
+            rd-end   (or (str/index-of out "## Recently Closed") (count out))
             rd-section (subs out rd-start rd-end)]
         (is (not (str/includes? out "## In Progress"))
             "no in-progress tickets → no In Progress heading")
@@ -3397,34 +3395,34 @@ Restart the daemon.
             "no-project preamble still wins over the agent preamble when no project is found")))))
 
 (deftest prime-cmd-stale-in-progress-test
-  (testing "in-progress ticket whose :updated is >14 days before now is flagged [stale]"
+  (testing "in-progress ticket whose :updated is ~30 days before now renders age in weeks"
     (with-tmp tmp
       (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
             a (cli/create-cmd c-old {:title "Stalled work"})
             a-id (id-of-created a "stalled-work")
             _    (cli/start-cmd c-old {:id a-id})
-            ;; Fast-forward "now" by ~30 days so the ticket's :updated
-            ;; (set during start) is older than the staleness threshold.
-            c-now (assoc (ctx tmp) :now "2026-05-01T10:00:00Z")
-            out   (cli/prime-cmd (assoc (prime-ctx tmp) :now "2026-05-01T10:00:00Z") {})
+            out  (cli/prime-cmd (assoc (prime-ctx tmp) :now "2026-05-01T10:00:00Z") {})
             ip-start (str/index-of out "## In Progress")
             ip-end   (str/index-of out "## Ready")
             section  (subs out ip-start ip-end)]
-        (is (re-find #"\[stale\]" section)
-            "30-day-old in-progress ticket is rendered with [stale] prefix"))))
+        (is (re-find #"\b4w\b" section)
+            "30-day-old in-progress ticket renders `4w` (30/7 = 4) in the age column")
+        (is (not (str/includes? section "[stale]"))
+            "[stale] prefix retired in v0.4 — age column carries the signal"))))
 
-  (testing "in-progress ticket whose :updated is recent is NOT flagged [stale]"
+  (testing "in-progress ticket whose :updated is recent renders a small Nd age"
     (with-tmp tmp
       (let [c (assoc (ctx tmp) :now "2026-04-29T10:00:00Z")
             a (cli/create-cmd c {:title "Active work"})
             a-id (id-of-created a "active-work")
             _    (cli/start-cmd c {:id a-id})
-            ;; "now" is the same day — well within 14 days of :updated.
             out  (cli/prime-cmd (assoc (prime-ctx tmp) :now "2026-04-29T11:00:00Z") {})]
+        (is (str/includes? out "0d")
+            "fresh in-progress ticket renders `0d` in the age column")
         (is (not (str/includes? out "[stale]"))
-            "fresh in-progress ticket is not flagged"))))
+            "fresh ticket is not flagged"))))
 
-  (testing "JSON exposes stale:true for stalled in-progress tickets"
+  (testing "JSON still exposes stale:true for stalled in-progress tickets (asymmetry preserved)"
     (with-tmp tmp
       (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
             a (cli/create-cmd c-old {:title "Stalled work"})
@@ -3434,22 +3432,26 @@ Restart the daemon.
                   (assoc (prime-ctx tmp) :now "2026-05-01T10:00:00Z")
                   {:json? true})]
         (is (str/includes? out "\"stale\":true")
-            "JSON in_progress entry carries stale:true for old tickets"))))
+            "JSON in_progress entry still carries stale:true (text drops [stale]; JSON keeps the flag)"))))
 
-  (testing "exactly 14 days old is stale (boundary lock)"
+  (testing "exactly 14 days old renders as `2w` and JSON stale:true (boundary lock)"
     (with-tmp tmp
       (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
             a (cli/create-cmd c-old {:title "Edge case"})
             a-id (id-of-created a "edge-case")
             _    (cli/start-cmd c-old {:id a-id})
-            ;; 14 days exactly after the start (which set :updated).
             out  (cli/prime-cmd
                   (assoc (prime-ctx tmp) :now "2026-04-15T10:00:00Z")
-                  {})]
-        (is (str/includes? out "[stale]")
-            "14d threshold is inclusive — at exactly 14 days a ticket is stale"))))
+                  {})
+            json-out (cli/prime-cmd
+                      (assoc (prime-ctx tmp) :now "2026-04-15T10:00:00Z")
+                      {:json? true})]
+        (is (str/includes? out "2w")
+            "14d age renders as `2w` (boundary into weeks bucket)")
+        (is (str/includes? json-out "\"stale\":true")
+            "14d threshold is inclusive in JSON stale-flag (asymmetry preserved)"))))
 
-  (testing "13 days 23 hours is NOT stale (boundary lock)"
+  (testing "13 days 23 hours renders `13d` and JSON has no stale flag (boundary lock)"
     (with-tmp tmp
       (let [c-old (assoc (ctx tmp) :now "2026-04-01T10:00:00Z")
             a (cli/create-cmd c-old {:title "Just under threshold"})
@@ -3457,8 +3459,13 @@ Restart the daemon.
             _    (cli/start-cmd c-old {:id a-id})
             out  (cli/prime-cmd
                   (assoc (prime-ctx tmp) :now "2026-04-15T09:00:00Z")
-                  {})]
-        (is (not (str/includes? out "[stale]"))
+                  {})
+            json-out (cli/prime-cmd
+                      (assoc (prime-ctx tmp) :now "2026-04-15T09:00:00Z")
+                      {:json? true})]
+        (is (str/includes? out "13d")
+            "13d 23h renders as `13d` (still in days bucket)")
+        (is (not (str/includes? json-out "\"stale\":true"))
             "13d 23h is NOT stale — locks the boundary against future drift")))))
 
 (deftest prime-cmd-recently-closed-test
@@ -3470,7 +3477,7 @@ Restart the daemon.
             _    (cli/close-cmd c {:id a-id :summary "shipped in #482"})
             out  (cli/prime-cmd (prime-ctx tmp) {})
             rc-start (str/index-of out "## Recently Closed")
-            cm-start (str/index-of out "## Commands")]
+            cm-start (count out)]
         (is (some? rc-start) "Recently Closed section appears after closing")
         (let [section (subs out rc-start cm-start)]
           (is (str/includes? section "Shipped feature X")
@@ -3498,7 +3505,7 @@ Restart the daemon.
              {:id id :summary (str "summary-" i)})))
         (let [out (cli/prime-cmd (prime-ctx tmp) {})
               rc-start (str/index-of out "## Recently Closed")
-              cm-start (str/index-of out "## Commands")
+              cm-start (count out)
               section  (subs out rc-start cm-start)]
           (is (str/includes? section "Cl-3")  "newest closed surfaces")
           (is (str/includes? section "Cl-2")  "second-newest surfaces")
@@ -3531,7 +3538,7 @@ Restart the daemon.
                   {:id a-id :summary "shipped in #999"})
             out  (cli/prime-cmd (prime-ctx tmp) {})
             rc-start (str/index-of out "## Recently Closed")
-            cm-start (str/index-of out "## Commands")
+            cm-start (count out)
             section  (subs out rc-start cm-start)]
         (is (str/includes? section "shipped in #999")
             "the latest note (close summary) surfaces")
@@ -3860,7 +3867,7 @@ Restart the daemon.
             _ (cli/close-cmd c {:id b-id})
             out      (cli/prime-cmd (prime-ctx tmp) {:type #{"bug"}})
             rc-start (str/index-of out "## Recently Closed")
-            cm-start (str/index-of out "## Commands")
+            cm-start (count out)
             section  (subs out rc-start cm-start)]
         (is (some? rc-start) "Recently Closed section present")
         (is (str/includes? section "Bug done"))

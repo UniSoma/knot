@@ -1109,6 +1109,18 @@
      (when (and a b)
        (>= (- b a) (* prime-stale-days millis-per-day))))))
 
+(defn- age-days-from-updated
+  "Compute integer-days delta between a ticket's `:updated` and `now-iso`.
+   Returns nil for nil/unparseable input so the renderer's `format-age-days`
+   falls back to `-`. Negative deltas (clock skew) clamp to 0 — a future
+   timestamp shouldn't render as a meaningful age."
+  [ticket now-iso]
+  (let [updated (get-in ticket [:frontmatter :updated])
+        a (parse-instant-ms updated)
+        b (parse-instant-ms now-iso)]
+    (when (and a b)
+      (max 0 (long (quot (- b a) millis-per-day))))))
+
 (defn- recently-closed-tickets
   "Project the top-N most recently closed tickets into the compact shape
    prime renders. Filters by terminal status, sorts by `:closed`
@@ -1142,7 +1154,10 @@
        (filter (fn [t] (= active-status (get-in t [:frontmatter :status]))))
        (sort-by (fn [t] (or (get-in t [:frontmatter :updated]) ""))
                 #(compare %2 %1))
-       (mapv (fn [t] (assoc t :prime-stale? (stale-in-progress? t now-iso))))))
+       (mapv (fn [t]
+               (assoc t
+                      :prime-stale? (stale-in-progress? t now-iso)
+                      :prime-age-days (age-days-from-updated t now-iso))))))
 
 (defn- count-archive
   "Count tickets whose status is in `terminal-statuses`."

@@ -1242,7 +1242,8 @@
         (is (zero? exit) (str "prime err=" err))
         (is (str/includes? out "## Project"))
         (is (str/includes? out "## Ready"))
-        (is (str/includes? out "## Commands"))
+        (is (not (str/includes? out "## Commands"))
+            "Commands cheatsheet retired in v0.4 — preamble + skill carry the verb mappings")
         (is (not (str/includes? out "## Schema"))
             "schema cheatsheet is retired")
         (is (not (str/includes? out "## In Progress"))
@@ -1297,10 +1298,7 @@
         (is (not (str/includes? out "## In Progress"))
             "no in-progress tickets → no In Progress heading")
         (let [rd-start (str/index-of out "## Ready")
-              ;; Closed tickets surface under Recently Closed, so the
-              ;; Ready slice ends at that heading (or Commands if absent).
-              rd-end   (or (str/index-of out "## Recently Closed")
-                           (str/index-of out "## Commands"))
+              rd-end   (or (str/index-of out "## Recently Closed") (count out))
               rd-section (subs out rd-start rd-end)]
           (is (not (str/includes? rd-section "Will close"))
               "closed ticket does not appear in ready")))))
@@ -1312,7 +1310,7 @@
       (let [{:keys [exit out err]} (run-knot tmp "prime" "--mode" "afk")]
         (is (zero? exit) (str "prime --mode afk err=" err))
         (let [rd-start (str/index-of out "## Ready")
-              cm-start (str/index-of out "## Commands")
+              cm-start (or (str/index-of out "## Recently Closed") (count out))
               section  (subs out rd-start cm-start)]
           (is (str/includes? section "Afk job"))
           (is (not (str/includes? section "Hitl job")))))))
@@ -1415,9 +1413,7 @@
           (is (zero? exit) (str "prime err=" err))
           (is (str/includes? out "## In Progress")
               "ticket in :active-status surfaces under ## In Progress")
-          (is (str/includes? out "Custom workflow"))
-          (is (str/includes? out "transition to active")
-              "Commands cheatsheet `knot start` line names the active status")))))
+          (is (str/includes? out "Custom workflow"))))))
 
   (testing "custom :statuses without :active-status fails fast with a strict-validation error on start"
     (with-tmp tmp

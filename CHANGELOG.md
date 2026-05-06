@@ -14,6 +14,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- `knot prime` directive content overhauled against v0.3's CLI surface:
+  - **HITL preamble** swaps the old 7-row "When the user says..." table
+    for an 8-row mapping that adds the agent-write verb (`knot update`)
+    and an explicit `show`/`list`/`dep tree` row, with inline filter
+    annotations on the read-row (`--mode afk`, `--tag`, etc.). The
+    closing pointer is rephrased to "For less-common ops (`info` /
+    `check` / `link` / `reopen` / `--json` shapes / partial-id
+    contract), invoke the `knot` skill" so the directive frames the
+    skill as the long-tail reference rather than duplicating its
+    contents.
+  - **AFK preamble** inserts a `knot update <id>` step between
+    `add-note` and `close` and tags it with a "never use `knot edit`,
+    it opens $EDITOR and will fail without a TTY" anti-pattern. The
+    skill pointer trims `lifecycle` (subsumed by the explicit verbs in
+    the autonomous-flow checklist).
+  - **`## Commands` cheatsheet retired entirely.** The preamble's
+    intent table plus the bundled `knot` skill cover the same ground
+    without per-session token cost. `prime --mode afk` agents in
+    particular benefit — the cheatsheet was redundant with the
+    autonomous-flow checklist.
+  - **In Progress row format** is now `id  type  mode  pri  age  title`
+    (6 cols). The `age` column renders the relative `:updated` delta as
+    `Nd` (<14d), `Nw` (14d–6w, floor by 7), or `Nm` (>6w, floor by 30);
+    missing `:updated` renders as `-`. The binary `[stale]` text prefix
+    is retired; the age column carries the staleness signal in human-
+    readable form. The `prime --json` `stale: true` flag on
+    `data.in_progress[]` entries is **preserved** (set when `:updated`
+    >= 14d) — the documented text/JSON asymmetry is intentional.
+  - **Ready row format** is now `id  type  mode  pri  title` (5 cols),
+    with the `type` column inserted between `id` and `mode`. Missing
+    fields render as `-`.
+  - **Recently Closed summaries** truncate at the first paragraph
+    boundary (`\n\n`) at display time, with an additional 280-char
+    hard cap on long single-paragraph summaries. When truncation fires,
+    the line ends with ` (see knot show <id>)` so agents know where the
+    rest lives. `prime --json data.recently_closed[].summary` keeps the
+    full untruncated string.
+  - **Per-section nudges** are now mode-conditioned. HITL is unchanged
+    ("Resume here if the user picks up mid-stream." / "If asked
+    'what's next', recommend the top entry..."). AFK drops the Ready
+    nudge entirely (the autonomous-flow checklist already covers it)
+    and rephrases the In Progress nudge to drop the "user" reference:
+    "Finish your in-progress work before grabbing new tickets."
+  - `prime --json` payload shape is **unchanged**: same keys on
+    `data.in_progress[]` / `data.ready[]` / `data.recently_closed[]`,
+    no `schema_version` bump, no new fields. The redesign is a display
+    refresh; the contract is stable.
+
 ## [0.3.0] - 2026-05-06
 
 ### Added

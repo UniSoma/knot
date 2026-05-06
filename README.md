@@ -162,12 +162,13 @@ and Claude will fall back to reading `.tickets/` files directly, which
 silently drifts from the CLI's invariants.
 
 `knot prime` emits a markdown primer summarizing project state —
-preamble, project metadata, in-progress tickets, ready tickets (capped
-at 20 by default), recently-closed tickets, and a commands cheatsheet
-— for injection into a fresh AI agent session.
+preamble (with the canonical user-says intent table), project
+metadata, in-progress tickets (with a relative `age` column), ready
+tickets (capped at 20 by default), and recently-closed tickets — for
+injection into a fresh AI agent session.
 
 ```sh
-knot prime                    # markdown primer (project, in-progress, ready, recently-closed, commands)
+knot prime                    # markdown primer (project, in-progress, ready, recently-closed)
 knot prime --mode afk         # filter ready section to agent-runnable work
 knot prime --limit 5          # override the default ready cap of 20
 knot prime --json             # bare object with snake_case keys:

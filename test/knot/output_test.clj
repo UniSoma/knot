@@ -692,11 +692,12 @@
 (defn- mk-prime-ticket
   "Build a ticket map suitable for the prime renderers. `opts` overrides
    any frontmatter field; `:title` populates the frontmatter `:title`."
-  [{:keys [id status priority mode title updated created]}]
+  [{:keys [id status priority mode type title updated created]}]
   {:frontmatter (cond-> {:id id :title (or title "Untitled")}
                   status   (assoc :status status)
                   priority (assoc :priority priority)
                   mode     (assoc :mode mode)
+                  type     (assoc :type type)
                   updated  (assoc :updated updated)
                   created  (assoc :created created))
    :body ""})
@@ -716,15 +717,31 @@
                                      :title "Working on beta"
                                      :updated "2026-04-27T10:00:00Z"})]
    :ready         [(mk-prime-ticket {:id "kno-rd01" :status "open"
-                                     :mode "afk" :priority 0
+                                     :mode "afk" :priority 0 :type "bug"
                                      :title "Ready highest"
                                      :created "2026-04-28T09:00:00Z"})
                    (mk-prime-ticket {:id "kno-rd02" :status "open"
-                                     :mode "hitl" :priority 2
+                                     :mode "hitl" :priority 2 :type "task"
                                      :title "Ready lower"
                                      :created "2026-04-27T09:00:00Z"})]
    :ready-truncated? false
    :ready-remaining 0})
+
+(deftest format-age-days-test
+  (testing "missing day-count renders as `-`"
+    (is (= "-" (output/format-age-days nil))))
+  (testing "<14 days renders as Nd"
+    (is (= "0d"  (output/format-age-days 0)))
+    (is (= "1d"  (output/format-age-days 1)))
+    (is (= "13d" (output/format-age-days 13))))
+  (testing "14d through 42d (6w) inclusive renders as Nw (floor by 7)"
+    (is (= "2w" (output/format-age-days 14)))
+    (is (= "2w" (output/format-age-days 15)) "floor: 15d still in 2w bucket")
+    (is (= "6w" (output/format-age-days 42))))
+  (testing ">42d renders as Nm (floor by 30)"
+    (is (= "1m" (output/format-age-days 43)))
+    (is (= "1m" (output/format-age-days 45)) "floor: 45d still in 1m bucket")
+    (is (= "3m" (output/format-age-days 100)))))
 
 (deftest prime-text-canonical-sections-test
   (testing "preamble paragraph appears at the top before all section headings"
@@ -734,15 +751,14 @@
       (is (pos? (count (str/trim preamble)))
           "preamble is a non-empty paragraph above the first heading")))
 
-  (testing "project, in-progress, ready, commands sections appear in canonical order"
+  (testing "project, in-progress, ready sections appear in canonical order"
     (let [out (output/prime-text sample-prime-data)
           p-i  (str/index-of out "## Project")
           ip-i (str/index-of out "## In Progress")
-          rd-i (str/index-of out "## Ready")
-          cm-i (str/index-of out "## Commands")]
-      (is (every? some? [p-i ip-i rd-i cm-i])
-          "all four section headings present (preamble has no heading)")
-      (is (< p-i ip-i rd-i cm-i)
+          rd-i (str/index-of out "## Ready")]
+      (is (every? some? [p-i ip-i rd-i])
+          "all three section headings present (preamble has no heading; cheatsheet retired)")
+      (is (< p-i ip-i rd-i)
           "section headings appear in the canonical order"))))
 
 (deftest prime-text-project-metadata-test
@@ -787,7 +803,7 @@
   (testing "ready ticket lines contain id, mode, priority, and title"
     (let [out (output/prime-text sample-prime-data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Commands") (count out))
+          end   (or (str/index-of out "## Recently Closed") (count out))
           section (subs out start end)]
       (is (str/includes? section "kno-rd01"))
       (is (str/includes? section "afk"))
@@ -805,7 +821,7 @@
                                          :created "2026-04-27T09:00:00Z"})])
           out (output/prime-text data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Commands") (count out))
+          end   (or (str/index-of out "## Recently Closed") (count out))
           section (subs out start end)
           ;; The id contains no digits and the title contains no digits,
           ;; so the digit `2` unambiguously locates the priority column.
@@ -820,11 +836,40 @@
         (is (< id-i mode-i pri-i title-i)
             "id, mode, priority, title appear left-to-right on the line")))))
 
+(deftest prime-text-ready-row-format-test
+  (testing "ready row has 5 cols: id  type  mode  pri  title (type column inserted)"
+    (let [out (output/prime-text sample-prime-data)
+          start (str/index-of out "## Ready")
+          end   (or (str/index-of out "## Recently Closed") (count out))
+          section (subs out start end)
+          line (some (fn [l] (when (str/includes? l "kno-rd01") l))
+                     (str/split-lines section))]
+      (is (some? line))
+      (is (re-find #"^kno-rd01\s+bug\s+afk\s+0\s+Ready highest" line)
+          "row matches the canonical 5-col order: id type mode pri title")))
+
+  (testing "ready row renders missing :type as `-`"
+    (let [data (assoc sample-prime-data
+                      :ready
+                      [(mk-prime-ticket {:id "kno-notype"
+                                         :status "open" :mode "afk" :priority 1
+                                         :title "Has no type set"
+                                         :created "2026-04-27T09:00:00Z"})])
+          out (output/prime-text data)
+          start (str/index-of out "## Ready")
+          end   (or (str/index-of out "## Recently Closed") (count out))
+          section (subs out start end)
+          line (some (fn [l] (when (str/includes? l "kno-notype") l))
+                     (str/split-lines section))]
+      (is (some? line))
+      (is (re-find #"kno-notype\s+-\s+afk\s+1\s+Has no type set" line)
+          "missing type renders as `-` in the type column"))))
+
 (deftest prime-text-ready-order-preserved-test
   (testing "the ready section emits tickets in the order supplied (caller controls the sort)"
     (let [out (output/prime-text sample-prime-data)
           start (str/index-of out "## Ready")
-          end   (or (str/index-of out "## Commands") (count out))
+          end   (or (str/index-of out "## Recently Closed") (count out))
           section (subs out start end)
           rd01-i (str/index-of section "kno-rd01")
           rd02-i (str/index-of section "kno-rd02")]
@@ -860,7 +905,8 @@
           out (output/prime-text data)]
       (is (str/includes? out "## Project"))
       (is (str/includes? out "## Ready"))
-      (is (str/includes? out "## Commands"))
+      (is (not (str/includes? out "## Commands"))
+          "Commands cheatsheet retired — preamble + skill carry the verb mappings")
       (is (not (str/includes? out "## In Progress"))
           "empty In Progress is dropped — heading-only sections are dead weight")
       (is (not (str/includes? out "## Schema"))
@@ -904,6 +950,28 @@
           "covers 'note that / FYI'")
       (is (str/includes? out "blocked on")
           "covers 'blocked on'"))))
+
+(deftest prime-text-hitl-preamble-rows-test
+  (let [out (output/prime-text sample-prime-data)
+        first-section (str/index-of out "## ")
+        preamble (subs out 0 first-section)]
+    (testing "hitl preamble surfaces all 8 canonical agent verbs in the intent table"
+      (doseq [snippet ["knot ready" "knot show" "knot list" "knot start"
+                       "knot add-note" "knot update" "knot close" "knot dep"]]
+        (is (str/includes? preamble snippet)
+            (str "hitl preamble missing intent for `" snippet "`"))))
+    (testing "hitl preamble teaches the canonical `knot update` patch flags"
+      (is (re-find #"knot update <id>.*--title.*--tags.*--priority" preamble)
+          "the update row surfaces the four patch flags"))
+    (testing "hitl preamble's closing pointer names the less-common ops"
+      (is (str/includes? preamble "less-common ops")
+          "modernized pointer phrasing 'less-common ops' present")
+      (doseq [op ["info" "check" "link" "reopen" "--json" "partial-id"]]
+        (is (str/includes? preamble op)
+            (str "less-common ops pointer mentions `" op "`"))))
+    (testing "hitl preamble drops the legacy 'lifecycle, graph ops' phrasing"
+      (is (not (re-find #"lifecycle, graph ops" preamble))
+          "the old skill-pointer prelude is gone"))))
 
 (deftest prime-text-negative-space-test
   (testing "output explicitly tells the agent NOT to cat or hand-edit ticket files"
@@ -958,6 +1026,36 @@
         (is (re-find #"(?i)autonomous" preamble)
             (str "mode " (pr-str m) " should still pick the afk preamble"))))))
 
+(deftest prime-text-afk-preamble-shape-test
+  (let [data (assoc sample-prime-data :mode "afk")
+        out  (output/prime-text data)
+        first-section (str/index-of out "## ")
+        preamble (subs out 0 first-section)
+        update-i   (str/index-of preamble "knot update")
+        add-note-i (str/index-of preamble "knot add-note")
+        close-i    (str/index-of preamble "knot close")]
+    (testing "afk preamble surfaces the agent-write `knot update` step"
+      (is (some? update-i) "afk preamble includes knot update")
+      (is (re-find #"knot update <id>.*--priority" preamble)
+          "afk preamble teaches the priority/tags update flags"))
+    (testing "knot update lands between add-note and close in the autonomous flow"
+      (is (every? some? [add-note-i update-i close-i])
+          "all three steps present")
+      (is (< add-note-i update-i close-i)
+          "ordering: add-note → update → close"))
+    (testing "afk preamble carries the `never knot edit` anti-pattern"
+      (is (re-find #"(?i)never use `knot edit`|never `knot edit`" preamble)
+          "anti-pattern names the forbidden command verbatim")
+      (is (or (str/includes? preamble "TTY")
+              (re-find #"(?i)\$editor|interactive" preamble))
+          "anti-pattern explains *why* (interactive / no-TTY failure)"))
+    (testing "afk skill pointer drops 'lifecycle' (subsumed by the explicit verbs)"
+      (is (not (re-find #"lifecycle" preamble))
+          "afk pointer no longer mentions 'lifecycle'")
+      (doseq [topic ["graph ops" "JSON shapes" "partial-id"]]
+        (is (str/includes? preamble topic)
+            (str "afk pointer keeps `" topic "`"))))))
+
 (deftest prime-text-afk-mode-config-driven-test
   (testing "renderer dispatches the AFK preamble on data-map :afk-mode, not the literal \"afk\""
     (let [data (assoc sample-prime-data :mode "robot" :afk-mode "robot")
@@ -1001,42 +1099,52 @@
       (is (re-find #"(?i)knot.*skill|skill.*knot" preamble)
           "the skill mention is anchored to `knot`, not just any skill"))))
 
-(deftest prime-text-stale-in-progress-flag-test
-  (testing "in-progress entries carrying :prime-stale? render with a [stale] prefix"
+(deftest prime-text-in-progress-row-format-test
+  (testing "in-progress row has 6 cols: id  type  mode  pri  age  title"
+    (let [t (-> (mk-prime-ticket {:id "kno-ip-fmt" :status "in_progress"
+                                  :mode "afk" :priority 1 :type "feature"
+                                  :title "Six-col row"
+                                  :updated "2026-04-28T10:00:00Z"})
+                (assoc :prime-age-days 8))
+          data (assoc sample-prime-data :in-progress [t])
+          out  (output/prime-text data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          section  (subs out ip-start ip-end)
+          line (some (fn [l] (when (str/includes? l "kno-ip-fmt") l))
+                     (str/split-lines section))]
+      (is (some? line))
+      (is (re-find #"^kno-ip-fmt\s+feature\s+afk\s+1\s+8d\s+Six-col row" line)
+          "row matches the canonical 6-col order: id type mode pri age title")))
+
+  (testing "missing :prime-age-days renders `-` in the age column"
+    (let [t (mk-prime-ticket {:id "kno-no-age" :status "in_progress"
+                              :mode "afk" :priority 0 :type "task"
+                              :title "Has no updated"})
+          data (assoc sample-prime-data :in-progress [t])
+          out  (output/prime-text data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          section  (subs out ip-start ip-end)
+          line (some (fn [l] (when (str/includes? l "kno-no-age") l))
+                     (str/split-lines section))]
+      (is (some? line))
+      (is (re-find #"^kno-no-age\s+task\s+afk\s+0\s+-\s+Has no updated" line)
+          "missing age column renders as `-`")))
+
+  (testing "[stale] prefix is gone from in-progress text rows (replaced by the age column)"
     (let [stale-ticket  (-> (mk-prime-ticket {:id "kno-stale" :status "in_progress"
                                               :mode "afk" :priority 1
                                               :title "Stalled work"
                                               :updated "2026-04-01T10:00:00Z"})
-                            (assoc :prime-stale? true))
-          fresh-ticket  (mk-prime-ticket {:id "kno-fresh" :status "in_progress"
-                                          :mode "hitl" :priority 2
-                                          :title "Active work"
-                                          :updated "2026-04-29T10:00:00Z"})
-          data (assoc sample-prime-data :in-progress [stale-ticket fresh-ticket])
-          out  (output/prime-text data)
-          ip-start (str/index-of out "## In Progress")
-          ip-end   (str/index-of out "## Ready")
-          section  (subs out ip-start ip-end)]
-      (is (re-find #"\[stale\]\s+kno-stale" section)
-          "stalled ticket line is prefixed with [stale]")
-      (is (not (re-find #"\[stale\]\s+kno-fresh" section))
-          "fresh ticket line is not prefixed")))
-
-  (testing "the [stale] prefix is omitted when :prime-stale? is absent or false"
-    (let [t1 (mk-prime-ticket {:id "kno-a" :status "in_progress"
-                               :mode "afk" :priority 1 :title "Alpha"
-                               :updated "2026-04-29T10:00:00Z"})
-          t2 (-> t1
-                 (assoc :prime-stale? false)
-                 (assoc-in [:frontmatter :id] "kno-b")
-                 (assoc-in [:frontmatter :title] "Beta"))
-          data (assoc sample-prime-data :in-progress [t1 t2])
-          out  (output/prime-text data)
-          ip-start (str/index-of out "## In Progress")
-          ip-end   (str/index-of out "## Ready")
-          section  (subs out ip-start ip-end)]
-      (is (not (str/includes? section "[stale]"))
-          "no prefix when the flag is absent or false"))))
+                            (assoc :prime-stale? true)
+                            (assoc :prime-age-days 35))
+          data (assoc sample-prime-data :in-progress [stale-ticket])
+          out  (output/prime-text data)]
+      (is (not (str/includes? out "[stale]"))
+          "[stale] prefix removed from text output (age column carries the signal)")
+      (is (str/includes? out "5w")
+          "35-day age renders as `5w` in the age column"))))
 
 (deftest prime-json-stale-flag-test
   (testing "in_progress entries carrying :prime-stale? get a \"stale\":true field"
@@ -1058,7 +1166,7 @@
           "fresh ticket has no \"stale\" key (omitted to keep payload tight)"))))
 
 (deftest prime-text-recently-closed-section-test
-  (testing "## Recently Closed heading appears between Ready and Commands when entries exist"
+  (testing "## Recently Closed heading appears after Ready when entries exist"
     (let [data (assoc sample-prime-data
                       :recently-closed
                       [{:id "kno-cl01"
@@ -1067,11 +1175,10 @@
                         :summary "shipped in #482"}])
           out (output/prime-text data)
           rd-i (str/index-of out "## Ready")
-          rc-i (str/index-of out "## Recently Closed")
-          cm-i (str/index-of out "## Commands")]
-      (is (every? some? [rd-i rc-i cm-i]))
-      (is (< rd-i rc-i cm-i)
-          "Recently Closed appears between Ready and Commands")))
+          rc-i (str/index-of out "## Recently Closed")]
+      (is (every? some? [rd-i rc-i]))
+      (is (< rd-i rc-i)
+          "Recently Closed appears after Ready (it is the last section)")))
 
   (testing "each entry surfaces id and title"
     (let [data (assoc sample-prime-data
@@ -1080,8 +1187,7 @@
                        {:id "kno-bbb" :title "Beta shipped"  :closed "2026-04-28T10:00:00Z"}])
           out (output/prime-text data)
           rc-start (str/index-of out "## Recently Closed")
-          cm-start (str/index-of out "## Commands")
-          section  (subs out rc-start cm-start)]
+          section  (subs out rc-start (count out))]
       (is (str/includes? section "kno-aaa"))
       (is (str/includes? section "Alpha shipped"))
       (is (str/includes? section "kno-bbb"))
@@ -1094,9 +1200,79 @@
                         :summary "shipped in PR #482"}])
           out (output/prime-text data)
           rc-start (str/index-of out "## Recently Closed")
-          cm-start (str/index-of out "## Commands")
-          section  (subs out rc-start cm-start)]
+          section  (subs out rc-start (count out))]
       (is (str/includes? section "shipped in PR #482"))))
+
+  (testing "long multi-paragraph summary truncates at the first paragraph boundary"
+    (let [data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-multi"
+                        :title "Multi-paragraph close"
+                        :closed "2026-04-29T10:00:00Z"
+                        :summary "First paragraph is the headline.\n\nSecond paragraph has follow-up details that should NOT surface in prime."}])
+          out (output/prime-text data)
+          rc-start (str/index-of out "## Recently Closed")
+          section  (subs out rc-start (count out))]
+      (is (str/includes? section "First paragraph is the headline.")
+          "first paragraph appears")
+      (is (not (str/includes? section "Second paragraph has follow-up"))
+          "everything after the first \\n\\n is dropped from prime text")
+      (is (str/includes? section "(see knot show kno-multi)")
+          "truncation marker pointing at full summary appended")))
+
+  (testing "summary >280 chars hard-caps at 280 even with no paragraph break"
+    (let [long-summary (apply str (repeat 30 "Lorem ipsum dolor sit amet, consectetur. "))
+          data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-long"
+                        :title "Long single paragraph"
+                        :closed "2026-04-29T10:00:00Z"
+                        :summary long-summary}])
+          out (output/prime-text data)
+          rc-start (str/index-of out "## Recently Closed")
+          section  (subs out rc-start (count out))
+          summary-line (some (fn [l] (when (str/starts-with? l "    ") l))
+                             (str/split-lines section))]
+      (is (some? summary-line) "summary line found")
+      ;; Line is "    " (4 indent) + truncated body + " (see knot show kno-long)".
+      ;; The body slice itself should be ≤ 280 chars.
+      (is (str/includes? summary-line "(see knot show kno-long)")
+          "hard-cap truncation also gets the see-knot-show marker")
+      (let [marker " (see knot show kno-long)"
+            body   (-> summary-line
+                       (subs 4)
+                       (str/replace marker ""))]
+        (is (<= (count body) 280)
+            (str "truncated body is ≤ 280 chars (was " (count body) ")")))))
+
+  (testing "short single-paragraph summary is NOT truncated and gets no marker"
+    (let [data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-short"
+                        :title "Short"
+                        :closed "2026-04-29T10:00:00Z"
+                        :summary "Short summary, no paragraph break."}])
+          out (output/prime-text data)
+          rc-start (str/index-of out "## Recently Closed")
+          section  (subs out rc-start (count out))]
+      (is (str/includes? section "Short summary, no paragraph break.")
+          "short summary surfaces in full")
+      (is (not (str/includes? section "(see knot show"))
+          "no truncation marker when no truncation happened")))
+
+  (testing "JSON keeps the full multi-paragraph summary unchanged"
+    (let [full-summary "First paragraph is the headline.\n\nSecond paragraph has follow-up details."
+          data (assoc sample-prime-data
+                      :recently-closed
+                      [{:id "kno-multi"
+                        :title "Multi-paragraph close"
+                        :closed "2026-04-29T10:00:00Z"
+                        :summary full-summary}])
+          out (output/prime-json data)
+          parsed (json/parse-string out true)
+          entry (first (get-in parsed [:data :recently_closed]))]
+      (is (= full-summary (:summary entry))
+          "JSON consumers see the full untruncated summary")))
 
   (testing "the section is omitted entirely when :recently-closed is empty"
     (let [data (assoc sample-prime-data :recently-closed [])
@@ -1109,71 +1285,51 @@
       (is (not (str/includes? out "## Recently Closed"))
           "callers that don't supply :recently-closed get the prior behavior"))))
 
-(deftest prime-text-commands-cheatsheet-trim-test
-  (testing "Commands cheatsheet covers the 7 most-used lifecycle/read commands"
-    (let [out      (output/prime-text sample-prime-data)
-          start    (str/index-of out "## Commands")
-          section  (subs out start (count out))]
-      (doseq [cmd ["knot list" "knot ready" "knot show" "knot create"
-                   "knot start" "knot close" "knot add-note"]]
-        (is (str/includes? section cmd)
-            (str cmd " stays in the prime cheatsheet — it's a high-frequency op")))))
+(deftest prime-text-commands-cheatsheet-removed-test
+  (testing "## Commands cheatsheet is removed entirely in hitl mode (preamble + skill carry the load)"
+    (let [out (output/prime-text sample-prime-data)]
+      (is (not (str/includes? out "## Commands"))
+          "hitl mode does not emit the Commands cheatsheet")))
 
-  (testing "graph commands are NOT in the prime cheatsheet — they live in the skill"
-    (let [out      (output/prime-text sample-prime-data)
-          start    (str/index-of out "## Commands")
-          section  (subs out start (count out))]
-      (is (not (re-find #"(?m)^knot dep\b" section))
-          "`knot dep` belongs in the skill, not the per-session primer")
-      (is (not (re-find #"(?m)^knot link\b" section))
-          "`knot link` belongs in the skill, not the per-session primer"))))
+  (testing "## Commands cheatsheet is removed entirely in afk mode"
+    (let [data (assoc sample-prime-data :mode "afk")
+          out  (output/prime-text data)]
+      (is (not (str/includes? out "## Commands"))
+          "afk mode does not emit the Commands cheatsheet"))))
 
-(deftest prime-text-active-status-cheatsheet-test
-  (testing "Commands cheatsheet `knot start` line reflects :active-status from data"
-    (let [data (assoc sample-prime-data :active-status "active")
+(deftest prime-text-mode-conditioned-nudges-test
+  (testing "afk mode drops the Ready section nudge entirely"
+    (let [data (assoc sample-prime-data :mode "afk")
           out  (output/prime-text data)
-          start (str/index-of out "## Commands")
-          section (subs out start (count out))
-          start-line (some (fn [l] (when (re-find #"^knot start\b" l) l))
-                           (str/split-lines section))]
-      (is (some? start-line))
-      (is (str/includes? start-line "transition to active")
-          "knot start line reflects the configured active status")
-      (is (not (str/includes? start-line "in_progress"))
-          "literal in_progress is gone when active-status is something else")))
+          rd-start (str/index-of out "## Ready")
+          rd-end   (or (str/index-of out "## Recently Closed") (count out))
+          section  (subs out rd-start rd-end)]
+      (is (not (re-find #"(?i)recommend|what's next|confirm" section))
+          "afk's autonomous flow already covers picking the next ticket — no Ready nudge needed")))
 
-  (testing "no-project caller (prime-cmd) threads :active-status from (config/defaults) so the cheatsheet renders in_progress"
-    ;; The renderer requires :active-status in the data arg — the
-    ;; no-project branch in prime-cmd substitutes (config/defaults) so
-    ;; the cheatsheet still renders. This test mirrors what that caller
-    ;; does, locking in the contract that the caller owns the fallback.
-    (let [data {:project {:found? false}
-                :in-progress []
-                :ready []
-                :ready-truncated? false
-                :ready-remaining 0
-                :active-status "in_progress"}
-          out (output/prime-text data)
-          start (str/index-of out "## Commands")
-          section (subs out start (count out))
-          start-line (some (fn [l] (when (re-find #"^knot start\b" l) l))
-                           (str/split-lines section))]
-      (is (some? start-line))
-      (is (str/includes? start-line "transition to in_progress")
-          "default :active-status from (config/defaults) yields the in_progress literal"))))
+  (testing "afk in-progress nudge is the agent-framed 'Finish your in-progress work...'"
+    (let [data (assoc sample-prime-data :mode "afk")
+          out  (output/prime-text data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          section  (subs out ip-start ip-end)]
+      (is (str/includes? section "Finish your in-progress work before grabbing new tickets.")
+          "afk in-progress nudge is the new agent-framed copy")
+      (is (not (re-find #"\buser\b" section))
+          "afk in-progress nudge removes the 'user' reference (no human in the loop)")))
 
-(deftest prime-text-close-shows-summary-flag-test
-  (testing "Commands cheatsheet documents --summary on the close line, not buried in the user-says mapping"
-    (let [out      (output/prime-text sample-prime-data)
-          start    (str/index-of out "## Commands")
-          end      (count out)
-          section  (subs out start end)
-          close-line (some (fn [l] (when (re-find #"^knot close\b" l) l))
-                           (str/split-lines section))]
-      (is (some? close-line)
-          "Commands section has a dedicated `knot close` line (not lumped with start)")
-      (is (str/includes? close-line "--summary")
-          "close line surfaces the --summary flag inline so the agent doesn't cross-reference"))))
+  (testing "hitl mode keeps the existing nudges intact"
+    (let [out (output/prime-text sample-prime-data)
+          ip-start (str/index-of out "## In Progress")
+          ip-end   (str/index-of out "## Ready")
+          ip-section (subs out ip-start ip-end)
+          rd-start (str/index-of out "## Ready")
+          rd-end   (or (str/index-of out "## Recently Closed") (count out))
+          rd-section (subs out rd-start rd-end)]
+      (is (str/includes? ip-section "Resume here if the user picks up mid-stream.")
+          "hitl in-progress nudge unchanged")
+      (is (str/includes? rd-section "If asked")
+          "hitl ready nudge unchanged"))))
 
 (deftest prime-text-section-nudges-test
   (testing "in-progress section carries a one-line behavioral nudge under its heading"
@@ -1188,10 +1344,9 @@
   (testing "ready section carries a one-line behavioral nudge under its heading"
     (let [out (output/prime-text sample-prime-data)
           start (str/index-of out "## Ready")
-          ;; Stop at the next `## ` heading after Ready (Commands or Schema)
-          ;; so the nudge match is scoped to the Ready section body.
-          next-sec (or (str/index-of out "## Commands" start)
-                       (str/index-of out "## Schema" start)
+          ;; Stop at the next `## ` heading after Ready (Recently Closed) so
+          ;; the nudge match is scoped to the Ready section body.
+          next-sec (or (str/index-of out "## Recently Closed" start)
                        (count out))
           section  (subs out start next-sec)]
       (is (or (str/includes? section "what's next")

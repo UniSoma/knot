@@ -540,24 +540,21 @@
   (str "For the full reference (" topics "), invoke the `knot` skill."))
 
 (def ^:private prime-preamble-found
-  (str
-   "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
+  "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
 
 When the user says... → you do:
-  \"what's next?\" / \"what should I work on?\"        → `knot ready`
-  \"any pending bugs?\" / \"list bugs\"                → `knot list --type bug`
-  \"let's tackle <id>\" / \"start working on <id>\"    → `knot show <id>`, then `knot start <id>`
-  \"I'm done\" / \"shipped\" / \"let's close this\"      → `knot close <id> --summary \"...\"`
+  \"what's next?\" / \"what should I work on?\"        → `knot ready` (add `--mode afk` for agent-runnable only)
+  \"show me <id>\" / \"tell me about <id>\"            → `knot show <id>` (resolves partial ids; works on archive too)
+  \"any pending bugs?\" / \"what's tagged X?\"          → `knot list --type bug` (also: --tag, --mode, --assignee, --status, --limit)
+  \"let's tackle <id>\" / \"start working on <id>\"    → `knot start <id>`
   \"note that...\" / \"FYI...\" mid-task               → `knot add-note <id> \"...\"`
-  \"blocked on <other>\"                            → `knot dep <current> <other>`
-  \"what's blocking this?\"                         → `knot dep tree <id>`
+  \"retitle / retag / change priority / set ...\"    → `knot update <id> --title|--tags|--priority|--assignee|--description ...`
+  \"I'm done\" / \"shipped\" / \"let's close this\"      → `knot close <id> --summary \"...\"`
+  \"blocked on <other>\" / \"what's blocking <id>?\"   → `knot dep <current> <other>` / `knot dep tree <id>`
 
-Read commands accept `--type`, `--mode`, `--tag`, `--status`, `--assignee` filters — pass the matching flag instead of scanning a bare list.
+Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `update` keep frontmatter valid.
 
-Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `edit` keep frontmatter valid.
-
-"
-   (prime-skill-pointer "lifecycle, graph ops, JSON shapes, partial-id resolution, AFK vs HITL")))
+For less-common ops (`info` / `check` / `link` / `reopen` / `--json` shapes / partial-id contract), invoke the `knot` skill.")
 
 (def ^:private prime-preamble-afk
   (str
@@ -565,80 +562,129 @@ Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't wri
 
 Autonomous flow:
 
-  knot ready --mode afk --json     enumerate unblocked agent-runnable candidates
-  knot show <id>                   confirm scope before claiming
-  knot start <id>                  claim
-  knot add-note <id> \"<progress>\"  log progress on long runs
-  knot close <id> --summary \"...\"  ship — the summary lands in the ticket as a note
+  knot ready --mode afk --json                   enumerate unblocked agent-runnable candidates
+  knot show <id>                                 confirm scope before claiming
+  knot start <id>                                claim
+  knot add-note <id> \"<progress>\"                log progress on long runs
+  knot update <id> --priority 0 --tags p0,auth   patch frontmatter or named body sections (non-interactive — never use `knot edit`, it opens $EDITOR and will fail without a TTY)
+  knot close <id> --summary \"...\"                ship — the summary lands in the ticket as a note
 
 Don't pick up `hitl` tickets — those need a human in the loop. The `mode` field is the contract.
 
 "
-   (prime-skill-pointer "lifecycle, graph ops, JSON shapes, partial-id resolution")))
+   (prime-skill-pointer "graph ops, JSON shapes, partial-id resolution")))
 
 (def ^:private prime-preamble-no-project
   "No Knot project was discovered from the current directory. Run `knot init`
 in the project root to create a `.knot.edn` config and `.tickets/` directory
 before issuing other Knot commands.")
 
-(def ^:private prime-in-progress-nudge
+(def ^:private prime-in-progress-nudge-hitl
   "Resume here if the user picks up mid-stream.")
 
-(def ^:private prime-ready-nudge
+(def ^:private prime-in-progress-nudge-afk
+  "Finish your in-progress work before grabbing new tickets.")
+
+(def ^:private prime-ready-nudge-hitl
   "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
 
-(defn- prime-commands-cheatsheet
-  "Render the static `## Commands` cheatsheet block, parameterized by
-   `active-status` so the `knot start` line names the project's active
-   lane. The caller (prime-cmd) supplies the value from config; the
-   no-project branch falls back to `(config/defaults)` so this function
-   never has to reason about absence."
-  [active-status]
-  (str
-   "knot list                        list live tickets (alias: ls)\n"
-   "knot ready [--mode afk]          list non-blocked tickets (filter by mode)\n"
-   "knot show <id>                   show one ticket (frontmatter + body)\n"
-   "knot create \"<title>\"            create a new ticket\n"
-   "knot start <id>                  transition to " active-status "\n"
-   "knot close <id> [--summary <s>]  transition to terminal status + auto-archive\n"
-   "knot add-note <id> [text]        append a timestamped note"))
+(defn format-age-days
+  "Render an integer day-count as a relative-age string for the prime
+   `## In Progress` age column. Buckets:
+     <14 days  → `Nd`  (e.g. `0d`, `13d`)
+     14d–42d   → `Nw`  (floor: 15d → `2w`)
+     >42d      → `Nm`  (floor by 30: 100d → `3m`)
+   `nil` (missing :updated, unparseable timestamp) renders as `-` so
+   columns stay aligned. Pure: callers pre-compute the day delta from
+   `:updated` and `now-iso` and pass it in."
+  [days]
+  (cond
+    (nil? days) "-"
+    (< days 14) (str days "d")
+    (<= days 42) (str (quot days 7) "w")
+    :else (str (quot days 30) "m")))
 
-(defn- prime-ticket-line
-  "Format a ticket as `id  mode  pri  title` for the prime in-progress and
-   ready sections. Missing fields render as `-` so columns stay aligned.
-   When `:prime-stale?` is truthy on the ticket map (set by the in-progress
-   pipeline when `:updated` is older than the staleness threshold), the
-   line is prefixed with `[stale] ` so agents notice forgotten work. The
+(defn- prime-in-progress-line
+  "Format an in-progress ticket as `id  type  mode  pri  age  title` (6
+   cols). Missing fields render as `-` so columns stay aligned. The age
+   column comes from `:prime-age-days` (set by the cli pipeline from
+   `:updated` and `now-iso`); see `format-age-days` for the bucketing
+   rules. The `:prime-stale?` flag remains on the ticket map for the
+   JSON projection but no longer affects the text output — the age
+   column carries the staleness signal in human-readable form. The
    renderer is whitespace-only — no ANSI codes — because prime output
-   is consumed by AI agents and downstream tools, not human terminals."
+   is consumed by AI agents and downstream tools."
   [ticket]
-  (let [fm     (:frontmatter ticket)
-        id     (or (:id fm) "")
-        mode   (or (:mode fm) "-")
-        pri    (let [p (:priority fm)] (if (some? p) (str p) "-"))
-        title  (ticket-title ticket)
-        prefix (if (:prime-stale? ticket) "[stale] " "")]
-    (str prefix id "  " mode "  " pri "  " title)))
+  (let [fm    (:frontmatter ticket)
+        id    (or (:id fm) "")
+        type- (or (:type fm) "-")
+        mode  (or (:mode fm) "-")
+        pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
+        age   (format-age-days (:prime-age-days ticket))
+        title (ticket-title ticket)]
+    (str id "  " type- "  " mode "  " pri "  " age "  " title)))
+
+(defn- prime-ready-line
+  "Format a ready ticket as `id  type  mode  pri  title` (5 cols). Missing
+   fields render as `-` so columns stay aligned. Whitespace-only — no
+   ANSI codes — because prime output is consumed by AI agents."
+  [ticket]
+  (let [fm    (:frontmatter ticket)
+        id    (or (:id fm) "")
+        type- (or (:type fm) "-")
+        mode  (or (:mode fm) "-")
+        pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
+        title (ticket-title ticket)]
+    (str id "  " type- "  " mode "  " pri "  " title)))
 
 (defn- prime-section
   "Render a `## <header>` section: heading, optional one-line behavioral
-   nudge (blank-line separated), the ticket lines, and an optional
-   trailing footer block. Empty ticket sequences still emit the heading
-   and nudge so the directive is visible even on a quiet project."
-  [header nudge tickets footer]
+   nudge (blank-line separated), the ticket lines (formatted by
+   `row-fn`), and an optional trailing footer block. Empty ticket
+   sequences still emit the heading and nudge so the directive is
+   visible even on a quiet project."
+  [header nudge tickets footer row-fn]
   (let [nudge-block (if (str/blank? nudge) "" (str nudge "\n\n"))
-        lines (mapv prime-ticket-line tickets)
+        lines (mapv row-fn tickets)
         body  (if (seq lines) (str (str/join "\n" lines) "\n") "")
         foot  (if (str/blank? footer) "" (str footer "\n"))]
     (str "## " header "\n\n" nudge-block body foot)))
 
+(def ^:private prime-summary-char-cap
+  "Hard char-cap for a Recently Closed summary's first paragraph in prime
+   text output. Long monoliths still get truncated even when there is no
+   `\\n\\n` break to slice on."
+  280)
+
+(defn- truncate-prime-summary
+  "Truncate a Recently Closed summary for prime text display:
+     1. Slice at the first `\\n\\n` paragraph boundary.
+     2. If the result still exceeds `prime-summary-char-cap`, hard-cap.
+     3. When either rule fired, append ` (see knot show <id>)` so the
+        agent knows where the rest lives.
+   JSON consumers bypass this and always get the full string."
+  [summary id]
+  (let [boundary (str/index-of summary "\n\n")
+        sliced   (if boundary (subs summary 0 boundary) summary)
+        capped   (if (> (count sliced) prime-summary-char-cap)
+                   (subs sliced 0 prime-summary-char-cap)
+                   sliced)
+        truncated? (or (some? boundary) (> (count sliced) prime-summary-char-cap))]
+    (if truncated?
+      (str capped " (see knot show " id ")")
+      capped)))
+
 (defn- prime-recently-closed-line
   "Render a single recently-closed entry as one or two lines: `id  title`,
-   then an indented summary line when `:summary` is present and non-blank."
+   then an indented summary line when `:summary` is present and non-blank.
+   The summary is truncated at the first paragraph boundary or at the
+   `prime-summary-char-cap` (whichever is shorter); see
+   `truncate-prime-summary`. JSON callers (`jsonify-recently-closed`)
+   skip this path and emit the full string."
   [{:keys [id title summary]}]
   (let [head (str (or id "") "  " (or title ""))]
     (if (and (some? summary) (not (str/blank? summary)))
-      (str head "\n    " summary)
+      (str head "\n    " (truncate-prime-summary summary id))
       head)))
 
 (defn- prime-recently-closed-section
@@ -673,13 +719,10 @@ before issuing other Knot commands.")
      4. `## Ready` ticket lines (with behavioral nudge and optional footer)
      5. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
-     6. `## Commands` cheatsheet (the `knot start` line names
-        `:active-status`, which the caller threads through from config —
-        the no-project branch in `prime-cmd` substitutes `(config/defaults)`)
    Each ticket line is `id  mode  pri  title`. Caller controls sort and
    limit — this function does not reorder or truncate."
   [{:keys [project in-progress ready ready-truncated? ready-remaining
-           recently-closed mode active-status afk-mode]
+           recently-closed mode afk-mode]
     :or {afk-mode (:afk-mode (config/defaults))}}]
   (let [found? (:found? project)
         ;; Coerce mode through name+lower-case+trim so keywords (`:afk`),
@@ -689,31 +732,38 @@ before issuing other Knot commands.")
                                   str str/trim str/lower-case))
         mode-norm (normalize mode)
         afk-norm  (normalize afk-mode)
+        afk?  (and (some? afk-norm) (= mode-norm afk-norm))
         preamble (cond
-                   (not found?)                          prime-preamble-no-project
-                   (and (some? afk-norm)
-                        (= mode-norm afk-norm))          prime-preamble-afk
-                   :else                                 prime-preamble-found)
+                   (not found?) prime-preamble-no-project
+                   afk?         prime-preamble-afk
+                   :else        prime-preamble-found)
+        ip-nudge    (when found? (if afk?
+                                   prime-in-progress-nudge-afk
+                                   prime-in-progress-nudge-hitl))
+        ;; afk's preamble flow checklist already handles next-ticket
+        ;; selection, so the Ready nudge would be redundant noise; only
+        ;; hitl mode renders it.
+        ready-nudge (when (and found? (not afk?)) prime-ready-nudge-hitl)
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
                             " more (run `knot ready`)"))
         in-progress-block (when (seq in-progress)
                             (str (prime-section "In Progress"
-                                                (when found? prime-in-progress-nudge)
+                                                ip-nudge
                                                 in-progress
-                                                nil)
+                                                nil
+                                                prime-in-progress-line)
                                  "\n"))
         recently-closed-block (prime-recently-closed-section recently-closed)]
     (str preamble "\n\n"
          (prime-project-section project) "\n"
          in-progress-block
          (prime-section "Ready"
-                        (when found? prime-ready-nudge)
+                        ready-nudge
                         ready
-                        ready-footer) "\n"
-         recently-closed-block
-         "## Commands\n\n"
-         (prime-commands-cheatsheet active-status) "\n")))
+                        ready-footer
+                        prime-ready-line) "\n"
+         recently-closed-block)))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:
