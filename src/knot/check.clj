@@ -6,6 +6,7 @@
    already-loaded tickets and scan counts."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
+            [knot.acceptance :as acceptance]
             [knot.config :as config]
             [knot.query :as query]
             [knot.store :as store]
@@ -202,12 +203,29 @@
                    acceptance
                    (range))))))
 
+(defn- check-legacy-acceptance
+  "Per-ticket warning: ticket body still contains a `## Acceptance
+   Criteria` section that `migrate-ac` would lift into structured
+   frontmatter. Aligned with what `migrate-ac` actually fixes — uses
+   `parse-body-section`, so once the body is stripped the warning
+   self-clears and the surface is idempotent."
+  [_ctx ticket]
+  (let [{:keys [id]} (:frontmatter ticket)
+        body         (:body ticket)]
+    (when (and id (acceptance/parse-body-section body))
+      [{:severity :warning
+        :code     :legacy_acceptance_section
+        :ids      [id]
+        :message  (str "legacy '## Acceptance Criteria' body section found; "
+                       "run `knot migrate-ac` to lift entries into "
+                       "structured frontmatter")}])))
+
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries
    `:config` (merged) and `:all-ids` (set of every known id)."
   [check-status check-type check-mode check-priority
    check-required-fields check-terminal-outside-archive
-   check-unknown-id check-acceptance])
+   check-unknown-id check-acceptance check-legacy-acceptance])
 
 (defn- per-ticket-issues
   "Run every per-ticket validator against every ticket. When `ids-filter`

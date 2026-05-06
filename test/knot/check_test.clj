@@ -1,7 +1,9 @@
 (ns knot.check-test
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
-            [knot.check :as check]))
+            [knot.check :as check]
+            [knot.cli :as cli]
+            [knot.store :as store]))
 
 (defmacro ^:private with-tmp [bind & body]
   `(let [tmp# (str (fs/create-temp-dir))
@@ -521,3 +523,112 @@
         (is (= [] tickets))
         (is (= [] parse-errors))
         (is (= {:live 0 :archive 0} scanned))))))
+
+(deftest legacy-acceptance-section-warning-test
+  (testing "ticket whose body has a `## Acceptance Criteria` section emits a :legacy_acceptance_section warning"
+    (let [body    (str "## Description\n\nFoo bar.\n\n"
+                       "## Acceptance Criteria\n\n"
+                       "- [ ] Thing one\n"
+                       "- [x] Thing two\n")
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :legacy_acceptance_section)]
+      (is (= 1 (count issues)))
+      (let [issue (first issues)]
+        (is (= :warning (:severity issue))
+            "legacy AC body section is a migration nudge, not data corruption")
+        (is (= :legacy_acceptance_section (:code issue)))
+        (is (= ["a"] (:ids issue)))
+        (is (string? (:message issue)))
+        (is (re-find #"migrate-ac" (:message issue))
+            "message points users at `knot migrate-ac`"))))
+
+  (testing "ticket without an Acceptance Criteria body section emits no warning"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Description\n\nNo AC section here.\n")]
+          issues  (issues-of (run-with tickets) :legacy_acceptance_section)]
+      (is (= 0 (count issues)))))
+
+  (testing "structured :acceptance frontmatter alone (no body section) emits no warning"
+    (let [tickets [(assoc (ticket "a" "open" []
+                                  :title "T"
+                                  :acceptance [{:title "x" :done false}])
+                          :body "## Description\n\nplain body.\n")]
+          issues  (issues-of (run-with tickets) :legacy_acceptance_section)]
+      (is (= 0 (count issues))
+          "the structured form is the post-migration end-state — no warning")))
+
+  (testing "warning is filterable by --code legacy_acceptance_section"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Acceptance Criteria\n\n- [ ] thing\n")
+                   (ticket "b" "wat" [] :title "T")]
+          all     (:issues (run-with tickets))
+          filtered (check/filter-issues all {:code #{:legacy_acceptance_section}})]
+      (is (= 1 (count filtered)))
+      (is (every? #(= :legacy_acceptance_section (:code %)) filtered))))
+
+  (testing "warning is filterable by --severity warning"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Acceptance Criteria\n\n- [ ] thing\n")
+                   (ticket "b" "wat" [] :title "T")]
+          all      (:issues (run-with tickets))
+          warnings (check/filter-issues all {:severity #{:warning}})]
+      (is (every? #(= :warning (:severity %)) warnings))
+      (is (some #(= :legacy_acceptance_section (:code %)) warnings)))))
+
+(defn- spit-frontmatter-ticket! [path id title status body]
+  (fs/create-dirs (fs/parent path))
+  (spit (str path)
+        (str "---\n"
+             "id: " id "\n"
+             "title: " title "\n"
+             "status: " status "\n"
+             "---\n\n"
+             body)))
+
+(deftest legacy-acceptance-warning-disappears-after-migrate-ac-test
+  (testing "after `knot migrate-ac` runs, no ticket still triggers the legacy warning"
+    (with-tmp tmp
+      (let [tdir   ".tickets"
+            tpath  (fs/path tmp tdir "kno-01a--alpha.md")
+            body   (str "## Description\n\nDoit.\n\n"
+                        "## Acceptance Criteria\n\n"
+                        "- [ ] one\n"
+                        "- [x] two\n")]
+        (spit-frontmatter-ticket! tpath "kno-01a" "Alpha" "open" body)
+        (let [{:keys [tickets]} (check/scan tmp tdir)
+              issues-before     (->> (check/run {:tickets tickets
+                                                 :config  default-config
+                                                 :scanned {:live 1 :archive 0}})
+                                     :issues
+                                     (filterv #(= :legacy_acceptance_section (:code %))))]
+          (is (= 1 (count issues-before))
+              "warning surfaces while the body section is still present"))
+        ;; Run the actual migrate-ac command against the temp project, then re-scan.
+        (let [ctx {:project-root      tmp
+                   :tickets-dir       tdir
+                   :prefix            "kno"
+                   :statuses          (:statuses default-config)
+                   :terminal-statuses (:terminal-statuses default-config)
+                   :active-status     (:active-status default-config)
+                   :types             (:types default-config)
+                   :modes             (:modes default-config)
+                   :default-type      "task"
+                   :default-mode      "hitl"
+                   :default-priority  3
+                   :now               "2026-05-06T00:00:00Z"}]
+          (cli/migrate-ac-cmd ctx {}))
+        (let [{:keys [tickets]} (check/scan tmp tdir)
+              issues-after      (->> (check/run {:tickets tickets
+                                                 :config  default-config
+                                                 :scanned {:live 1 :archive 0}})
+                                     :issues
+                                     (filterv #(= :legacy_acceptance_section (:code %))))
+              loaded            (store/load-all tmp tdir)]
+          (is (= 0 (count issues-after))
+              "after migrate-ac the body section is gone, so the warning self-clears")
+          (is (= 1 (count loaded)) "the migrated ticket round-trips on disk")
+          (let [migrated-fm (:frontmatter (first loaded))]
+            (is (= [{:title "one" :done false}
+                    {:title "two" :done true}]
+                   (:acceptance migrated-fm))
+                "the body bullets were lifted into structured frontmatter")))))))

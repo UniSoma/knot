@@ -1,12 +1,13 @@
 ---
 id: kno-01kqzh1tadw8
 title: knot check warning for legacy '## Acceptance Criteria' body section
-status: open
+status: closed
 type: feature
 priority: 3
 mode: afk
 created: '2026-05-06T20:53:11.623411501Z'
-updated: '2026-05-06T21:36:48.975272046Z'
+updated: '2026-05-06T23:35:17.982768024Z'
+closed: '2026-05-06T23:35:17.982768024Z'
 tags:
 - v0.4
 - check
@@ -14,13 +15,13 @@ tags:
 - migration
 acceptance:
 - title: knot check emits a 'legacy_acceptance_section' warning when a ticket body contains '## Acceptance Criteria'
-  done: false
+  done: true
 - title: Code is filterable via --code and --severity
-  done: false
+  done: true
 - title: After migrate-ac runs, the warning disappears for migrated tickets (idempotent end-state)
-  done: false
+  done: true
 - title: Test covers detection, filtering, and post-migration silence
-  done: false
+  done: true
 links:
 - kno-01kqgqfwk4h1
 - kno-01kqzkhpc244
@@ -45,3 +46,9 @@ New per-ticket warning (not error) emitted by `knot check`:
 Once every project has migrated, no ticket triggers the warning. Self-cleaning surface area.
 
 Adjacent: keep `migrate-ac` itself hidden (`:hidden? true`) — discoverability comes from `check`, not from `--help` cruft.
+
+## Notes
+
+**2026-05-06T23:35:17.982768024Z**
+
+knot check now emits :legacy_acceptance_section warning aligned with what migrate-ac fixes; self-clears after migration. Filterable via --code/--severity. Verified end-to-end: warning surfaces, exit stays 0 (warning, not error), JSON envelope shape unchanged, disappears after migrate-ac runs.
