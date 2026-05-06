@@ -127,7 +127,8 @@
   (testing "empty title produces a bare <id>.md filename"
     (with-tmp tmp
       (let [path (cli/create-cmd (ctx tmp) {:title ""})]
-        (is (re-matches #".+/\.tickets/kno-[0-9a-z]{12}\.md" path)))))
+        (is (some #{".tickets"} (map str (fs/components path))))
+        (is (re-matches #"kno-[0-9a-z]{12}\.md" (str (fs/file-name path)))))))
 
   (testing "rendered frontmatter has stable, human-readable key order (id first, title second)"
     (with-tmp tmp
@@ -302,7 +303,7 @@
       (let [t-path     (cli/create-cmd (ctx tmp) {:title "Target"})
             t-id       (create-id t-path "target")
             closed-path (cli/close-cmd (ctx tmp) {:id t-id})
-            _ (assert (str/includes? (str closed-path) "/archive/")
+            _ (assert (some #{"archive"} (map str (fs/components closed-path)))
                       "precondition: target was archived on close")
             new-path   (cli/create-cmd (ctx tmp) {:title "Linker" :link [t-id]})
             new-id     (create-id new-path "linker")
@@ -918,7 +919,11 @@
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "closed" (get-in loaded [:frontmatter :status])))
         (is (= "2026-05-02T00:00:00Z" (get-in loaded [:frontmatter :closed])))
-        (is (str/includes? new-path "/archive/"))
+        ;; fs/components returns Path segments, not strings — (map str ...)
+        ;; coerces them so "archive" membership compares correctly. The
+        ;; structural claim survives platform separators (\ on Windows, / on
+        ;; POSIX); see docs/agents/testing.md "Cross-platform considerations".
+        (is (some #{"archive"} (map str (fs/components new-path))))
         (is (not (fs/exists? created))
             "live-directory file should be removed by archive auto-move"))))
 
@@ -1013,7 +1018,7 @@
             new-path (cli/close-cmd (ctx tmp) {:id id})
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= "closed" (get-in loaded [:frontmatter :status])))
-        (is (str/includes? new-path "/archive/")))))
+        (is (some #{"archive"} (map str (fs/components new-path)))))))
 
   (testing "close-cmd respects a custom :statuses + :terminal-statuses ordering"
     (with-tmp tmp
@@ -1068,7 +1073,7 @@
         (is (= "open" (get-in loaded [:frontmatter :status])))
         (is (not (contains? (:frontmatter loaded) :closed))
             "reopen should clear :closed entirely")
-        (is (not (str/includes? new-path "/archive/"))
+        (is (not (some #{"archive"} (map str (fs/components new-path))))
             "reopened file should live in the live directory again")))))
 
 (deftest reopen-cmd-json-test
@@ -1141,7 +1146,7 @@
             loaded   (store/load-one tmp ".tickets" id)
             body     (:body loaded)]
         (is (= "closed" (get-in loaded [:frontmatter :status])))
-        (is (str/includes? new-path "/archive/"))
+        (is (some #{"archive"} (map str (fs/components new-path))))
         (is (str/includes? body "## Notes"))
         (is (str/includes? body "**2026-05-01T10:00:00Z**"))
         (is (str/includes? body "fixed in deploy 42")))))

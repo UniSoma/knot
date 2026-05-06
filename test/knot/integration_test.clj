@@ -115,7 +115,8 @@
           ;; under the subdirectory we ran from. Canonicalize tmp because
           ;; macOS symlinks /var → /private/var; knot's output is canonical.
           (is (str/starts-with? (str/trim out)
-                                (str (fs/canonicalize tmp) "/.tickets/"))))))))
+                                (str (fs/path (fs/canonicalize tmp) ".tickets")
+                                     java.io.File/separator))))))))
 
 (deftest unknown-command-test
   (testing "unknown commands fail with non-zero exit and a stderr message"
@@ -730,7 +731,8 @@
       (let [{:keys [exit out err]} (run-knot tmp "create" "Routed")]
         (is (zero? exit) (str "create err=" err))
         (is (str/starts-with? (str/trim out)
-                              (str (fs/canonicalize tmp) "/tasks/"))
+                              (str (fs/path (fs/canonicalize tmp) "tasks")
+                                   java.io.File/separator))
             "ticket should be written under the configured tickets-dir"))))
 
   (testing "invalid .knot.edn fails fast with a clear stderr error"
@@ -1186,7 +1188,7 @@
             {:keys [exit out err]}
             (run-knot tmp "close" a-id "--summary" "shipped to prod")]
         (is (zero? exit) (str "close err=" err))
-        (is (str/includes? (str/trim out) "/archive/")
+        (is (some #{"archive"} (map str (fs/components (str/trim out))))
             "closed file moved to archive")
         (let [{:keys [out]} (run-knot tmp "show" a-id)]
           (is (str/includes? out "status: closed"))
