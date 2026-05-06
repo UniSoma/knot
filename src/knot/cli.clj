@@ -327,7 +327,7 @@
           (let [post            (store/load-one project-root tickets-dir full-id)
                 terminal-target? (contains? (or terminal-statuses #{}) status)
                 meta-opt        (when terminal-target?
-                                  {:meta {:archived_to (str saved)}})]
+                                  {:meta {:archived_to (fs/unixify saved)}})]
             (output/touched-ticket-json post meta-opt))
           saved)))))
 
@@ -1273,12 +1273,12 @@
              :name           project-name
              :prefix         prefix
              :config_present (boolean config-present?)}
-   :paths {:cwd          cwd
-           :project_root project-root
-           :config_path  (str (fs/path project-root ".knot.edn"))
-           :tickets_dir  tickets-dir
-           :tickets_path (str (fs/path project-root tickets-dir))
-           :archive_path (str (fs/path project-root tickets-dir store/archive-subdir))}
+   :paths {:cwd          (fs/unixify cwd)
+           :project_root (fs/unixify project-root)
+           :config_path  (fs/unixify (fs/path project-root ".knot.edn"))
+           :tickets_dir  (fs/unixify tickets-dir)
+           :tickets_path (fs/unixify (fs/path project-root tickets-dir))
+           :archive_path (fs/unixify (fs/path project-root tickets-dir store/archive-subdir))}
    :defaults {:default_assignee          (when (contains? ctx :default-assignee)
                                            (:default-assignee ctx))
               :effective_create_assignee (effective-create-assignee ctx)

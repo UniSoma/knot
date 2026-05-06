@@ -169,7 +169,7 @@
   [s]
   (if (str/ends-with? s "\n")
     (print s)
-    (println s))
+    (print (str s "\n")))
   (flush))
 
 (defn- emit-not-found-envelope!
@@ -917,7 +917,7 @@
       ;; and exit 0. `-v` is intentionally NOT wired — that slot is
       ;; reserved for a future `--verbose`.
       (when (= "--version" cmd)
-        (println version/version)
+        (println-out version/version)
         (System/exit 0))
 
       ;; Top-level / per-command help. `knot help`, `knot --help`, `knot -h`
