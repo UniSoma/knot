@@ -531,8 +531,17 @@
       (str "knot check: ok" suffix)
       (str total " issues (" errs " errors, " warns " warnings)" suffix))))
 
+(defn- prime-skill-pointer
+  "Closing sentence shared by the found/afk preambles, parameterised by
+   the topic list inside the parentheses. Centralised so a reword to the
+   wrapping template (`For the full reference (...), invoke the `knot`
+   skill.`) can't drift between the two preambles."
+  [topics]
+  (str "For the full reference (" topics "), invoke the `knot` skill."))
+
 (def ^:private prime-preamble-found
-  "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
+  (str
+   "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
 
 When the user says... → you do:
   \"what's next?\" / \"what should I work on?\"        → `knot ready`
@@ -547,10 +556,12 @@ Read commands accept `--type`, `--mode`, `--tag`, `--status`, `--assignee` filte
 
 Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `edit` keep frontmatter valid.
 
-For the full reference (lifecycle, graph ops, JSON shapes, partial-id resolution, AFK vs HITL), invoke the `knot` skill.")
+"
+   (prime-skill-pointer "lifecycle, graph ops, JSON shapes, partial-id resolution, AFK vs HITL")))
 
 (def ^:private prime-preamble-afk
-  "You are an autonomous agent picking up unblocked work in this project. Use the `knot` CLI for all ticket reads and writes — don't `cat`, `grep`, or hand-edit files under `.tickets/`.
+  (str
+   "You are an autonomous agent picking up unblocked work in this project. Use the `knot` CLI for all ticket reads and writes — don't `cat`, `grep`, or hand-edit files under `.tickets/`.
 
 Autonomous flow:
 
@@ -562,7 +573,8 @@ Autonomous flow:
 
 Don't pick up `hitl` tickets — those need a human in the loop. The `mode` field is the contract.
 
-For the full reference (lifecycle, graph ops, JSON shapes, partial-id resolution), invoke the `knot` skill.")
+"
+   (prime-skill-pointer "lifecycle, graph ops, JSON shapes, partial-id resolution")))
 
 (def ^:private prime-preamble-no-project
   "No Knot project was discovered from the current directory. Run `knot init`

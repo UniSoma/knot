@@ -1070,14 +1070,17 @@
                   :closed  (:closed fm)
                   :summary (ticket/latest-note-content (:body t))})))))
 
-(defn- in-progress-tickets
+(defn- prime-in-progress-tickets
   "Pick non-terminal tickets whose status equals `active-status` (the
    project's active lane) and sort by `:updated` descending so the
    most-recently-touched work surfaces first. Tickets without `:updated`
    sort last in stable input order. Each returned map carries
    `:prime-stale?` — true when `:updated` is `prime-stale-days` or more
    older than `now-iso`. The flag drives the `[stale]` prefix in the
-   renderer and the `\"stale\":true` field in the JSON projection."
+   renderer and the `\"stale\":true` field in the JSON projection.
+
+   Named `prime-`-prefixed because the result is decorated specifically
+   for `prime`'s consumption — not a generic in-progress selector."
   [tickets active-status now-iso]
   (->> tickets
        (filter (fn [t] (= active-status (get-in t [:frontmatter :status]))))
@@ -1148,7 +1151,7 @@
                          (seq tag)        (assoc :tag      tag)
                          (seq type)       (assoc :type     type))
           in-progress* (query/filter-tickets
-                        (in-progress-tickets all active-status now)
+                        (prime-in-progress-tickets all active-status now)
                         criteria)
           ready*       (query/ready all terminal-statuses)
           ready-filtered (query/filter-tickets ready* criteria)

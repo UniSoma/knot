@@ -177,6 +177,14 @@ knot prime --json             # bare object with snake_case keys:
                               # new ones may be added in future minor versions.
 ```
 
+The staleness flag (`stale: true`, set when an in-progress ticket's
+`:updated` is 14+ days old) appears **only on `in_progress` entries**.
+A ticket may legitimately appear in both `in_progress` and `ready` (an
+in-progress ticket with all deps closed satisfies both) — `ready`
+copies never carry `stale`. To enumerate stalled work, iterate
+`.in_progress` and filter on `stale`; do not look for the flag on
+`.ready`.
+
 `knot prime` always exits 0, including when run from a directory with
 no Knot project (the preamble in that case directs the user to `knot
 init`), when the project has zero tickets, or when only archived

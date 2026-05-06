@@ -384,6 +384,11 @@ For any decision logic, prefer `--json | jq` over parsing tables. Don't
 pipe table output through `awk`/`grep` — column widths shift and titles
 can contain whitespace. `--json` is stable.
 
+`prime --json` flags stalled in-progress work with `stale: true` (set when
+`:updated` is 14+ days old), but the flag appears **only on `in_progress`
+entries** — `ready` copies of the same ticket never carry it. Iterate
+`.in_progress` (not `.ready`) when hunting for forgotten work.
+
 ## Partial ID resolution
 
 Ids are 12-char ULID suffixes (`01` + 10 base32 chars) prefixed with the

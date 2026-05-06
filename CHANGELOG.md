@@ -259,6 +259,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- README, `.claude/skills/knot/SKILL.md`, and
+  `.claude/skills/knot/references/json-protocol.md` document the
+  `prime --json` stale-flag asymmetry: `stale: true` appears only on
+  `in_progress` entries, never on the `ready` copy of the same ticket.
+  Code behavior unchanged — narrow JSON surface preserved on purpose.
 - `knot info --bogus --json` (any unknown flag with `--json`) now emits
   the v0.3 `invalid_argument` error envelope on stdout instead of
   printing plain stderr text. Plain `knot info --bogus` (no `--json`)
