@@ -199,8 +199,32 @@
   (println-out (output/error-envelope-str error))
   (System/exit 1))
 
+(defn- extract-rel-order
+  "Walk argv and return [[:dep input] [:link input] ...] in CLI occurrence
+   order. Used by `create-handler` to honour AC9 (first failing strict
+   relationship input wins, left-to-right) — `babashka.cli` parsing
+   collects `:dep` and `:link` into separate vectors and loses the
+   interleaving. Recognises both `--flag value` and `--flag=value` forms."
+  [argv]
+  (loop [a argv, acc []]
+    (if (empty? a)
+      acc
+      (let [token (first a)]
+        (cond
+          (= "--dep" token)
+          (recur (drop 2 a) (conj acc [:dep (second a)]))
+          (str/starts-with? token "--dep=")
+          (recur (rest a) (conj acc [:dep (subs token (count "--dep="))]))
+          (= "--link" token)
+          (recur (drop 2 a) (conj acc [:link (second a)]))
+          (str/starts-with? token "--link=")
+          (recur (rest a) (conj acc [:link (subs token (count "--link="))]))
+          :else
+          (recur (rest a) acc))))))
+
 (defn- create-handler [argv]
   (let [{:keys [body-opts argv]} (extract-body-flags argv create-body-flags)
+        rel-order                (extract-rel-order argv)
         {:keys [opts args]}      (bcli/parse-args argv (spec :create))
         title (first args)
         json? (boolean (:json opts))]
@@ -209,10 +233,25 @@
     (let [opts (cond-> (-> opts
                            (merge body-opts)
                            (assoc :title title)
-                           (assoc :json? json?))
-                 (:tags opts) (assoc :tags (split-tags (:tags opts))))
-          out  (cli/create-cmd (discover-ctx) opts)]
-      (println-out (str out)))))
+                           (assoc :json? json?)
+                           (assoc :rel-order rel-order))
+                 (:tags opts) (assoc :tags (split-tags (:tags opts))))]
+      (try
+        (let [out (cli/create-cmd (discover-ctx) opts)]
+          (println-out (str out)))
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (cond
+              (and json? (= :ambiguous (:kind data)))
+              (emit-ambiguous-envelope! e data)
+
+              (and json? (= :not-found (:kind data)))
+              (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
+
+              json?
+              (emit-error-envelope! {:code "invalid_argument" :message (.getMessage e)})
+
+              :else (die (str "knot create: " (or (.getMessage e) (.toString e)))))))))))
 
 (defn- ->set
   "Coerce an opt value to a non-empty set, or nil. babashka.cli with

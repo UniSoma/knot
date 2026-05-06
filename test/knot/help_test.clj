@@ -454,6 +454,25 @@
       (is (not (contains? #{:afk :hitl} name))
           (str k " reintroduces a per-mode shortcut flag: " name)))))
 
+(deftest create-dep-link-flags-test
+  (testing ":create exposes repeatable --dep and --link flags"
+    (let [flags    (get-in help/registry [:create :flags])
+          by-name  (into {} (map (juxt :name identity) flags))
+          dep      (get by-name :dep)
+          link     (get by-name :link)]
+      (is (some? dep)  ":create must expose --dep")
+      (is (some? link) ":create must expose --link")
+      (is (= [] (:coerce dep))  "--dep is repeatable (collects into a vector)")
+      (is (= [] (:coerce link)) "--link is repeatable (collects into a vector)")
+      (is (string? (:desc dep)))
+      (is (string? (:desc link)))
+      (is (or (re-find #"(?i)lenient|missing.*ok|forward.*ref|broken.*ok" (:desc dep))
+              (re-find #"(?i)lenient|missing.*ok|forward.*ref|broken.*ok" (:desc link)))
+          "the dep/link asymmetry should be documented (dep lenient on missing)")
+      (is (or (re-find #"(?i)strict|must.*resolve|fail.*missing" (:desc link))
+              (re-find #"(?i)strict|must.*resolve|fail.*missing" (:desc dep)))
+          "--link is strict on missing/ambiguous targets"))))
+
 ;; ---- Integration tests for help routing (subprocess via babashka.process) ----
 
 (def ^:private project-root

@@ -151,6 +151,20 @@ candidates; relay them, don't guess.
   `{title, done: false}`; `knot show` synthesizes a `## Acceptance
   Criteria` checklist from these at display time. There is no body
   section to author by hand.
+- `--dep <id>` / `--link <id>` (both repeatable, one id per
+  occurrence) wire the new ticket into the graph at create time.
+  Asymmetry on missing targets:
+  - `--dep` is **lenient** — an unresolved id is kept verbatim as a
+    forward ref (matches `knot dep`'s tolerant-target contract).
+  - `--link` is **strict** — every target must resolve uniquely, or
+    the command fails before any file is written. Plain text reports
+    `knot create: ...`; `--json` returns a `not_found` /
+    `ambiguous_id` error envelope.
+  Both flags accept partial ids, dedupe equivalents that resolve to
+  the same ticket (preserving first-occurrence order), and may name
+  archived targets — a reciprocal `--link` write does not unarchive
+  the target. `--dep X --link X` records both. If multiple strict
+  inputs are bad, the first failure in left-to-right CLI order wins.
 
 Always pass `--description` when there's any context worth saving — a
 title-only ticket forces the next reader to reconstruct intent from
@@ -427,9 +441,10 @@ check                                  project-integrity scan (cycles, dangling
                                        refs, schema, archive placement)
 create                                 new ticket (-t -p -a --tags --mode
                                        -d --design --acceptance --parent
-                                       --external-ref)
-                                       --acceptance is repeatable; appends
-                                       structured frontmatter entries
+                                       --external-ref --dep --link)
+                                       --acceptance / --dep / --link are
+                                       repeatable; --dep is lenient on
+                                       missing, --link is strict
 start / status / close / reopen        lifecycle (--summary on close)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace

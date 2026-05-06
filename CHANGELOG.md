@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `knot create` gains repeatable `--dep <id>` and `--link <id>` flags
+  to wire a new ticket into the graph at create time. `--dep` is
+  lenient on missing targets (kept verbatim as a forward ref, matching
+  `knot dep`'s tolerant-target contract); `--link` is strict (every
+  target must resolve uniquely, or the command fails before any file
+  is written). Both accept partial ids, dedupe equivalents that
+  resolve to the same ticket, and may name archived targets — a
+  reciprocal `--link` write does not unarchive. `--dep X --link X` is
+  allowed and records both relationships. If multiple strict inputs
+  are bad, the first failure in left-to-right CLI order wins. A
+  reciprocal-link write failure rolls back: applied recip links are
+  reverted and the new ticket file is deleted. Plain text errors use
+  the `knot create:` prefix; `--json` returns the standard
+  `not_found` / `ambiguous_id` / `invalid_argument` envelope. Bundled
+  skill kept in sync.
+
 - New `test/knot/json_contract_test.clj` namespace pins the v0.3
   `--json` envelope contract for every read and mutating command at
   `bb test` time: schema_version + ok + data XOR error invariants

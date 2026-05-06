@@ -56,10 +56,10 @@
   "Build a frontmatter map with a stable, human-readable key order. Keys
    present in this canonical order: id, title, status, type, priority,
    mode, created, updated, assignee, parent, tags, external_refs,
-   acceptance. Optional keys are omitted when their value is
-   nil/blank/empty."
+   acceptance, deps, links. Optional keys are omitted when their value
+   is nil/blank/empty."
   [{:keys [id title status type priority assignee mode created updated
-           tags parent external-ref acceptance]}]
+           tags parent external-ref acceptance deps links]}]
   (let [pairs [[:id            id]
                [:title         title]
                [:status        status]
@@ -72,7 +72,9 @@
                [:parent        parent]
                [:tags          (when (seq tags) (vec tags))]
                [:external_refs (when (seq external-ref) (vec external-ref))]
-               [:acceptance    (when (seq acceptance) (vec acceptance))]]]
+               [:acceptance    (when (seq acceptance) (vec acceptance))]
+               [:deps          (when (seq deps) (vec deps))]
+               [:links         (when (seq links) (vec links))]]]
     (into (om/ordered-map)
           (filter (fn [[_ v]] (some? v)))
           pairs)))
@@ -104,6 +106,31 @@
            ;; deterministic 'now' for tests; fall back to wall clock
            (when-not (:now ctx) {:now (now-iso)}))))
 
+(defn- add-link
+  "Add `other` to `ticket`'s `:links`, idempotent. Returns the updated
+   ticket; nil-safe on missing `:links`."
+  [ticket other]
+  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))]
+    (if (some #{other} existing)
+      ticket
+      (assoc-in ticket [:frontmatter :links] (conj existing other)))))
+
+(defn- remove-link
+  "Remove `other` from `ticket`'s `:links`. When the resulting list is
+   empty, drop the `:links` key entirely (mirrors `undep-cmd`'s on-disk
+   cleanliness rule)."
+  [ticket other]
+  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))
+        kept     (vec (remove #{other} existing))]
+    (if (empty? kept)
+      (update ticket :frontmatter dissoc :links)
+      (assoc-in ticket [:frontmatter :links] kept))))
+
+(defn- warn!
+  "Emit a single line to stderr."
+  [msg]
+  (binding [*out* *err*] (println msg)))
+
 (defn create-cmd
   "Create a new ticket from `opts` and write it via `knot.store/save-new!`.
    Returns the saved path. `ctx` carries `:project-root`, `:prefix`, and
@@ -125,6 +152,33 @@
         gen-id   #(ticket/generate-id prefix)
         intake   (or (first-intake-status statuses active-status terminal-statuses)
                      "open")
+        rel-order (or (:rel-order opts)
+                      (concat (for [d (:dep opts)]  [:dep d])
+                              (for [l (:link opts)] [:link l])))
+        ;; one ordered pass — first strict failure (left-to-right) wins
+        resolved (mapv (fn [[kind input]]
+                         (case kind
+                           :dep  [:dep
+                                  (store/try-resolve-id
+                                   project-root tickets-dir input)]
+                           :link [:link
+                                  (get-in
+                                   (store/resolve-id
+                                    project-root tickets-dir input)
+                                   [:frontmatter :id])]))
+                       rel-order)
+        deps*    (when (some #(= :dep (first %)) resolved)
+                   (->> resolved
+                        (filter #(= :dep (first %)))
+                        (mapv second)
+                        distinct
+                        vec))
+        link-ids (when (some #(= :link (first %)) resolved)
+                   (->> resolved
+                        (filter #(= :link (first %)))
+                        (mapv second)
+                        distinct
+                        vec))
         build-fn (fn [id]
                    {:slug   slug
                     :ticket {:frontmatter
@@ -142,22 +196,44 @@
                                :parent       (:parent opts)
                                :external-ref (:external-ref opts)
                                :acceptance   (acceptance/from-titles
-                                              (:acceptance opts))})
+                                              (:acceptance opts))
+                               :deps         deps*
+                               :links        link-ids})
                              :body body}})
         saved    (store/save-new! project-root tickets-dir gen-id build-fn
-                                  {:now now :terminal-statuses terminal-statuses})]
+                                  {:now now :terminal-statuses terminal-statuses})
+        filename (str (fs/file-name saved))
+        new-id   (or (second (re-matches #"(.+?)(?:--.+)?\.md" filename))
+                     filename)
+        save-opts {:now now :terminal-statuses terminal-statuses}
+        applied   (atom [])]
+    (try
+      (doseq [tid link-ids]
+        (let [t  (store/load-one project-root tickets-dir tid)
+              t* (add-link t new-id)]
+          (store/save! project-root tickets-dir tid nil t* save-opts)
+          (swap! applied conj tid)))
+      (catch Throwable e
+        ;; Best-effort rollback: revert reciprocal links applied so far,
+        ;; then delete the new ticket file. A revert that itself fails
+        ;; emits a stderr breadcrumb and we still re-throw the original.
+        (doseq [tid @applied]
+          (try
+            (let [t  (store/load-one project-root tickets-dir tid)
+                  t* (remove-link t new-id)]
+              (store/save! project-root tickets-dir tid nil t* save-opts))
+            (catch Throwable re
+              (warn! (str "knot create: rollback of reciprocal link on "
+                          tid " failed: " (.getMessage re))))))
+        (try (fs/delete-if-exists saved)
+             (catch Throwable re
+               (warn! (str "knot create: rollback of new ticket file "
+                           saved " failed: " (.getMessage re)))))
+        (throw e)))
     (if (:json? opts)
-      (let [filename (str (fs/file-name saved))
-            id       (or (second (re-matches #"(.+?)(?:--.+)?\.md" filename))
-                         filename)]
-        (output/touched-ticket-json
-         (store/load-one project-root tickets-dir id)))
+      (output/touched-ticket-json
+       (store/load-one project-root tickets-dir new-id))
       saved)))
-
-(defn- warn!
-  "Emit a single line to stderr."
-  [msg]
-  (binding [*out* *err*] (println msg)))
 
 (defn- resolve-or-nil
   "Run `store/resolve-id` and translate a `:not-found` ex-info into nil so
@@ -357,15 +433,6 @@
            (store/load-one project-root tickets-dir from-id))
           saved)))))
 
-(defn- add-link
-  "Add `other` to `ticket`'s `:links`, idempotent. Returns the updated
-   ticket; nil-safe on missing `:links`."
-  [ticket other]
-  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))]
-    (if (some #{other} existing)
-      ticket
-      (assoc-in ticket [:frontmatter :links] (conj existing other)))))
-
 (defn link-cmd
   "Create symmetric `:links` between every pair of ids in `(:ids opts)`.
    Requires two or more ids. Each id may be partial — `store/resolve-id`
@@ -404,17 +471,6 @@
         (output/touched-tickets-json
          (mapv #(store/load-one project-root tickets-dir %) full-ids))
         paths))))
-
-(defn- remove-link
-  "Remove `other` from `ticket`'s `:links`. When the resulting list is
-   empty, drop the `:links` key entirely (mirrors `undep-cmd`'s on-disk
-   cleanliness rule)."
-  [ticket other]
-  (let [existing (vec (or (get-in ticket [:frontmatter :links]) []))
-        kept     (vec (remove #{other} existing))]
-    (if (empty? kept)
-      (update ticket :frontmatter dissoc :links)
-      (assoc-in ticket [:frontmatter :links] kept))))
 
 (defn unlink-cmd
   "Remove the symmetric link between `(:from opts)` and `(:to opts)`.

@@ -2100,3 +2100,114 @@
           (is (= [] (get-in parsed [:data :deps])))
           (is (= [] (get-in parsed [:data :links]))))))))
 
+(deftest create-dep-link-end-to-end-test
+  (testing "knot create --dep <existing> stores the canonical id"
+    (with-tmp tmp
+      (let [{t-out :out}
+            (run-knot tmp "create" "Target")
+            t-id (id-of t-out "target")
+            {:keys [exit out err]}
+            (run-knot tmp "create" "Wires" "--dep" t-id)]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (re-find (re-pattern (str "(?m)^- " t-id "$")) text)
+              "deps yaml list should carry the canonical id")))))
+
+  (testing "knot create --link <existing> writes reciprocal link on the target"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "A")
+            a-id (id-of a-out "a")
+            {:keys [exit out err]}
+            (run-knot tmp "create" "Linker" "--link" a-id)
+            new-id (id-of out "linker")
+            a-text (:out (run-knot tmp "show" a-id))]
+        (is (zero? exit) (str "create err=" err))
+        (is (re-find (re-pattern (str "(?m)^- " new-id "$")) a-text)
+            "target A reciprocates the link to the new ticket"))))
+
+  (testing "knot create --link <missing> plain text fails with `knot create:` prefix"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "Bad" "--link" "kno-ghost")]
+        (is (= 1 exit) (str "expected exit 1, out=" out))
+        (is (re-find #"^knot create:" err)
+            "stderr must use the `knot create:` prefix"))))
+
+  (testing "knot create --link <missing> --json emits a not_found error envelope"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "Bad" "--link" "kno-ghost" "--json")]
+        (is (= 1 exit) (str "expected exit 1, err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= false (:ok parsed)))
+          (is (= "not_found" (get-in parsed [:error :code])))))))
+
+  (testing "knot create --link <ambiguous> --json emits an ambiguous_id envelope"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "A")
+            _            (run-knot tmp "create" "B")
+            ;; both seed ids share the auto-derived project prefix; pass
+            ;; the bare prefix so layer-2 prefix match is ambiguous
+            prefix (->> (str (fs/file-name (str/trim a-out)))
+                        (re-find #"^([^-]+)-")
+                        second)
+            {:keys [exit out]}
+            (run-knot tmp "create" "Bad" "--link" (str prefix "-") "--json")]
+        (is (= 1 exit))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= false (:ok parsed)))
+          (is (= "ambiguous_id" (get-in parsed [:error :code])))
+          (is (vector? (get-in parsed [:error :candidates])))))))
+
+  (testing "knot create --link <missing> aborts before any file is written"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [before (set (map (comp str fs/file-name)
+                             (fs/list-dir (fs/path tmp ".tickets"))))
+            _ (run-knot tmp "create" "Bad" "--link" "kno-ghost" "--json")
+            after (set (map (comp str fs/file-name)
+                            (fs/list-dir (fs/path tmp ".tickets"))))]
+        (is (= before after)
+            "no ticket file should be created when a strict --link fails"))))
+
+  (testing "knot create --dep <missing> succeeds (lenient on dep)"
+    (with-tmp tmp
+      (let [{:keys [exit out err]}
+            (run-knot tmp "create" "Forward" "--dep" "kno-ghost")]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (str/includes? text "deps:"))
+          (is (str/includes? text "- kno-ghost"))))))
+
+  (testing "knot create --dep X --link X records both (cross-flag value reuse)"
+    (with-tmp tmp
+      (let [{t-out :out} (run-knot tmp "create" "Target")
+            t-id (id-of t-out "target")
+            {:keys [exit out err]}
+            (run-knot tmp "create" "Both" "--dep" t-id "--link" t-id)]
+        (is (zero? exit) (str "create err=" err))
+        (let [text (slurp (str/trim out))]
+          (is (re-find (re-pattern (str "(?m)^deps:\\n- " t-id "$")) text))
+          (is (re-find (re-pattern (str "(?m)^links:\\n- " t-id "$")) text))))))
+
+  (testing "missing title fails before relationship resolution (no --link probe)"
+    (with-tmp tmp
+      (let [{:keys [exit err]}
+            (run-knot tmp "create" "" "--link" "kno-ghost")]
+        (is (= 1 exit))
+        (is (re-find #"(?i)title is required" err)
+            "title-missing error is surfaced even though --link target is also bad"))))
+
+  (testing "successful plain-text create still prints only the new ticket path"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "A")
+            a-id (id-of a-out "a")
+            {:keys [exit out err]}
+            (run-knot tmp "create" "Wires" "--dep" a-id "--link" a-id)]
+        (is (zero? exit) (str "create err=" err))
+        (let [trimmed (str/trim out)]
+          (is (str/ends-with? trimmed "--wires.md")
+              "stdout is just the saved-path line")
+          (is (= 1 (count (str/split-lines trimmed)))
+              "stdout has exactly one line — no extra prose"))))))
+

@@ -1,37 +1,39 @@
 ---
 id: kno-01kqsj9fy8zx
 title: Add --dep and --link arguments to `knot create`
-status: open
+status: in_progress
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-04T13:19:25.128614479Z'
-updated: '2026-05-06T00:56:46.957286855Z'
+updated: '2026-05-06T02:43:38.878009118Z'
 acceptance:
 - title: '`knot create --help` documents repeatable long-form `--dep <id>` and `--link <id>` flags, one id per occurrence, and calls out that `--dep` is lenient on missing targets while `--link` is strict.'
-  done: false
+  done: true
 - title: '`knot create "T" --dep <existing> --dep <missing>` succeeds, canonicalizes resolved dep ids, preserves unresolved deps verbatim, and dedupes duplicates after resolution while preserving first-occurrence order.'
-  done: false
+  done: true
 - title: '`knot create "T" --link <a> --link <b>` succeeds, writes reciprocal links on every touched ticket, and leaves archived targets archived.'
-  done: false
+  done: true
 - title: '`knot create "T" --dep X --link X` is allowed and records both relationships.'
-  done: false
+  done: true
 - title: Repeating the same dep or link, including equivalent partial/full ids that resolve to the same ticket, does not create duplicate entries.
-  done: false
+  done: true
 - title: 'Any strict `--link` failure aborts the command before ticket creation. Plain-text mode reports `knot create: ...`; `--json` returns a structured error envelope.'
-  done: false
+  done: true
 - title: If several strict relationship inputs are bad, the surfaced error is the first failing one in left-to-right CLI order.
-  done: false
+  done: true
 - title: 'Basic create validation still wins: a missing title fails before relationship resolution.'
-  done: false
+  done: true
 - title: Successful plain-text `create` still prints only the new ticket path.
-  done: false
+  done: true
 - title: Successful `create --json` still returns only the created ticket, adds no new `meta`, and includes the final `deps` and `links` state.
-  done: false
+  done: true
 - title: A simulated multi-file write failure during reciprocal-link application fails loudly and attempts rollback rather than silently leaving success state.
-  done: false
+  done: true
 links:
 - kno-01kqxchq706w
+tags:
+- v0.3
 ---
 
 ## Description

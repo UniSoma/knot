@@ -187,9 +187,18 @@
                   {:name :description :alias :d :body? true :desc "Body content for the Description section."}
                   {:name :design      :body? true :desc "Body content for the Design section."}
                   {:name :acceptance  :coerce []
-                   :desc "Acceptance criterion title (repeatable). Stored in frontmatter; rendered by `knot show`."}]
+                   :desc "Acceptance criterion title (repeatable). Stored in frontmatter; rendered by `knot show`."}
+                  {:name :dep :coerce []
+                   :desc (str "Add a dep edge: the new ticket depends on <id> (repeatable). "
+                              "Lenient on missing targets — unresolved ids are kept verbatim "
+                              "as a forward ref.")}
+                  {:name :link :coerce []
+                   :desc (str "Add a symmetric link to <id> (repeatable). Strict: every target "
+                              "must resolve uniquely, or the command fails before any write.")}]
     :examples    [{:cmd "knot create \"Fix login bug\" -p 1 --tags auth,p0"
-                   :note "Create a ticket at priority 1 with two tags."}]}
+                   :note "Create a ticket at priority 1 with two tags."}
+                  {:cmd "knot create \"Refactor X\" --dep kno-01abc --link kno-01def"
+                   :note "Wire the new ticket into the graph at create time."}]}
 
    :show
    {:group       :listing

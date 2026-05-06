@@ -163,6 +163,245 @@
         (is (not (contains? parsed :meta))
             "create emits no :meta slot")))))
 
+(defn- create-id [path slug-pat]
+  (->> (fs/file-name path)
+       (re-matches (re-pattern (str "(.+)--" slug-pat "\\.md")))
+       second))
+
+(deftest create-cmd-deps-test
+  (testing "--deps with a full existing id stores the canonical id in :deps"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (create-id target-path "target")
+            new-path    (cli/create-cmd (ctx tmp)
+                                        {:title "New" :dep [target-id]})
+            new-id      (create-id new-path "new")
+            loaded      (store/load-one tmp ".tickets" new-id)]
+        (is (= [target-id] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "--deps with a missing id preserves it verbatim (lenient forward ref)"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp)
+                                   {:title "New" :dep ["kno-ghost"]})
+            new-id (create-id path "new")
+            loaded (store/load-one tmp ".tickets" new-id)]
+        (is (= ["kno-ghost"] (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "--deps canonicalizes resolved ids and preserves unresolved verbatim"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (create-id target-path "target")
+            ;; partial id (post-prefix ULID prefix) should resolve
+            partial     (subs target-id (count "kno-") (+ (count "kno-") 6))
+            path        (cli/create-cmd
+                         (ctx tmp)
+                         {:title "New" :dep [partial "kno-ghost"]})
+            new-id      (create-id path "new")
+            loaded      (store/load-one tmp ".tickets" new-id)]
+        (is (= [target-id "kno-ghost"]
+               (vec (get-in loaded [:frontmatter :deps])))))))
+
+  (testing "--deps with full + partial id resolving to same ticket dedupes (first wins)"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (create-id target-path "target")
+            partial     (subs target-id (count "kno-") (+ (count "kno-") 6))
+            path        (cli/create-cmd
+                         (ctx tmp)
+                         {:title "New" :dep [target-id partial target-id]})
+            new-id      (create-id path "new")
+            loaded      (store/load-one tmp ".tickets" new-id)]
+        (is (= [target-id]
+               (vec (get-in loaded [:frontmatter :deps]))))))))
+
+(deftest create-cmd-links-test
+  (testing "--links writes the canonical id on the new ticket and reciprocates on the target"
+    (with-tmp tmp
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "A"})
+            b-path (cli/create-cmd (ctx tmp) {:title "B"})
+            a-id   (create-id a-path "a")
+            b-id   (create-id b-path "b")
+            new-path (cli/create-cmd (ctx tmp)
+                                     {:title "New" :link [a-id b-id]})
+            new-id (create-id new-path "new")
+            loaded-new (store/load-one tmp ".tickets" new-id)
+            loaded-a   (store/load-one tmp ".tickets" a-id)
+            loaded-b   (store/load-one tmp ".tickets" b-id)]
+        (is (= [a-id b-id]
+               (vec (get-in loaded-new [:frontmatter :links])))
+            "new ticket carries both link targets")
+        (is (= [new-id]
+               (vec (get-in loaded-a [:frontmatter :links])))
+            "target A links back to the new ticket")
+        (is (= [new-id]
+               (vec (get-in loaded-b [:frontmatter :links])))
+            "target B links back to the new ticket"))))
+
+  (testing "--links with a missing target throws :not-found and writes no file"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [before (set (fs/list-dir (fs/path tmp ".tickets")))]
+        (try
+          (cli/create-cmd (ctx tmp) {:title "New" :link ["kno-ghost"]})
+          (is false "expected :not-found ex-info")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :not-found (:kind (ex-data e))))))
+        (is (= before (set (fs/list-dir (fs/path tmp ".tickets"))))
+            "no ticket file was written"))))
+
+  (testing "--links with an ambiguous partial throws :ambiguous and writes no file"
+    (with-tmp tmp
+      ;; deliberately seed two tickets so a short partial is ambiguous
+      (let [_ (cli/create-cmd (ctx tmp) {:title "A"})
+            _ (cli/create-cmd (ctx tmp) {:title "B"})
+            before (set (fs/list-dir (fs/path tmp ".tickets")))]
+        (try
+          ;; bare prefix with no characters → matches every ticket
+          (cli/create-cmd (ctx tmp) {:title "New" :link ["kno-"]})
+          (is false "expected :ambiguous ex-info")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :ambiguous (:kind (ex-data e))))))
+        (is (= before (set (fs/list-dir (fs/path tmp ".tickets"))))
+            "no ticket file was written"))))
+
+  (testing "--deps X --links X records both relationships against the same ticket"
+    (with-tmp tmp
+      (let [t-path  (cli/create-cmd (ctx tmp) {:title "Target"})
+            t-id    (create-id t-path "target")
+            new-path (cli/create-cmd (ctx tmp)
+                                     {:title "New"
+                                      :dep  [t-id]
+                                      :link [t-id]})
+            new-id  (create-id new-path "new")
+            loaded-new (store/load-one tmp ".tickets" new-id)
+            loaded-t   (store/load-one tmp ".tickets" t-id)]
+        (is (= [t-id] (vec (get-in loaded-new [:frontmatter :deps]))))
+        (is (= [t-id] (vec (get-in loaded-new [:frontmatter :links]))))
+        (is (= [new-id] (vec (get-in loaded-t [:frontmatter :links])))
+            "target reciprocates the link only (not also a dep)")
+        (is (nil? (get-in loaded-t [:frontmatter :deps]))
+            "target dep list is unchanged"))))
+
+  (testing "--links with full + partial id resolving to same ticket dedupes (first wins)"
+    (with-tmp tmp
+      (let [t-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            t-id   (create-id t-path "target")
+            partial (subs t-id (count "kno-") (+ (count "kno-") 6))
+            new-path (cli/create-cmd (ctx tmp)
+                                     {:title "New"
+                                      :link [t-id partial t-id]})
+            new-id (create-id new-path "new")
+            loaded-new (store/load-one tmp ".tickets" new-id)
+            loaded-t   (store/load-one tmp ".tickets" t-id)]
+        (is (= [t-id] (vec (get-in loaded-new [:frontmatter :links]))))
+        (is (= [new-id] (vec (get-in loaded-t [:frontmatter :links])))
+            "target reciprocates exactly once, regardless of dupes on input"))))
+
+  (testing "--link to an archived target reciprocates without unarchiving"
+    (with-tmp tmp
+      (let [t-path     (cli/create-cmd (ctx tmp) {:title "Target"})
+            t-id       (create-id t-path "target")
+            closed-path (cli/close-cmd (ctx tmp) {:id t-id})
+            _ (assert (str/includes? (str closed-path) "/archive/")
+                      "precondition: target was archived on close")
+            new-path   (cli/create-cmd (ctx tmp) {:title "Linker" :link [t-id]})
+            new-id     (create-id new-path "linker")
+            t-after    (store/load-one tmp ".tickets" t-id)]
+        (is (= [new-id] (vec (get-in t-after [:frontmatter :links])))
+            "archived target gets the reciprocal link")
+        (is (= "closed" (get-in t-after [:frontmatter :status]))
+            "archived target keeps its terminal status (no reopen)")
+        (let [archive-files (set (map (comp str fs/file-name)
+                                      (fs/list-dir (fs/path tmp ".tickets" "archive"))))]
+          (is (some #(str/includes? % t-id) archive-files)
+              "archived target file remains under .tickets/archive/"))))))
+
+(deftest create-cmd-rollback-on-recip-failure-test
+  (testing "a reciprocal write failure rolls back: new ticket deleted, applied recip links reverted"
+    (with-tmp tmp
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "A"})
+            b-path (cli/create-cmd (ctx tmp) {:title "B"})
+            a-id   (create-id a-path "a")
+            b-id   (create-id b-path "b")
+            before (set (fs/list-dir (fs/path tmp ".tickets")))
+            ;; first save! is the recip to A, second is the recip to B
+            recip-count (atom 0)
+            orig-save store/save!]
+        (with-redefs [store/save!
+                      (fn [project-root tickets-dir id slug ticket save-opts]
+                        (swap! recip-count inc)
+                        (if (and (= 2 @recip-count)
+                                 (= id b-id))
+                          (throw (ex-info "simulated reciprocal write failure"
+                                          {:simulated true}))
+                          (orig-save project-root tickets-dir id slug ticket save-opts)))]
+          (try
+            (cli/create-cmd (ctx tmp)
+                            {:title "New" :link [a-id b-id]})
+            (is false "expected exception")
+            (catch clojure.lang.ExceptionInfo e
+              (is (:simulated (ex-data e))
+                  "original failure propagates loudly"))))
+        (is (= before (set (fs/list-dir (fs/path tmp ".tickets"))))
+            "new ticket file deleted on rollback (no extra files)")
+        (let [a-loaded (store/load-one tmp ".tickets" a-id)
+              b-loaded (store/load-one tmp ".tickets" b-id)]
+          (is (nil? (get-in a-loaded [:frontmatter :links]))
+              "A's reciprocal link was reverted")
+          (is (nil? (get-in b-loaded [:frontmatter :links]))
+              "B never had a link to revert"))))))
+
+(deftest create-cmd-deps-links-json-test
+  (testing "create --json with --deps and --links returns final state, no :meta slot"
+    (with-tmp tmp
+      (let [a-path (cli/create-cmd (ctx tmp) {:title "A"})
+            b-path (cli/create-cmd (ctx tmp) {:title "B"})
+            a-id   (create-id a-path "a")
+            b-id   (create-id b-path "b")
+            out    (cli/create-cmd
+                    (ctx tmp)
+                    {:title "New"
+                     :dep   [a-id]
+                     :link  [b-id]
+                     :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= 1 (:schema_version parsed)))
+        (is (= true (:ok parsed)))
+        (is (not (contains? parsed :meta))
+            "create still emits no :meta slot, even with deps/links")
+        (is (= [a-id] (get-in parsed [:data :deps]))
+            ":data.deps reflects the resolved dep")
+        (is (= [b-id] (get-in parsed [:data :links]))
+            ":data.links reflects the resolved link")))))
+
+(deftest create-cmd-rel-order-test
+  (testing ":rel-order drives strict-failure left-to-right across --dep and --link"
+    (with-tmp tmp
+      ;; seed two tickets so a bare prefix is ambiguous
+      (let [_ (cli/create-cmd (ctx tmp) {:title "A"})
+            _ (cli/create-cmd (ctx tmp) {:title "B"})]
+        (testing "link-missing before dep-ambiguous → :not-found wins"
+          (try
+            (cli/create-cmd (ctx tmp)
+                            {:title     "N"
+                             :rel-order [[:link "kno-ghost"] [:dep "kno-"]]})
+            (is false "expected ex-info")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= :not-found (:kind (ex-data e)))))))
+        (testing "dep-ambiguous before link-missing → :ambiguous wins"
+          (try
+            (cli/create-cmd (ctx tmp)
+                            {:title     "N"
+                             :rel-order [[:dep "kno-"] [:link "kno-ghost"]]})
+            (is false "expected ex-info")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= :ambiguous (:kind (ex-data e)))))))
+        (testing "no file is written for either failed call"
+          (let [files (->> (fs/list-dir (fs/path tmp ".tickets"))
+                           (map (comp str fs/file-name)))]
+            (is (= 2 (count files))
+                "still only the two seed tickets")))))))
+
 (deftest create-cmd-title-in-frontmatter-test
   (testing "title is written into frontmatter (not just into the body H1)"
     (with-tmp tmp
