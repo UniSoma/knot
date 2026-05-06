@@ -24,7 +24,7 @@ asymmetries.
 | `ok`             | boolean  | Success discriminator. See *The `ok` discriminator* below for the one carve-out (`knot check`).    |
 | `data`           | varies   | Present on success. Shape depends on the command — see *Per-command `data`*.                       |
 | `error`          | object   | Present on failure. Always carries `code` and `message`; some codes carry extra fields.            |
-| `meta`           | object   | Optional. Currently only `meta.archived_to` on terminal-status mutations (`close`, terminal `status`). |
+| `meta`           | object   | Optional. Currently only `meta.archived_to` on terminal-status mutations (`close`, terminal `status`). Path is POSIX-normalized (forward slashes) on every platform. |
 
 ### Stable invariants
 
@@ -256,6 +256,10 @@ Optional keys that may be present:
 `counts` uses raw filesystem listing (top-level `*.md` files only —
 no parsing). For health verdicts and integrity validation, use
 `knot check`.
+
+All path strings under `paths` are POSIX-normalized (forward slashes)
+on every platform — Windows callers don't have to branch on
+`os.name`. Same rule as `meta.archived_to`.
 
 ### `check` shape
 

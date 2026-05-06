@@ -358,6 +358,8 @@ with the archive path:
  "meta": {"archived_to": ".tickets/archive/kno-01abc--…md"}}
 ```
 
+`archived_to` is POSIX-normalized (forward slashes) on every platform — Windows callers don't have to branch on `os.name`. The same rule applies to `info --json` path fields (`paths.*`).
+
 Mutating-command error envelopes mirror the read-side contract:
 missing ids emit `{ok:false, error:{code:"not_found", ...}}`
 (exit 1); partial-id ambiguity emits `code: "ambiguous_id"` with a

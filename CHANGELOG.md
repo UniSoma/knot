@@ -320,6 +320,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values still omit the field — the default is injected only at the
   JSON boundary.
 
+- Cross-platform stability: `--json` envelopes emit POSIX-normalized
+  paths on every OS — `meta.archived_to` (close/terminal-status) and
+  `info --json`'s `paths.*` (cwd, project_root, config_path,
+  tickets_dir, tickets_path, archive_path) all flow through
+  `babashka.fs/unixify`, so JSON consumers don't have to branch on
+  `os.name`. Stdout paths stay native (humans copy-paste them into
+  the local shell). Stdout also uses `\n` line endings on every
+  platform — Babashka's Windows JVM was emitting `\r\n` via `println`,
+  surprising scripts that compared exact stdout (e.g. `knot --version`
+  output). Bundled skill (`SKILL.md`, `references/json-protocol.md`)
+  and `docs/agents/testing.md` ("Cross-platform considerations")
+  document the path-policy and test rules. CI now treats
+  `windows-latest` as a blocking gate; `continue-on-error` was dropped
+  from the matrix.
+
 ## [0.2.0] - 2026-04-30
 
 ### Added
