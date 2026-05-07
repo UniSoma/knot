@@ -93,6 +93,7 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "what's open for <user>?" / "my tickets"                | `knot list --assignee <user>`                                |
 | "what's blocked?"                                       | `knot blocked`                                               |
 | "what did I close recently?"                            | `knot closed --limit 10`                                     |
+| "what's ready to close?" / "what's done?"               | `knot prime` (Ready to close section) — active tickets whose AC are all checked |
 | "show me <id>" / "tell me about <id>"                   | `knot show <id>`                                             |
 | "let's start <id>" / "begin <id>"                       | `knot show <id>`, then `knot start <id>`                     |
 | "I'm done" / "shipped" / "close this"                   | `knot close <id> --summary "<what shipped>"`                 |
@@ -445,6 +446,25 @@ can contain whitespace. `--json` is stable.
 `:updated` is 14+ days old), but the flag appears **only on `in_progress`
 entries** — `ready` copies of the same ticket never carry it. Iterate
 `.in_progress` (not `.ready`) when hunting for forgotten work.
+
+`prime --json` also exposes `data.ready_to_close` — a parallel array to
+`in_progress` and `ready` carrying active-status tickets whose every
+acceptance entry is checked. Same body-less compact ticket shape; no
+derived `acceptance_progress` field. The same tickets do **not** appear
+in `data.in_progress` (mutually exclusive partition). Vacuously-complete
+tickets (no AC list) deliberately do not migrate — only tickets with an
+explicit fully-checked checklist count. The text renderer surfaces the
+matching `## Ready to close` section between `## In Progress` and
+`## Ready`, omitted entirely when empty.
+
+Listing tables (`knot ls`, `knot ready`, `knot blocked`, `knot closed`)
+gain a conditional `AC` column rendered as `d/t` (e.g. `2/5`)
+immediately before `TITLE`. The column is omitted entirely when no
+ticket in the result set has acceptance, so quiet projects don't pay
+the width cost. Tickets without AC render as `-`. Force-closed terminal
+tickets render their partial counts (`2/5`) — useful audit signal when
+scanning archive. `ls --json` is unchanged: raw `:acceptance` already
+passes through.
 
 ## Partial ID resolution
 

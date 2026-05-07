@@ -863,6 +863,7 @@
         (is (map? data))
         (is (map? (:project data)))
         (is (vector? (:in_progress data)))
+        (is (vector? (:ready_to_close data)))
         (is (vector? (:ready data)))
         (is (boolean? (:ready_truncated data)))
         (is (integer? (:ready_remaining data)))

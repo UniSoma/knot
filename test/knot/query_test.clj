@@ -467,3 +467,35 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"unknown criterion key :taggs"
                             (doall (query/filter-tickets ts {:taggs #{"x"}})))))))
+
+(deftest ready-to-close?-test
+  (testing "true when status equals active-status, has AC, and every AC is done"
+    (let [t (ft "a" :status "in_progress"
+                :acceptance [{:title "x" :done true}
+                             {:title "y" :done true}])]
+      (is (true? (query/ready-to-close? t "in_progress")))))
+
+  (testing "false when status differs from active-status (even with all AC done)"
+    (let [t (ft "a" :status "open"
+                :acceptance [{:title "x" :done true}])]
+      (is (false? (query/ready-to-close? t "in_progress")))))
+
+  (testing "false when AC is empty — vacuously-complete must NOT trigger ready-to-close"
+    (let [t (ft "a" :status "in_progress" :acceptance [])]
+      (is (false? (query/ready-to-close? t "in_progress")))))
+
+  (testing "false when AC key is absent (nil)"
+    (let [t (ft "a" :status "in_progress")]
+      (is (false? (query/ready-to-close? t "in_progress")))))
+
+  (testing "false when at least one AC entry is undone"
+    (let [t (ft "a" :status "in_progress"
+                :acceptance [{:title "x" :done true}
+                             {:title "y" :done false}])]
+      (is (false? (query/ready-to-close? t "in_progress")))))
+
+  (testing "predicate is keyed off the project's active-status, not the literal \"in_progress\""
+    (let [t (ft "a" :status "active"
+                :acceptance [{:title "x" :done true}])]
+      (is (true? (query/ready-to-close? t "active")))
+      (is (false? (query/ready-to-close? t "in_progress"))))))

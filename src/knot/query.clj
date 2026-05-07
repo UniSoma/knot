@@ -1,6 +1,7 @@
 (ns knot.query
   "Pure graph algorithms over ticket sequences:
-   cycle detection, dep-tree, ready/blocked, filters.")
+   cycle detection, dep-tree, ready/blocked, filters."
+  (:require [knot.acceptance :as acceptance]))
 
 (defn non-terminal
   "Return only those tickets whose `:status` is not in `terminal-statuses`.
@@ -152,6 +153,19 @@
     (if (zero? cmp)
       (compare cb ca)
       cmp)))
+
+(defn ready-to-close?
+  "True when `ticket` is in the project's `active-status` lane, has at
+   least one acceptance entry, and every entry is `:done`. The empty/nil
+   AC short-circuit is deliberate — `acceptance/complete?` is vacuously
+   true on no AC, but a ticket with no checklist isn't 'ready to close',
+   it's just normal in-progress work."
+  [ticket active-status]
+  (let [fm (:frontmatter ticket)
+        ac (:acceptance fm)]
+    (boolean (and (= (:status fm) active-status)
+                  (seq ac)
+                  (acceptance/complete? ac)))))
 
 (defn ready
   "Return live (non-terminal) tickets whose every `:deps` entry resolves to

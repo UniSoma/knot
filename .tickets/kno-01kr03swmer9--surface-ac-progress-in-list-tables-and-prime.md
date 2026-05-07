@@ -1,66 +1,66 @@
 ---
 id: kno-01kr03swmer9
 title: Surface AC progress in list tables and prime
-status: open
+status: in_progress
 type: task
 priority: 2
 mode: afk
 created: '2026-05-07T02:20:54.791397129Z'
-updated: '2026-05-07T02:20:54.791397129Z'
+updated: '2026-05-07T21:45:22.601030268Z'
 tags:
 - v0.3
 - acceptance
 acceptance:
 - title: ls-columns gains an AC column inserted immediately before :title.
-  done: false
+  done: true
 - title: Cell renders as "d/t" via acceptance/progress for tickets with AC; renders as "-" for tickets without AC.
-  done: false
+  done: true
 - title: ls-table omits the AC column header and the column entirely when no ticket in the input has (seq :acceptance).
-  done: false
+  done: true
 - title: Conditional column propagates to ls, ready, blocked, closed views.
-  done: false
+  done: true
 - title: Closed view shows the AC column; force-closed tickets render as e.g. 2/5 (audit signal).
-  done: false
+  done: true
 - title: prime-in-progress-line and prime-ready-line render an AC slot before title when any ticket in the section has AC; otherwise the slot is omitted.
-  done: false
+  done: true
 - title: knot.query/ready-to-close? [ticket active-status] returns (and (= status active-status) (seq ac) (acceptance/complete? ac)).
-  done: false
+  done: true
 - title: prime-cmd data assembly partitions active-status tickets so a ticket appears in either :ready-to-close or :in-progress, never both.
-  done: false
+  done: true
 - title: 'prime-text renders ## Ready to close between ## In Progress and ## Ready.'
-  done: false
+  done: true
 - title: Ready to close section uses the in-progress line shape (id, type, mode, pri, age, ac, title — 7 cols when AC slot is present; 6 cols when omitted).
-  done: false
+  done: true
 - title: Ready to close section is sorted by :updated descending.
-  done: false
+  done: true
 - title: Ready to close section is uncapped (no "... +N more" footer).
-  done: false
+  done: true
 - title: Ready to close section is omitted entirely when no tickets match the predicate.
-  done: false
+  done: true
 - title: 'Hitl nudge for Ready to close: "All acceptance criteria are checked — close with knot close <id> --summary ...".'
-  done: false
+  done: true
 - title: 'Afk nudge for Ready to close: "Close these before grabbing new tickets."'
-  done: false
+  done: true
 - title: prime-json gains a ready_to_close array parallel to in_progress, ready, and recently_closed, with the same per-ticket projection as in_progress.
-  done: false
+  done: true
 - title: No acceptance_progress derived field is added to per-ticket JSON projections.
-  done: false
+  done: true
 - title: ls --json output shape is unchanged (raw acceptance pass-through).
-  done: false
+  done: true
 - title: 'Tests cover: column conditional on/off based on result set; empty cell renders as "-"; column position immediately before TITLE.'
-  done: false
+  done: true
 - title: 'Tests cover: prime line shape with and without the AC slot; partition correctness (active + all AC done → ready-to-close, not in-progress).'
-  done: false
+  done: true
 - title: 'Tests cover: section ordering in prime-text; omit-when-empty for Ready to close; sort order; ready_to_close JSON shape parity with text section.'
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md updated with the new column, prime section, and JSON shape in the same commit.
-  done: false
+  done: true
 - title: 'CHANGELOG entry under [Unreleased]/Added: AC column, AC progress in prime lines, Ready to close section, ready_to_close JSON array.'
-  done: false
+  done: true
 - title: README listing/prime sections mention AC visibility.
-  done: false
+  done: true
 - title: bb test passes; existing snapshot tests for prime-text, prime-json, and ls-table updated; clj-kondo --lint src test baseline preserved.
-  done: false
+  done: true
 deps:
 - kno-01kr03rmk9p9
 ---

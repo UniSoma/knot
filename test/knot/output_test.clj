@@ -412,6 +412,81 @@
         (is (re-find #"\[36mopen" out)
             "first non-active non-terminal lane derived from config/defaults wraps in :cyan SGR (36)")))))
 
+(def ^:private sample-ls-tickets-with-ac
+  [{:frontmatter {:id "kno-01abcd0001"
+                  :title "Has acceptance"
+                  :status "open"
+                  :priority 2
+                  :mode "afk"
+                  :type "task"
+                  :assignee "alice"
+                  :acceptance [{:title "x" :done true}
+                               {:title "y" :done false}
+                               {:title "z" :done false}]}
+    :body ""}
+   {:frontmatter {:id "kno-01abcd0002"
+                  :title "No acceptance"
+                  :status "in_progress"
+                  :priority 0
+                  :mode "hitl"
+                  :type "bug"
+                  :assignee "bob"}
+    :body ""}])
+
+(deftest ls-table-ac-column-shown-when-any-ticket-has-acceptance-test
+  (testing "AC column header appears when at least one ticket has (seq :acceptance)"
+    (let [out (output/ls-table sample-ls-tickets-with-ac {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bAC\b" first-line)
+          "AC header surfaces when any input ticket has acceptance")))
+
+  (testing "AC column appears between ASSIGNEE and TITLE"
+    (let [out (output/ls-table sample-ls-tickets-with-ac {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          ac-i    (str/index-of first-line "AC")
+          title-i (str/index-of first-line "TITLE")
+          assignee-i (str/index-of first-line "ASSIGNEE")]
+      (is (every? some? [ac-i title-i assignee-i]))
+      (is (< assignee-i ac-i title-i)
+          "AC sits between ASSIGNEE and TITLE")))
+
+  (testing "row with AC renders d/t (e.g. 1/3)"
+    (let [out (output/ls-table sample-ls-tickets-with-ac {:color? false :tty? false})]
+      (is (re-find #"\b1/3\b" out)
+          "ticket with 1 of 3 done renders 1/3 in its AC cell")))
+
+  (testing "row without AC renders \"-\""
+    (let [out (output/ls-table sample-ls-tickets-with-ac {:color? false :tty? false})
+          line (some (fn [l] (when (str/includes? l "kno-01abcd0002") l))
+                     (str/split-lines out))]
+      (is (some? line))
+      (is (re-find #"bob\s+-\s+No acceptance" line)
+          "missing AC renders as `-` in the AC column"))))
+
+(deftest ls-table-ac-column-omitted-when-no-ticket-has-acceptance-test
+  (testing "AC column header is absent when no input ticket has acceptance"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bAC\b" first-line))
+          "no AC header when no ticket has acceptance"))))
+
+(deftest ls-table-ac-column-on-closed-tickets-test
+  (testing "force-closed terminal tickets render partial progress (audit signal)"
+    (let [tickets [{:frontmatter {:id "kno-01force001"
+                                  :title "Force-closed with open AC"
+                                  :status "closed"
+                                  :priority 2 :mode "afk" :type "task"
+                                  :assignee "alice"
+                                  :acceptance [{:title "x" :done true}
+                                               {:title "y" :done true}
+                                               {:title "z" :done false}
+                                               {:title "w" :done false}
+                                               {:title "v" :done false}]}
+                    :body ""}]
+          out (output/ls-table tickets {:color? false :tty? false})]
+      (is (re-find #"\b2/5\b" out)
+          "force-closed ticket with 2 of 5 AC done renders 2/5"))))
+
 (deftest show-json-test
   (testing "renders a v0.3 success envelope wrapping the ticket"
     (let [ticket {:frontmatter {:id "kno-01abc"
@@ -1146,6 +1221,168 @@
       (is (str/includes? out "5w")
           "35-day age renders as `5w` in the age column"))))
 
+(deftest prime-text-in-progress-ac-slot-test
+  (testing "in-progress row gains an AC slot (7 cols) when any ticket in the section has acceptance"
+    (let [t (-> (mk-prime-ticket {:id "kno-ip-ac" :status "in_progress"
+                                  :mode "afk" :priority 1 :type "feature"
+                                  :title "Has AC"
+                                  :updated "2026-04-28T10:00:00Z"})
+                (assoc :prime-age-days 3)
+                (assoc-in [:frontmatter :acceptance]
+                          [{:title "x" :done true}
+                           {:title "y" :done false}]))
+          data (assoc sample-prime-data :in-progress [t])
+          out  (output/prime-text data)
+          line (some (fn [l] (when (str/includes? l "kno-ip-ac") l))
+                     (str/split-lines out))]
+      (is (some? line))
+      (is (re-find #"^kno-ip-ac\s+feature\s+afk\s+1\s+3d\s+1/2\s+Has AC" line)
+          "row matches 7-col order: id type mode pri age ac title")))
+
+  (testing "in-progress section with no AC tickets keeps the 6-col shape (no AC slot)"
+    (let [t (-> (mk-prime-ticket {:id "kno-no-ac" :status "in_progress"
+                                  :mode "afk" :priority 1 :type "task"
+                                  :title "No AC"
+                                  :updated "2026-04-28T10:00:00Z"})
+                (assoc :prime-age-days 1))
+          data (assoc sample-prime-data :in-progress [t])
+          out  (output/prime-text data)
+          line (some (fn [l] (when (str/includes? l "kno-no-ac") l))
+                     (str/split-lines out))]
+      (is (some? line))
+      (is (re-find #"^kno-no-ac\s+task\s+afk\s+1\s+1d\s+No AC" line)
+          "row stays 6-col when no ticket in the section has AC")
+      (is (not (re-find #"\b-\s+No AC" line))
+          "no orphan `-` slot before the title when AC slot is omitted")))
+
+  (testing "tickets without AC render a `-` slot when peers in the same section have AC"
+    (let [t-ac    (-> (mk-prime-ticket {:id "kno-with-ac" :status "in_progress"
+                                        :mode "afk" :priority 0 :type "task"
+                                        :title "With AC"
+                                        :updated "2026-04-28T10:00:00Z"})
+                      (assoc :prime-age-days 0)
+                      (assoc-in [:frontmatter :acceptance]
+                                [{:title "x" :done true}]))
+          t-noac  (-> (mk-prime-ticket {:id "kno-bare" :status "in_progress"
+                                        :mode "afk" :priority 1 :type "task"
+                                        :title "Bare"
+                                        :updated "2026-04-28T09:00:00Z"})
+                      (assoc :prime-age-days 0))
+          data (assoc sample-prime-data :in-progress [t-ac t-noac])
+          out  (output/prime-text data)
+          bare-line (some (fn [l] (when (str/includes? l "kno-bare") l))
+                          (str/split-lines out))]
+      (is (some? bare-line))
+      (is (re-find #"^kno-bare\s+task\s+afk\s+1\s+0d\s+-\s+Bare" bare-line)
+          "ticket without AC renders `-` in the AC slot when section has AC peers"))))
+
+(deftest prime-text-ready-to-close-section-test
+  (let [t1 (-> (mk-prime-ticket {:id "kno-rtc01" :status "in_progress"
+                                 :mode "afk" :priority 1 :type "task"
+                                 :title "Done with all AC"
+                                 :updated "2026-04-30T10:00:00Z"})
+               (assoc :prime-age-days 1)
+               (assoc-in [:frontmatter :acceptance]
+                         [{:title "x" :done true}
+                          {:title "y" :done true}]))
+        t2 (-> (mk-prime-ticket {:id "kno-rtc02" :status "in_progress"
+                                 :mode "hitl" :priority 2 :type "feature"
+                                 :title "Also done"
+                                 :updated "2026-04-29T10:00:00Z"})
+               (assoc :prime-age-days 2)
+               (assoc-in [:frontmatter :acceptance]
+                         [{:title "a" :done true}]))]
+    (testing "## Ready to close heading appears between ## In Progress and ## Ready"
+      (let [data (assoc sample-prime-data :ready-to-close [t1])
+            out  (output/prime-text data)
+            ip-i  (str/index-of out "## In Progress")
+            rtc-i (str/index-of out "## Ready to close")
+            rd-i  (str/index-of out "## Ready\n")]
+        (is (every? some? [ip-i rtc-i rd-i]))
+        (is (< ip-i rtc-i rd-i)
+            "Ready to close sits between In Progress and Ready")))
+
+    (testing "section uses the in-progress line shape with the AC slot (id type mode pri age ac title)"
+      (let [data (assoc sample-prime-data :ready-to-close [t1])
+            out  (output/prime-text data)
+            rtc-i (str/index-of out "## Ready to close")
+            rtc-end (or (str/index-of out "## Ready\n" rtc-i) (count out))
+            section (subs out rtc-i rtc-end)
+            line (some (fn [l] (when (str/includes? l "kno-rtc01") l))
+                       (str/split-lines section))]
+        (is (some? line))
+        (is (re-find #"^kno-rtc01\s+task\s+afk\s+1\s+1d\s+2/2\s+Done with all AC" line)
+            "row matches 7-col order: id type mode pri age ac title")))
+
+    (testing "section is uncapped (no `... +N more` footer)"
+      (let [data (assoc sample-prime-data :ready-to-close [t1 t2])
+            out  (output/prime-text data)
+            rtc-i (str/index-of out "## Ready to close")
+            rtc-end (str/index-of out "## Ready\n" rtc-i)
+            section (subs out rtc-i rtc-end)]
+        (is (not (re-find #"\+\d+\s+more" section))
+            "no truncation footer in Ready to close section")))
+
+    (testing "section is omitted entirely when no tickets match the predicate"
+      (let [out (output/prime-text sample-prime-data)]
+        (is (not (str/includes? out "## Ready to close"))
+            "no heading when :ready-to-close is absent or empty"))
+      (let [data (assoc sample-prime-data :ready-to-close [])
+            out  (output/prime-text data)]
+        (is (not (str/includes? out "## Ready to close"))
+            "no heading when :ready-to-close is empty")))
+
+    (testing "hitl nudge surfaces under the heading"
+      (let [data (assoc sample-prime-data :ready-to-close [t1])
+            out  (output/prime-text data)
+            rtc-i (str/index-of out "## Ready to close")
+            rtc-end (str/index-of out "## Ready\n" rtc-i)
+            section (subs out rtc-i rtc-end)]
+        (is (str/includes? section "All acceptance criteria are checked")
+            "hitl nudge present")
+        (is (re-find #"knot close <id>\s+--summary" section)
+            "hitl nudge surfaces the close command")))
+
+    (testing "afk nudge surfaces under the heading"
+      (let [data (-> sample-prime-data
+                     (assoc :ready-to-close [t1])
+                     (assoc :mode "afk"))
+            out  (output/prime-text data)
+            rtc-i (str/index-of out "## Ready to close")
+            rtc-end (str/index-of out "## Ready\n" rtc-i)
+            section (subs out rtc-i rtc-end)]
+        (is (str/includes? section "Close these before grabbing new tickets.")
+            "afk nudge present")))))
+
+(deftest prime-text-ready-ac-slot-test
+  (testing "ready row gains an AC slot (6 cols) when any ticket in the section has acceptance"
+    (let [t (-> (mk-prime-ticket {:id "kno-rd-ac" :status "open"
+                                  :mode "afk" :priority 0 :type "bug"
+                                  :title "Ready with AC"
+                                  :created "2026-04-28T09:00:00Z"})
+                (assoc-in [:frontmatter :acceptance]
+                          [{:title "x" :done false}
+                           {:title "y" :done false}
+                           {:title "z" :done false}]))
+          data (assoc sample-prime-data :ready [t])
+          out  (output/prime-text data)
+          line (some (fn [l] (when (str/includes? l "kno-rd-ac") l))
+                     (str/split-lines out))]
+      (is (some? line))
+      (is (re-find #"^kno-rd-ac\s+bug\s+afk\s+0\s+0/3\s+Ready with AC" line)
+          "row matches 6-col order: id type mode pri ac title")))
+
+  (testing "ready section with no AC tickets keeps the 5-col shape"
+    (let [out (output/prime-text sample-prime-data)
+          rd-start (str/index-of out "## Ready")
+          rd-end (or (str/index-of out "## Recently Closed") (count out))
+          section (subs out rd-start rd-end)
+          line (some (fn [l] (when (str/includes? l "kno-rd01") l))
+                     (str/split-lines section))]
+      (is (some? line))
+      (is (re-find #"^kno-rd01\s+bug\s+afk\s+0\s+Ready highest" line)
+          "row stays 5-col when no ready ticket has AC"))))
+
 (deftest prime-json-stale-flag-test
   (testing "in_progress entries carrying :prime-stale? get a \"stale\":true field"
     (let [stale-ticket (-> (mk-prime-ticket {:id "kno-stale" :status "in_progress"
@@ -1401,6 +1638,42 @@
       (is (str/includes? out "\"archive_count\":2"))
       (is (not (str/includes? out-no-name "\"name\""))
           "name field is omitted when no name is provided"))))
+
+(deftest prime-json-ready-to-close-array-test
+  (let [t (-> (mk-prime-ticket {:id "kno-rtc01" :status "in_progress"
+                                :mode "afk" :priority 1 :type "task"
+                                :title "Done"
+                                :updated "2026-04-30T10:00:00Z"})
+              (assoc-in [:frontmatter :acceptance]
+                        [{:title "x" :done true}]))]
+    (testing "prime-json envelope carries a ready_to_close array parallel to in_progress, ready, recently_closed"
+      (let [data (assoc sample-prime-data :ready-to-close [t])
+            out  (output/prime-json data)
+            parsed (json/parse-string out true)]
+        (is (vector? (get-in parsed [:data :ready_to_close])))
+        (is (= 1 (count (get-in parsed [:data :ready_to_close]))))))
+
+    (testing "ready_to_close uses the same per-ticket projection as in_progress (id, title, status, type, priority, mode, updated)"
+      (let [data (assoc sample-prime-data :ready-to-close [t])
+            parsed (json/parse-string (output/prime-json data) true)
+            entry (first (get-in parsed [:data :ready_to_close]))]
+        (is (= "kno-rtc01" (:id entry)))
+        (is (= "Done" (:title entry)))
+        (is (= "in_progress" (:status entry)))
+        (is (= "task" (:type entry)))
+        (is (= 1 (:priority entry)))
+        (is (= "afk" (:mode entry)))
+        (is (= "2026-04-30T10:00:00Z" (:updated entry)))))
+
+    (testing "no acceptance_progress derived field on per-ticket JSON projections"
+      (let [data (assoc sample-prime-data :ready-to-close [t])
+            out  (output/prime-json data)]
+        (is (not (str/includes? out "acceptance_progress"))
+            "no derived AC progress field — raw AC isn't in this projection either")))
+
+    (testing "ready_to_close defaults to an empty array when no tickets match"
+      (let [parsed (json/parse-string (output/prime-json sample-prime-data) true)]
+        (is (= [] (get-in parsed [:data :ready_to_close])))))))
 
 (deftest prime-json-no-project-test
   (testing "no-project case emits an envelope with empty arrays and counts of 0"

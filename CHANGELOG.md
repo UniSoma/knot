@@ -36,8 +36,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the gate, so `knot update <id> --ac "last AC" --done --status closed`
   checks then closes in one disk write.
 - `knot.acceptance` exposes three pure predicates used by the gate and
-  by listing-side AC progress (forthcoming): `complete?`, `progress`
-  (returns `[done total]`), `open-titles`.
+  by listing-side AC progress: `complete?`, `progress` (returns `[done
+  total]`), `open-titles`.
+- **AC progress is now visible in listing tables.** `knot ls`, `knot
+  ready`, `knot blocked`, and `knot closed` gain a conditional `AC`
+  column (rendered as `d/t`, e.g. `2/5`) inserted immediately before
+  `TITLE`. The column header and the column itself are omitted entirely
+  when no ticket in the result set carries `:acceptance`, so quiet
+  projects don't pay the width cost. Tickets without AC render as `-`.
+  Force-closed tickets render their partial counts (`2/5`) as an audit
+  signal. `ls --json` is unchanged — raw `:acceptance` already passes
+  through.
+- **AC progress is now visible in `knot prime`.** The In Progress and
+  Ready row shapes gain a conditional AC slot before `title` (7 cols
+  for In Progress / 6 for Ready when any ticket in the section has AC,
+  unchanged otherwise). The renderer is whitespace-only — same shape
+  for AI agents and downstream tools.
+- **New `## Ready to close` section in `knot prime`.** Renders between
+  `## In Progress` and `## Ready` and surfaces active-status tickets
+  whose every acceptance entry is checked — the natural call-to-action
+  prompt that pairs with the close-gate. Uses the In Progress line
+  shape (with age column), sorted by `:updated` descending, uncapped,
+  omitted entirely when empty. HITL nudge: "All acceptance criteria
+  are checked — close with `knot close <id> --summary "..."`." AFK
+  nudge: "Close these before grabbing new tickets." `prime-cmd`
+  partitions active tickets so a ticket appears in either
+  `:ready-to-close` or `:in-progress`, never both.
+- **`prime --json`** gains a `data.ready_to_close` array parallel to
+  `in_progress`, `ready`, and `recently_closed`, using the same
+  body-less compact ticket projection. No derived `acceptance_progress`
+  field on per-ticket projections — JSON consumers needing the raw AC
+  list use `ls --json` or `show --json`.
+- `knot.query/ready-to-close?` predicate: `(and (= status active-status)
+  (seq ac) (acceptance/complete? ac))`. Vacuously-complete tickets (no
+  AC list) deliberately do not migrate — only tickets with an explicit
+  fully-checked checklist count as ready-to-close.
 
 ### Changed
 

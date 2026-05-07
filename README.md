@@ -107,6 +107,13 @@ knot check --code dep_cycle    # filter by code (repeatable; OR within / AND acr
 knot check --json              # envelope + sorted issues, exit 0/1/2
 ```
 
+Listing tables (`ls`, `ready`, `blocked`, `closed`) include a
+conditional `AC` column rendered as `d/t` (e.g. `2/5`) when any
+ticket in the result set has acceptance criteria. The column is
+omitted entirely from quiet projects so width stays tight; tickets
+without AC render as `-`. `ls --json` is unchanged — raw `:acceptance`
+already passes through.
+
 Every read command (`show`, `ls`, `ready`, `blocked`, `closed`,
 `dep tree`, `check`, `prime`) accepts `--json` and emits snake_case
 keys. Stdout carries data only; warnings and errors go to stderr.
@@ -168,20 +175,29 @@ silently drifts from the CLI's invariants.
 
 `knot prime` emits a markdown primer summarizing project state —
 preamble (with the canonical user-says intent table), project
-metadata, in-progress tickets (with a relative `age` column), ready
-tickets (capped at 20 by default), and recently-closed tickets — for
-injection into a fresh AI agent session.
+metadata, in-progress tickets (with a relative `age` column), a
+`Ready to close` section listing active tickets whose every acceptance
+criterion is checked, ready tickets (capped at 20 by default), and
+recently-closed tickets — for injection into a fresh AI agent session.
 
 ```sh
-knot prime                    # markdown primer (project, in-progress, ready, recently-closed)
+knot prime                    # markdown primer (project, in-progress, ready-to-close, ready, recently-closed)
 knot prime --mode afk         # filter ready section to agent-runnable work
 knot prime --limit 5          # override the default ready cap of 20
 knot prime --json             # bare object with snake_case keys:
-                              #   project, in_progress, ready, ready_truncated,
-                              #   ready_remaining, recently_closed
+                              #   project, in_progress, ready_to_close, ready,
+                              #   ready_truncated, ready_remaining, recently_closed
                               # JSON consumers should tolerate unknown keys —
                               # new ones may be added in future minor versions.
 ```
+
+When any ticket in a section has acceptance criteria, the row shape
+gains a conditional `AC` column rendered as `d/t` (e.g. `2/5`)
+immediately before the title; sections with no AC tickets stay narrow.
+The `Ready to close` section pairs with the `--force --summary`
+acceptance gate on terminal transitions: it surfaces tickets where the
+gate would be a no-op (every AC is checked), so the natural prompt is
+"close these before grabbing new work."
 
 The staleness flag (`stale: true`, set when an in-progress ticket's
 `:updated` is 14+ days old) appears **only on `in_progress` entries**.

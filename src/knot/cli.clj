@@ -1293,6 +1293,7 @@
   (if-not (:project-found? ctx)
     (let [data {:project          {:found? false}
                 :in-progress      []
+                :ready-to-close   []
                 :ready            []
                 :ready-truncated? false
                 :ready-remaining  0
@@ -1314,9 +1315,19 @@
                          (seq assignee)   (assoc :assignee assignee)
                          (seq tag)        (assoc :tag      tag)
                          (seq type)       (assoc :type     type))
-          in-progress* (query/filter-tickets
+          active*      (query/filter-tickets
                         (prime-in-progress-tickets all active-status now)
                         criteria)
+          ;; Mutually-exclusive partition: a ticket whose AC are all
+          ;; checked is "ready to close" — surface it under that
+          ;; section, not duplicated under In Progress. The
+          ;; ready-to-close? predicate already short-circuits on empty
+          ;; AC so vacuously-complete tickets don't migrate.
+          {ready-to-close* true
+           in-progress*    false} (group-by (fn [t] (query/ready-to-close? t active-status))
+                                            active*)
+          in-progress*    (vec in-progress*)
+          ready-to-close* (vec ready-to-close*)
           ready*       (query/ready all terminal-statuses)
           ready-filtered (query/filter-tickets ready* criteria)
           cap          (prime-cap limit)
@@ -1337,6 +1348,7 @@
                                            :live-count    live-cnt
                                            :archive-count archive-cnt}
                         :in-progress      in-progress*
+                        :ready-to-close   ready-to-close*
                         :ready            ready-shown
                         :ready-truncated? truncated?
                         :ready-remaining  remaining

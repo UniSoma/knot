@@ -274,7 +274,7 @@
         s
         (str "[" params "m" s ansi-reset)))))
 
-(def ^:private ls-columns
+(def ^:private ls-columns-base
   [{:key :id        :header "ID"       :align :left}
    {:key :status    :header "STATUS"   :align :left}
    {:key :priority  :header "PRI"      :align :right}
@@ -282,6 +282,21 @@
    {:key :type      :header "TYPE"     :align :left}
    {:key :assignee  :header "ASSIGNEE" :align :left}
    {:key :title     :header "TITLE"    :align :left}])
+
+(def ^:private ls-ac-column
+  {:key :acceptance :header "AC" :align :left})
+
+(defn- ls-columns-for
+  "Return the column list for `tickets`. Splices the AC column in
+   immediately before TITLE when at least one ticket carries
+   `(seq :acceptance)`; otherwise omits the column entirely so the
+   header and slot disappear from quiet projects."
+  [tickets]
+  (if (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
+    (let [head (vec (butlast ls-columns-base))
+          title-col (last ls-columns-base)]
+      (conj head ls-ac-column title-col))
+    ls-columns-base))
 
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
@@ -291,6 +306,11 @@
   [ticket k]
   (case k
     :title (ticket-title ticket)
+    :acceptance (let [ac (get-in ticket [:frontmatter :acceptance])]
+                  (if (seq ac)
+                    (let [[d t] (acceptance/progress ac)]
+                      (str d "/" t))
+                    "-"))
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))
 
@@ -439,6 +459,7 @@
         status-ctx       {:statuses          (or statuses          (:statuses defaults))
                           :terminal-statuses (or terminal-statuses (:terminal-statuses defaults))
                           :active-status     (or active-status     (:active-status defaults))}
+        ls-columns       (ls-columns-for tickets)
         non-title        (vec (butlast ls-columns))
         title-col        (last ls-columns)
         non-title-widths (mapv (fn [{:keys [key header]}]
@@ -588,6 +609,12 @@ before issuing other Knot commands.")
 (def ^:private prime-ready-nudge-hitl
   "If asked \"what's next\", recommend the top entry and confirm before `knot start`.")
 
+(def ^:private prime-ready-to-close-nudge-hitl
+  "All acceptance criteria are checked — close with `knot close <id> --summary \"...\"`.")
+
+(def ^:private prime-ready-to-close-nudge-afk
+  "Close these before grabbing new tickets.")
+
 (defn format-age-days
   "Render an integer day-count as a relative-age string for the prime
    `## In Progress` age column. Buckets:
@@ -604,38 +631,61 @@ before issuing other Knot commands.")
     (<= days 42) (str (quot days 7) "w")
     :else (str (quot days 30) "m")))
 
+(defn- ac-cell
+  "Render the AC progress cell for a prime row: `d/t` for tickets with
+   acceptance, `-` for tickets without. Used only when the surrounding
+   section has at least one AC-bearing ticket (i.e., the slot is shown);
+   otherwise this never runs."
+  [ticket]
+  (let [ac (get-in ticket [:frontmatter :acceptance])]
+    (if (seq ac)
+      (let [[d t] (acceptance/progress ac)]
+        (str d "/" t))
+      "-")))
+
+(defn- section-has-ac?
+  "True when at least one ticket in the section carries acceptance —
+   the trigger for showing the AC slot in the line shape."
+  [tickets]
+  (boolean (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)))
+
 (defn- prime-in-progress-line
   "Format an in-progress ticket as `id  type  mode  pri  age  title` (6
-   cols). Missing fields render as `-` so columns stay aligned. The age
-   column comes from `:prime-age-days` (set by the cli pipeline from
-   `:updated` and `now-iso`); see `format-age-days` for the bucketing
-   rules. The `:prime-stale?` flag remains on the ticket map for the
-   JSON projection but no longer affects the text output — the age
-   column carries the staleness signal in human-readable form. The
-   renderer is whitespace-only — no ANSI codes — because prime output
-   is consumed by AI agents and downstream tools."
-  [ticket]
+   cols), or with an AC slot before the title (`id  type  mode  pri  age
+   ac  title`, 7 cols) when `ac-column?` is true. Missing fields render
+   as `-` so columns stay aligned. The age column comes from
+   `:prime-age-days` (set by the cli pipeline from `:updated` and
+   `now-iso`); see `format-age-days` for the bucketing rules. The
+   `:prime-stale?` flag remains on the ticket map for the JSON projection
+   but no longer affects the text output — the age column carries the
+   staleness signal in human-readable form. The renderer is
+   whitespace-only — no ANSI codes — because prime output is consumed by
+   AI agents and downstream tools."
+  [ticket ac-column?]
   (let [fm    (:frontmatter ticket)
         id    (or (:id fm) "")
         type- (or (:type fm) "-")
         mode  (or (:mode fm) "-")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
         age   (format-age-days (:prime-age-days ticket))
-        title (ticket-title ticket)]
-    (str id "  " type- "  " mode "  " pri "  " age "  " title)))
+        title (ticket-title ticket)
+        ac    (when ac-column? (str (ac-cell ticket) "  "))]
+    (str id "  " type- "  " mode "  " pri "  " age "  " (or ac "") title)))
 
 (defn- prime-ready-line
-  "Format a ready ticket as `id  type  mode  pri  title` (5 cols). Missing
-   fields render as `-` so columns stay aligned. Whitespace-only — no
-   ANSI codes — because prime output is consumed by AI agents."
-  [ticket]
+  "Format a ready ticket as `id  type  mode  pri  title` (5 cols), or
+   `id  type  mode  pri  ac  title` (6 cols) when `ac-column?` is true.
+   Missing fields render as `-` so columns stay aligned. Whitespace-only
+   — no ANSI codes — because prime output is consumed by AI agents."
+  [ticket ac-column?]
   (let [fm    (:frontmatter ticket)
         id    (or (:id fm) "")
         type- (or (:type fm) "-")
         mode  (or (:mode fm) "-")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
-        title (ticket-title ticket)]
-    (str id "  " type- "  " mode "  " pri "  " title)))
+        title (ticket-title ticket)
+        ac    (when ac-column? (str (ac-cell ticket) "  "))]
+    (str id "  " type- "  " mode "  " pri "  " (or ac "") title)))
 
 (defn- prime-section
   "Render a `## <header>` section: heading, optional one-line behavioral
@@ -716,14 +766,18 @@ before issuing other Knot commands.")
      3. `## In Progress` ticket lines (omitted entirely when no tickets are
         in the project's active lane — empty heading is dead weight on
         every quiet session)
-     4. `## Ready` ticket lines (with behavioral nudge and optional footer)
-     5. `## Recently Closed` (omitted when no entries are supplied — gives
+     4. `## Ready to close` ticket lines (omitted when empty — surfaces
+        active-status tickets where every AC is checked, the natural
+        call-to-action prompt that pairs with the close-gate)
+     5. `## Ready` ticket lines (with behavioral nudge and optional footer)
+     6. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
-   Ready rows are `id  type  mode  pri  title` (5 cols); In Progress
-   rows are `id  type  mode  pri  age  title` (6 cols, age replacing
-   the retired `[stale]` text prefix). Caller controls sort and limit
-   — this function does not reorder or truncate."
-  [{:keys [project in-progress ready ready-truncated? ready-remaining
+   Ready rows are `id  type  mode  pri  title` (5 cols, +1 for AC slot
+   when any ticket in the section has acceptance); In Progress and
+   Ready-to-close rows are `id  type  mode  pri  age  title` (6 cols, +1
+   for AC slot). Caller controls sort and limit — this function does not
+   reorder or truncate."
+  [{:keys [project in-progress ready-to-close ready ready-truncated? ready-remaining
            recently-closed mode afk-mode]
     :or {afk-mode (:afk-mode (config/defaults))}}]
   (let [found? (:found? project)
@@ -742,6 +796,9 @@ before issuing other Knot commands.")
         ip-nudge    (when found? (if afk?
                                    prime-in-progress-nudge-afk
                                    prime-in-progress-nudge-hitl))
+        rtc-nudge   (when found? (if afk?
+                                   prime-ready-to-close-nudge-afk
+                                   prime-ready-to-close-nudge-hitl))
         ;; afk's preamble flow checklist already handles next-ticket
         ;; selection, so the Ready nudge would be redundant noise; only
         ;; hitl mode renders it.
@@ -749,22 +806,33 @@ before issuing other Knot commands.")
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
                             " more (run `knot ready`)"))
+        ip-ac?       (section-has-ac? in-progress)
+        rtc-ac?      (section-has-ac? ready-to-close)
+        rd-ac?       (section-has-ac? ready)
         in-progress-block (when (seq in-progress)
                             (str (prime-section "In Progress"
                                                 ip-nudge
                                                 in-progress
                                                 nil
-                                                prime-in-progress-line)
+                                                #(prime-in-progress-line % ip-ac?))
                                  "\n"))
+        ready-to-close-block (when (seq ready-to-close)
+                               (str (prime-section "Ready to close"
+                                                   rtc-nudge
+                                                   ready-to-close
+                                                   nil
+                                                   #(prime-in-progress-line % rtc-ac?))
+                                    "\n"))
         recently-closed-block (prime-recently-closed-section recently-closed)]
     (str preamble "\n\n"
          (prime-project-section project) "\n"
          in-progress-block
+         ready-to-close-block
          (prime-section "Ready"
                         ready-nudge
                         ready
                         ready-footer
-                        prime-ready-line) "\n"
+                        #(prime-ready-line % rd-ac?)) "\n"
          recently-closed-block)))
 
 (defn- jsonify-prime-ticket
@@ -811,14 +879,19 @@ before issuing other Knot commands.")
 (defn prime-json
   "Render the actionable subset of prime data wrapped in the v0.3 success
    envelope. Inside `:data`, keys are snake_case: `project`,
-   `in_progress`, `ready`, `ready_truncated`, `ready_remaining`,
-   `recently_closed`. The preamble and command cheatsheet are omitted —
-   JSON consumers are tools that know the schema by definition."
-  [{:keys [project in-progress ready ready-truncated? ready-remaining
+   `in_progress`, `ready_to_close`, `ready`, `ready_truncated`,
+   `ready_remaining`, `recently_closed`. The preamble and command
+   cheatsheet are omitted — JSON consumers are tools that know the
+   schema by definition. `ready_to_close` shares the per-ticket shape
+   used by `in_progress` and `ready`; raw `:acceptance` is intentionally
+   omitted from the prime projection (callers needing it use
+   `ls --json` or `show --json`)."
+  [{:keys [project in-progress ready-to-close ready ready-truncated? ready-remaining
            recently-closed]}]
   (envelope-str
    {:project          (jsonify-prime-project project)
     :in_progress      (mapv jsonify-prime-ticket in-progress)
+    :ready_to_close   (mapv jsonify-prime-ticket (or ready-to-close []))
     :ready            (mapv jsonify-prime-ticket ready)
     :ready_truncated  (boolean ready-truncated?)
     :ready_remaining  (or ready-remaining 0)

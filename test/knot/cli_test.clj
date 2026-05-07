@@ -2140,7 +2140,7 @@ Restart the daemon.
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (let [{:keys [exit stdout stderr]} (cli/check-cmd (ctx tmp) {:json? true})
-            parsed (cheshire.core/parse-string stdout true)]
+            parsed (cheshire/parse-string stdout true)]
         (is (zero? exit))
         (is (str/blank? stderr))
         (is (= 1   (:schema_version parsed)))
@@ -2163,7 +2163,7 @@ Restart the daemon.
                            {:now "2026-04-28T11:00:00Z"
                             :terminal-statuses #{"closed"}})
             {:keys [exit stdout]} (cli/check-cmd (ctx tmp) {:json? true})
-            parsed (cheshire.core/parse-string stdout true)]
+            parsed (cheshire/parse-string stdout true)]
         (is (= 1   exit))
         (is (false? (:ok parsed)))
         (is (vector? (get-in parsed [:data :issues])))
@@ -2211,7 +2211,7 @@ Restart the daemon.
             {filt-exit :exit filt-out :stdout} (cli/check-cmd (ctx tmp)
                                                               {:code #{:does_not_exist}
                                                                :json? true})
-            parsed (cheshire.core/parse-string filt-out true)]
+            parsed (cheshire/parse-string filt-out true)]
         (is (= 1 full-exit) "errors present without filter -> exit 1")
         (is (= 0 filt-exit) "filter matches nothing -> exit 0 (clean view)")
         (is (true? (:ok parsed)))
@@ -3438,6 +3438,102 @@ Restart the daemon.
         (is (str/includes? section "Afk job"))
         (is (not (str/includes? section "Hitl job"))
             "hitl ticket excluded from ready section under --mode afk")))))
+
+(deftest prime-cmd-ready-to-close-partition-test
+  (testing "active-status ticket with all AC done lands in ## Ready to close, not ## In Progress"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            done    (cli/create-cmd c {:title "All AC done"  :acceptance ["a"]})
+            d-id    (id-of-created done "all-ac-done")
+            _       (cli/start-cmd c {:id d-id})
+            _       (cli/update-cmd c {:id d-id :ac "a" :done true})
+            partial (cli/create-cmd c {:title "Partial AC" :acceptance ["a" "b"]})
+            p-id    (id-of-created partial "partial-ac")
+            _       (cli/start-cmd c {:id p-id})
+            no-ac   (cli/create-cmd c {:title "No AC"})
+            n-id    (id-of-created no-ac "no-ac")
+            _       (cli/start-cmd c {:id n-id})
+            out     (cli/prime-cmd (prime-ctx tmp) {})
+            ip-i    (str/index-of out "## In Progress")
+            rtc-i   (str/index-of out "## Ready to close")
+            rd-i    (str/index-of out "## Ready\n")]
+        (is (and ip-i rtc-i rd-i))
+        (is (< ip-i rtc-i rd-i)
+            "section ordering: In Progress -> Ready to close -> Ready")
+        (let [ip-section  (subs out ip-i rtc-i)
+              rtc-section (subs out rtc-i rd-i)]
+          (is (str/includes? rtc-section "All AC done")
+              "ticket with all AC done lands in Ready to close")
+          (is (not (str/includes? ip-section "All AC done"))
+              "same ticket does NOT also appear in In Progress (mutually exclusive partition)")
+          (is (str/includes? ip-section "Partial AC")
+              "ticket with mixed AC stays in In Progress")
+          (is (not (str/includes? rtc-section "Partial AC"))
+              "mixed-AC ticket is not in Ready to close")
+          (is (str/includes? ip-section "No AC")
+              "ticket with no AC stays in In Progress (vacuously-complete must NOT trigger)")
+          (is (not (str/includes? rtc-section "No AC"))
+              "no-AC ticket is not in Ready to close")))))
+
+  (testing "## Ready to close section is omitted when no active ticket has all AC done"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            t (cli/create-cmd c {:title "Mixed" :acceptance ["a" "b"]})
+            t-id (id-of-created t "mixed")
+            _    (cli/start-cmd c {:id t-id})
+            out  (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (not (str/includes? out "## Ready to close"))
+            "no Ready to close heading when no ticket qualifies"))))
+
+  (testing "prime --json emits a ready_to_close array parallel to in_progress"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            done (cli/create-cmd c {:title "Done one" :acceptance ["a"]})
+            d-id (id-of-created done "done-one")
+            _    (cli/start-cmd c {:id d-id})
+            _    (cli/update-cmd c {:id d-id :ac "a" :done true})
+            out  (cli/prime-cmd (prime-ctx tmp) {:json? true})
+            parsed (cheshire/parse-string out true)
+            rtc  (get-in parsed [:data :ready_to_close])]
+        (is (vector? rtc))
+        (is (= 1 (count rtc))
+            "ready_to_close has the qualifying ticket")
+        (is (= "Done one" (:title (first rtc))))))))
+
+(deftest prime-cmd-ready-to-close-sort-and-parity-test
+  (testing "Ready to close section is sorted by :updated descending; JSON array order matches"
+    (with-tmp tmp
+      (let [c (ctx tmp)
+            ;; older updated (start) first
+            t1 (cli/create-cmd (assoc c :now "2026-04-25T08:00:00Z")
+                               {:title "Older done" :acceptance ["a"]})
+            id1 (id-of-created t1 "older-done")
+            _   (cli/start-cmd (assoc c :now "2026-04-25T09:00:00Z") {:id id1})
+            _   (cli/update-cmd (assoc c :now "2026-04-25T10:00:00Z")
+                                {:id id1 :ac "a" :done true})
+            ;; newer updated last
+            t2 (cli/create-cmd (assoc c :now "2026-04-28T08:00:00Z")
+                               {:title "Newer done" :acceptance ["b"]})
+            id2 (id-of-created t2 "newer-done")
+            _   (cli/start-cmd (assoc c :now "2026-04-28T09:00:00Z") {:id id2})
+            _   (cli/update-cmd (assoc c :now "2026-04-28T10:00:00Z")
+                                {:id id2 :ac "b" :done true})
+            ;; text shape
+            out (cli/prime-cmd (prime-ctx tmp) {})
+            rtc-i (str/index-of out "## Ready to close")
+            rtc-end (str/index-of out "## Ready\n" rtc-i)
+            section (subs out rtc-i rtc-end)
+            newer-i (str/index-of section "Newer done")
+            older-i (str/index-of section "Older done")]
+        (is (every? some? [newer-i older-i]))
+        (is (< newer-i older-i)
+            "newer-updated ticket renders first (sorted by :updated desc)"))
+      (let [out  (cli/prime-cmd (prime-ctx tmp) {:json? true})
+            parsed (cheshire/parse-string out true)
+            rtc  (get-in parsed [:data :ready_to_close])
+            titles (mapv :title rtc)]
+        (is (= ["Newer done" "Older done"] titles)
+            "JSON array preserves the same :updated-desc order as the text section")))))
 
 (deftest prime-cmd-default-cap-and-truncation-test
   (testing "ready section is capped at 20 by default with a truncation footer"
