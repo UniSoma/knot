@@ -1,12 +1,13 @@
 ---
 id: kno-01kqxd0amhnb
 title: 'knot create: dash-leading values for string flags fail with cryptic error'
-status: in_progress
+status: closed
 type: bug
 priority: 3
 mode: hitl
 created: '2026-05-06T01:03:59.633375082Z'
-updated: '2026-05-07T01:39:25.606713011Z'
+updated: '2026-05-07T02:23:27.822362781Z'
+closed: '2026-05-07T02:23:27.822362781Z'
 tags:
 - refine
 - v0.4
@@ -89,6 +90,10 @@ External user reproed the dash-leading parse bug with a multi-line value: `--acc
 **2026-05-06T23:55:03.377523382Z**
 
 **2026-05-07T01:39:25.606713011Z**
+
+**2026-05-07T02:23:27.822362781Z**
+
+Investigation complete: root cause is babashka.cli's parse-key treating any dash-leading argv token as a flag (cli.cljc:344-367), including after =. Failure surface mapped across loud (string-flag values), silent (knot prime), and positional categories. --<flag>=<value> empirically not a working escape. Decision: option (b) pre-process argv, tracked in kno-01kr0129m0y9. Error-message hint shipped here in 456564f — detects the ex-data signature (value-bearing flag collapsed to implicit-true) and replaces the cryptic Unknown-option message with an actionable workaround.
 
 ## Implementation landed (AC #6)
 
