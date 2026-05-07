@@ -190,6 +190,42 @@
         (is (re-find #"(?i)bogus" err)
             "stderr must name the offending flag")))))
 
+(deftest dash-leading-value-error-hint-test
+  ;; babashka.cli classifies any argv token starting with `-` as a flag
+  ;; name (cli.cljc:344-367), even after `=`, so a value like `- text`
+  ;; lands as several short-opt entries and the legitimate flag gets an
+  ;; implicit `true`. -main's catch detects that signature in ex-data
+  ;; and replaces the cryptic `Unknown option: :e` message with a hint.
+  ;; See kno-01kqxd0amhnb.
+  (testing "create --acceptance \"- text\" emits the dash-leading hint, not the bare bb-cli message"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--acceptance" "- text")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "value starting with `-`")
+            "stderr must explain the dash-leading-value pitfall")
+        (is (str/includes? err "kno-01kqxd0amhnb")
+            "stderr must reference the tracking ticket"))))
+  (testing "update --add-tag \"-foo\" hits the same hint"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]}      (run-knot tmp "create" "x")
+            id                 (-> out str/trim
+                                   (->> (re-matches #".+/([^/]+)--x\.md"))
+                                   second)
+            {:keys [exit err]} (run-knot tmp "update" id "--add-tag" "-foo")]
+        (is (= 1 exit))
+        (is (str/includes? err "value starting with `-`")))))
+  (testing "a genuine unknown flag still surfaces the original Unknown-option message"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "show" "no-such-id" "--bogus")]
+        (is (= 1 exit))
+        (is (str/includes? err "Unknown option"))
+        (is (not (str/includes? err "value starting with `-`"))
+            "the dash-leading hint must not fire on genuine unknown flags")))))
+
 (deftest read-cmd-error-envelope-test
   (testing "show --json on a missing id emits the v0.3 error envelope on stdout (exit 1)"
     (with-tmp tmp

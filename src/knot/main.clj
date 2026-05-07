@@ -45,6 +45,28 @@
   (binding [*out* *err*] (println msg))
   (System/exit 1))
 
+(defn- dash-leading-value-mishap?
+  "Detect babashka.cli's signature for a dash-leading value-position
+   token. The parser (cli.cljc:344-367) treats any argv element starting
+   with `-` as a flag name — including the post-`=` portion of
+   `--flag=value` — so a value like `- text` makes the legitimate flag
+   collapse to implicit `true` and the dash-leading token gets reparsed
+   as short-option chars. The smoking-gun ex-data signal: a flag listed
+   in `:spec` (so it is a real value-bearing flag, not `:coerce :boolean`)
+   appears in `:opts` with a `true` / `[true]` value. See kno-01kqxd0amhnb."
+  [data]
+  (and (= :org.babashka/cli (:type data))
+       (= :restrict (:cause data))
+       (let [spec (:spec data)
+             opts (:opts data)]
+         (boolean
+          (some (fn [[k v]]
+                  (let [s (get spec k)]
+                    (and s
+                         (not= :boolean (:coerce s))
+                         (or (true? v) (= [true] v)))))
+                opts)))))
+
 ;; Body-section flags (`--description / --design / --acceptance`, plus the
 ;; `-d` alias) are pre-extracted from argv by `extract-body-flags` before
 ;; delegating to `babashka.cli`. They live in `knot.help/registry` with
@@ -975,5 +997,11 @@
             (System/exit 1))))
     (catch Exception e
       (binding [*out* *err*]
-        (println (str "knot: " (or (.getMessage e) (.toString e)))))
+        (if (dash-leading-value-mishap? (ex-data e))
+          (do (println "knot: a value starting with `-` was passed to a flag, but")
+              (println "      babashka.cli classifies argv tokens starting with `-` as flag")
+              (println "      names — and the `--<flag>=<value>` form does not escape it.")
+              (println "      Workaround: prefix the value with a space, e.g.")
+              (println "      `--acceptance \" - text\"`. Tracked: kno-01kqxd0amhnb."))
+          (println (str "knot: " (or (.getMessage e) (.toString e))))))
       (System/exit 1))))
