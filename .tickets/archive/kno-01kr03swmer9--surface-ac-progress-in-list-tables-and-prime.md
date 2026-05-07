@@ -1,12 +1,13 @@
 ---
 id: kno-01kr03swmer9
 title: Surface AC progress in list tables and prime
-status: in_progress
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-07T02:20:54.791397129Z'
-updated: '2026-05-07T21:45:22.601030268Z'
+updated: '2026-05-07T22:19:53.302186088Z'
+closed: '2026-05-07T22:19:53.302186088Z'
 tags:
 - v0.3
 - acceptance
@@ -99,3 +100,9 @@ Heading nudges:
 - AC-specific colors in `ls-table` — leave to kno-01kqdaxz86nv (richer per-value colors).
 - AC visibility in `knot show` — already shows AC inline.
 - AC visibility in `knot status` single-ticket text — not needed.
+
+## Notes
+
+**2026-05-07T22:19:53.302186088Z**
+
+AC visibility surfaced at planning level: conditional AC column on ls/ready/blocked/closed (d/t before TITLE; omitted on quiet projects); new ## Ready to close section in prime between In Progress and Ready (HITL/AFK nudges; uncapped; :updated desc); prime --json gains data.ready_to_close parallel to in_progress. New knot.query/ready-to-close? predicate; prime-cmd partitions active tickets mutually exclusive. Tests: 347/4399 (+10/+63), 0 failures. Lint baseline preserved. Code review: APPROVE — production ready, two minor polish items applied. SKILL/CHANGELOG/README updated in the same commit.
