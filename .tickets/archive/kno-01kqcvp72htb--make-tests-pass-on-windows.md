@@ -6,11 +6,12 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T14:53:31.601460483Z'
-updated: '2026-05-06T20:25:02.676872548Z'
+updated: '2026-05-07T02:20:13.793049170Z'
 closed: '2026-05-06T20:25:02.676872548Z'
 links:
 - kno-01kqgqafcxvv
 - kno-01kqgqfwk4h1
+- kno-01kr03rmk9p9
 acceptance:
 - title: All 13 currently-failing Windows tests pass.
   done: false
