@@ -345,6 +345,25 @@
         path (cli/init-cmd ctx opts)]
     (println-out (str path))))
 
+(defn- emit-acceptance-incomplete!
+  "Emit the v0.3 acceptance gate failure: JSON envelope with code
+   `acceptance_incomplete` and `open_acceptance: [{title}, ...]`, or a
+   plain-text stderr message with the count and indented open titles.
+   Exits 1 in both modes."
+  [cmd-name json? msg open-titles]
+  (if json?
+    (do (println-out (output/error-envelope-str
+                      {:code             "acceptance_incomplete"
+                       :message          msg
+                       :open_acceptance  (mapv (fn [t] {:title t}) open-titles)}))
+        (System/exit 1))
+    (binding [*out* *err*]
+      (println (str "knot " cmd-name ": " msg))
+      (doseq [t open-titles]
+        (println (str "  - " t)))
+      (println "use --check to mark them done, or --force --summary \"<reason>\" to override.")
+      (System/exit 1))))
+
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
@@ -352,8 +371,10 @@
    used in error messages. The handler prints the new path on stdout
    (or a JSON envelope under `--json`). `--summary <text>` is threaded
    through; the cli layer rejects it on transitions to non-terminal
-   statuses. Under `--json`, not-found and ambiguous-id failures route
-   to the v0.3 error envelope; arg-parsing errors stay on stderr."
+   statuses. `--force` bypasses the acceptance gate (requires a
+   non-blank `--summary`). Under `--json`, not-found, ambiguous-id, and
+   `acceptance_incomplete` failures route to the v0.3 error envelope;
+   arg-parsing errors stay on stderr."
   [cmd-name cmd-key arg-count transition-fn argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))
         json? (boolean (:json opts))]
@@ -367,7 +388,8 @@
                   {:id id :status (second args)}
                   {:id id})
           opts* (cond-> (assoc base :json? json?)
-                  (contains? opts :summary) (assoc :summary (:summary opts)))]
+                  (contains? opts :summary) (assoc :summary (:summary opts))
+                  (:force opts)             (assoc :force? true))]
       (try
         (let [out (transition-fn (discover-ctx) opts*)]
           (cond
@@ -379,6 +401,10 @@
             (cond
               (and json? (= :ambiguous (:kind data)))
               (emit-ambiguous-envelope! e data)
+
+              (:acceptance-incomplete data)
+              (emit-acceptance-incomplete!
+               cmd-name json? (.getMessage e) (:open-titles data))
 
               json?
               (emit-error-envelope! {:code    "invalid_argument"
@@ -657,8 +683,11 @@
     (try
       (let [opts* (cond-> (-> opts
                               (merge body-opts)
-                              (dissoc :json)
+                              (dissoc :json :force)
                               (assoc :id id :json? json?))
+                    (:force opts)
+                    (assoc :force? true)
+
                     (contains? opts :tags)
                     (assoc :tags (split-tags (:tags opts)))
 
@@ -705,6 +734,10 @@
           (cond
             (and json? (= :ambiguous (:kind data)))
             (emit-ambiguous-envelope! e data)
+
+            (:acceptance-incomplete data)
+            (emit-acceptance-incomplete!
+             "update" json? (.getMessage e) (:open-titles data))
 
             json?
             (emit-error-envelope! {:code    "invalid_argument"

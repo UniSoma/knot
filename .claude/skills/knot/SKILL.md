@@ -208,6 +208,39 @@ For projects with custom `:statuses` (e.g. adding `"review"` between
 `knot start` / `knot close` so you don't accidentally skip a non-terminal
 stage.
 
+#### Acceptance gate on terminal transitions
+
+`knot close`, `knot status <id> <terminal>`, and `knot update <id>
+--status <terminal>` all enforce the v0.3 acceptance gate: when the
+ticket is in `:active-status` (default `in_progress`) and any
+frontmatter `:acceptance` entry has `done: false`, the transition is
+blocked. Plain text:
+
+```
+knot close: 0 of 2 acceptance criteria are unchecked:
+  - first AC
+  - second AC
+use --check to mark them done, or --force --summary "<reason>" to override.
+```
+
+JSON: `error.code = "acceptance_incomplete"`, `error.open_acceptance =
+[{title}, ...]`, exit 1.
+
+The gate skips on:
+
+- Empty / nil `:acceptance`.
+- Intake → terminal transitions (no work was started).
+- Terminal → terminal reclassifications (e.g. `closed → wontfix`).
+
+Two ways to clear it:
+
+1. Mark the AC done — `knot update <id> --ac "<title>" --done`. Composes
+   with `--status` in one call: `knot update <id> --ac "last AC" --done
+   --status closed` checks then closes.
+2. `--force --summary "<reason>"`. Required pair: `--force` without a
+   non-blank `--summary` exits `invalid_argument`. The summary is
+   appended as a Notes entry and serves as the override record.
+
 ### Notes and editing
 
 ```sh
@@ -252,11 +285,19 @@ Flag set on `knot update`:
   **add → flip → remove**, so a flip can target a just-added title.
   The same title in both directions exits 1 `invalid_argument`.
 - Whole body: `--body <text>` — destructive, mutually exclusive with
-  the sectional flags. There is **no `--force`**; git is the
-  documented undo path. The `## Acceptance Criteria` section in the
-  body is **display-only on write** — `--body` does not sync the
+  the sectional flags. There is **no `--force`** for `--body`; git is
+  the documented undo path. The `## Acceptance Criteria` section in
+  the body is **display-only on write** — `--body` does not sync the
   section back to frontmatter; use `--add-ac` / `--remove-ac` / `--ac`
   to mutate criteria.
+- Status transition: `--status <new>`. AC mutations apply *before* the
+  acceptance gate, so `knot update <id> --ac "last AC" --done --status
+  closed` checks then closes in one call. `--summary` is required on
+  terminal targets when overriding the gate; see
+  *Acceptance gate on terminal transitions* above.
+- `--force` (with `--summary`) bypasses the acceptance gate on a
+  terminal `--status` transition. Silent no-op when the gate would
+  not fire.
 - `--json` returns the v0.3 envelope wrapping the post-mutation
   ticket (no `:meta` slot — `update` never archives).
 
@@ -447,7 +488,9 @@ create                                 new ticket (-t -p -a --tags --mode
                                        --acceptance / --dep / --link are
                                        repeatable; --dep is lenient on
                                        missing, --link is strict
-start / status / close / reopen        lifecycle (--summary on close)
+start / status / close / reopen        lifecycle (--summary on close;
+                                       --force --summary to bypass the
+                                       acceptance gate on terminal moves)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode

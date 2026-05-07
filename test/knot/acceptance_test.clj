@@ -116,6 +116,52 @@
           twice (acceptance/strip-body-section once)]
       (is (= once twice)))))
 
+(deftest complete?-test
+  (testing "vacuously true on empty/nil"
+    (is (true? (acceptance/complete? nil)))
+    (is (true? (acceptance/complete? []))))
+
+  (testing "true when every entry is :done"
+    (is (true? (acceptance/complete? [{:title "a" :done true}
+                                      {:title "b" :done true}]))))
+
+  (testing "false when at least one entry is undone"
+    (is (false? (acceptance/complete? [{:title "a" :done true}
+                                       {:title "b" :done false}])))
+    (is (false? (acceptance/complete? [{:title "a" :done false}])))))
+
+(deftest progress-test
+  (testing "[0 0] on empty/nil"
+    (is (= [0 0] (acceptance/progress nil)))
+    (is (= [0 0] (acceptance/progress []))))
+
+  (testing "[done total] counts"
+    (is (= [0 1] (acceptance/progress [{:title "a" :done false}])))
+    (is (= [1 1] (acceptance/progress [{:title "a" :done true}])))
+    (is (= [1 3] (acceptance/progress [{:title "a" :done true}
+                                       {:title "b" :done false}
+                                       {:title "c" :done false}])))
+    (is (= [3 3] (acceptance/progress [{:title "a" :done true}
+                                       {:title "b" :done true}
+                                       {:title "c" :done true}])))))
+
+(deftest open-titles-test
+  (testing "empty seq on empty/nil"
+    (is (= [] (acceptance/open-titles nil)))
+    (is (= [] (acceptance/open-titles []))))
+
+  (testing "returns titles of unchecked entries in original order"
+    (is (= ["b" "d"]
+           (acceptance/open-titles [{:title "a" :done true}
+                                    {:title "b" :done false}
+                                    {:title "c" :done true}
+                                    {:title "d" :done false}]))))
+
+  (testing "empty seq when all entries are done"
+    (is (= []
+           (acceptance/open-titles [{:title "a" :done true}
+                                    {:title "b" :done true}])))))
+
 (deftest migrate-ticket-test
   (testing "lifts body AC into frontmatter and strips the section"
     (let [ticket {:frontmatter {:id "kno-A" :title "T"}

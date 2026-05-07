@@ -7,6 +7,30 @@
    a body section (one-shot migration only)."
   (:require [clojure.string :as str]))
 
+(defn progress
+  "Return `[done-count total-count]` for `acceptance`. `[0 0]` on
+   empty/nil so callers can render \"0/0\" without nil-checks."
+  [acceptance]
+  (let [total (count acceptance)
+        done  (count (filter :done acceptance))]
+    [done total]))
+
+(defn open-titles
+  "Return a vector of `:title` values from `acceptance` whose `:done`
+   is not truthy, preserving the original order. Empty vector on
+   empty/nil."
+  [acceptance]
+  (vec (keep (fn [{:keys [title done]}]
+               (when-not done title))
+             acceptance)))
+
+(defn complete?
+  "True when every entry in `acceptance` has `:done true`. Vacuously
+   true on empty/nil — callers that need to gate on \"some AC and not
+   complete\" must combine with `(seq acceptance)`."
+  [acceptance]
+  (every? :done acceptance))
+
 (defn render-section
   "Format an `:acceptance` vector as a `## Acceptance Criteria` markdown
    block, preceded by a leading blank-line separator. Returns `\"\"`

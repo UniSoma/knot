@@ -238,9 +238,13 @@
     :args        [{:name "id" :required true} {:name "new-status" :required true}]
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
+                  {:name :force :coerce :boolean :default false
+                   :desc "Bypass the acceptance-criteria gate on active→terminal transitions; requires --summary."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
-                   :note "Move a ticket into in_progress."}]}
+                   :note "Move a ticket into in_progress."}
+                  {:cmd "knot status kno-01abc closed --force --summary \"shipping anyway\""
+                   :note "Bypass the acceptance gate (recorded as a Notes entry)."}]}
 
    :start
    {:group       :lifecycle
@@ -257,9 +261,13 @@
     :args        [{:name "id" :required true}]
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
+                  {:name :force :coerce :boolean :default false
+                   :desc "Bypass the acceptance-criteria gate; requires --summary."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
-                   :note "Close with a summary."}]}
+                   :note "Close with a summary."}
+                  {:cmd "knot close kno-01abc --force --summary \"wontfix: outdated\""
+                   :note "Override the acceptance gate when AC is intentionally unfinished."}]}
 
    :reopen
    {:group       :lifecycle
@@ -410,6 +418,10 @@
     :restrict?   true
     :flags       [{:name :title        :desc "Replace the title."}
                   {:name :type         :desc "Replace the type."}
+                  {:name :status       :desc "Transition the status. Acceptance gate fires on active→terminal."}
+                  {:name :summary      :desc "Closing summary recorded on the ticket (terminal transitions only)."}
+                  {:name :force        :coerce :boolean :default false
+                   :desc "Bypass the acceptance-criteria gate on a --status terminal transition; requires --summary."}
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
                   {:name :mode         :desc "Replace the mode (afk|hitl)."}
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}

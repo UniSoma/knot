@@ -680,6 +680,49 @@
           (is (some #{b-id} path)
               "the offending cycle path must include the to id"))))))
 
+(deftest error-envelope-acceptance-incomplete-contract-test
+  ;; Pin the v0.3 acceptance gate: when `close --json` (or terminal
+  ;; `status --json` / `update --status <terminal> --json`) fires the
+  ;; gate, stdout carries `{ok:false, error:{code:"acceptance_incomplete",
+  ;; message, open_acceptance:[{title}, ...]}}` and the binary exits 1.
+  ;; Stdout-only — JSON consumers should never have to read stderr.
+  (testing "close --json on incomplete AC emits the acceptance_incomplete envelope"
+    (with-tmp tmp
+      (let [{create-out :out}      (run-knot tmp "create" "T"
+                                             "--acceptance" "first AC"
+                                             "--acceptance" "second AC")
+            id                     (id-of create-out "t")
+            _                      (run-knot tmp "start" id)
+            {:keys [exit out err]} (run-knot tmp "close" id "--json")
+            envelope               (parse-envelope out)]
+        (is (= 1 exit) (str "gate-firing close should exit 1, err=" err))
+        (is (str/blank? err)
+            "acceptance_incomplete envelope routes to stdout, not stderr")
+        (assert-envelope-invariants! envelope "close --json (acceptance_incomplete)")
+        (is (= false (:ok envelope)))
+        (is (= "acceptance_incomplete" (get-in envelope [:error :code])))
+        (is (string? (get-in envelope [:error :message])))
+        (let [open (get-in envelope [:error :open_acceptance])]
+          (is (vector? open) "error.open_acceptance must be a vector")
+          (is (= 2 (count open)))
+          (is (= "first AC"  (get-in open [0 :title])))
+          (is (= "second AC" (get-in open [1 :title])))))))
+
+  (testing "update --status <terminal> --json on incomplete AC emits the same envelope"
+    (with-tmp tmp
+      (let [{create-out :out}      (run-knot tmp "create" "T"
+                                             "--acceptance" "only AC")
+            id                     (id-of create-out "t")
+            _                      (run-knot tmp "start" id)
+            {:keys [exit out]}     (run-knot tmp "update" id
+                                             "--status" "closed" "--json")
+            envelope               (parse-envelope out)]
+        (is (= 1 exit))
+        (assert-envelope-invariants! envelope "update --json (acceptance_incomplete)")
+        (is (= "acceptance_incomplete" (get-in envelope [:error :code])))
+        (is (= [{:title "only AC"}]
+               (get-in envelope [:error :open_acceptance])))))))
+
 (deftest error-envelope-check-cannot-scan-test
   ;; Pin AC#5 (check exit-2): `knot check --json` outside a project
   ;; emits an error envelope on stdout (NOT stderr — distinct from

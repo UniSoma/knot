@@ -285,6 +285,40 @@
   [statuses terminal-statuses]
   (first (filter (set terminal-statuses) statuses)))
 
+(defn- gate-acceptance!
+  "Evaluate the v0.3 acceptance gate for a status transition. Fires when
+   `source` equals `active-status`, `target` is in `terminal-statuses`,
+   and `acceptance` has at least one unchecked entry. Throws ex-info
+   `:acceptance-incomplete` unless `force?` is true and `summary` is
+   non-blank — `--force` requires `--summary` so the override leaves a
+   record. Returns `:bypass` when the gate would fire but is forced
+   through (caller emits a stderr warning); returns nil otherwise."
+  [{:keys [source target acceptance active-status terminal-statuses
+           force? summary]}]
+  (let [fires? (and (= source active-status)
+                    (contains? (or terminal-statuses #{}) target)
+                    (seq acceptance)
+                    (not (acceptance/complete? acceptance)))]
+    (cond
+      (not fires?) nil
+
+      (not force?)
+      (let [open  (acceptance/open-titles acceptance)
+            [d t] (acceptance/progress acceptance)]
+        (throw (ex-info
+                (str d " of " t " acceptance criteria are unchecked; "
+                     "use --check to mark them done, or "
+                     "--force --summary \"<reason>\" to override.")
+                {:acceptance-incomplete true
+                 :open-titles           open
+                 :progress              [d t]})))
+
+      (str/blank? (or summary ""))
+      (throw (ex-info "--force requires a non-blank --summary"
+                      {:invalid-argument :force-summary}))
+
+      :else :bypass)))
+
 (defn status-cmd
   "Transition the ticket whose id is `(:id opts)` (full or partial) to
    `(:status opts)`. The resolver canonicalizes the id before save so
@@ -298,14 +332,19 @@
    a timestamped note under `## Notes` via `ticket/append-note`, sharing
    the same writer path as `add-note-cmd`.
 
+   The acceptance gate fires on `:active-status → :terminal-statuses`
+   transitions when at least one frontmatter `:acceptance` entry has
+   `:done false`. `(:force? opts)` bypasses the gate but requires a
+   non-blank `:summary` (the summary becomes the override record).
+
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the post-mutation ticket under `:data` instead of the saved
    path. When the new status is in `:terminal-statuses`, the envelope
    adds `:meta {:archived_to <path>}` so callers do not have to infer
    archive routing. Returns nil when no ticket matches (json mode does
    not change the not-found contract; the handler emits the envelope)."
-  [ctx {:keys [id status summary json?]}]
-  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+  [ctx {:keys [id status summary json? force?]}]
+  (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
         (resolve-ctx ctx)]
     (when (and (some? summary)
                (not (contains? (or terminal-statuses #{}) status)))
@@ -313,21 +352,36 @@
                            "terminal status; " status " is non-terminal")
                       {:status status})))
     (when-let [loaded (resolve-or-nil project-root tickets-dir id)]
-      (let [full-id (get-in loaded [:frontmatter :id])
-            new-fm  (assoc (:frontmatter loaded) :status status)
-            body*   (if (and (some? summary) (not (str/blank? summary)))
-                      (ticket/append-note (:body loaded)
-                                          now
-                                          (str/trim summary))
-                      (:body loaded))
-            ticket  (assoc loaded :frontmatter new-fm :body body*)
-            saved   (store/save! project-root tickets-dir full-id nil ticket
-                                 {:now now :terminal-statuses terminal-statuses})]
+      (let [full-id  (get-in loaded [:frontmatter :id])
+            source   (get-in loaded [:frontmatter :status])
+            ac       (get-in loaded [:frontmatter :acceptance])
+            bypass?  (= :bypass
+                        (gate-acceptance! {:source            source
+                                           :target            status
+                                           :acceptance        ac
+                                           :active-status     active-status
+                                           :terminal-statuses terminal-statuses
+                                           :force?            force?
+                                           :summary           summary}))
+            _        (when bypass?
+                       (warn! (str "knot: forcing transition with "
+                                   (count (acceptance/open-titles ac))
+                                   " unchecked acceptance criteria; "
+                                   "recorded in summary.")))
+            new-fm   (assoc (:frontmatter loaded) :status status)
+            body*    (if (and (some? summary) (not (str/blank? summary)))
+                       (ticket/append-note (:body loaded)
+                                           now
+                                           (str/trim summary))
+                       (:body loaded))
+            ticket   (assoc loaded :frontmatter new-fm :body body*)
+            saved    (store/save! project-root tickets-dir full-id nil ticket
+                                  {:now now :terminal-statuses terminal-statuses})]
         (if json?
-          (let [post            (store/load-one project-root tickets-dir full-id)
+          (let [post             (store/load-one project-root tickets-dir full-id)
                 terminal-target? (contains? (or terminal-statuses #{}) status)
-                meta-opt        (when terminal-target?
-                                  {:meta {:archived_to (fs/unixify saved)}})]
+                meta-opt         (when terminal-target?
+                                   {:meta {:archived_to (fs/unixify saved)}})]
             (output/touched-ticket-json post meta-opt))
           saved)))))
 
@@ -800,6 +854,9 @@
    and is mutually exclusive with the sectional flags. The acceptance
    triple `(:ac \"<title>\" + :done|:undone)` flips the `:done` state
    of one frontmatter `acceptance` entry; the title must match exactly.
+   `(:status opts)` transitions the ticket's status in the same call;
+   the v0.3 acceptance gate fires *after* AC mutations so
+   `--check \"last\" --status closed` works in one shot.
    Optional frontmatter fields (`:assignee`, `:parent`, `:tags`,
    `:external_refs`) are cleared when the supplied value is blank or
    empty. Returns the saved path, or nil when no ticket matches; throws
@@ -820,19 +877,51 @@
   (validate-tag-delta-opts! opts)
   (validate-ac-delta-opts! opts)
   (validate-ac-flip-opts! opts)
-  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+  (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
         (resolve-ctx ctx)]
+    (when (and (some? (:summary opts))
+               (contains? opts :status)
+               (not (contains? (or terminal-statuses #{}) (:status opts))))
+      (throw (ex-info (str "--summary is only valid on transitions to a "
+                           "terminal status; " (:status opts)
+                           " is non-terminal")
+                      {:status (:status opts)})))
     (when-let [loaded (resolve-or-nil project-root tickets-dir (:id opts))]
-      (let [full-id (get-in loaded [:frontmatter :id])
-            fm*     (-> (:frontmatter loaded)
-                        (update-frontmatter opts)
-                        (apply-ac-adds opts)
-                        (apply-ac-flip opts)
-                        (apply-ac-removes opts))
-            body*   (update-body (:body loaded) opts)
-            ticket* (assoc loaded :frontmatter fm* :body body*)
-            saved   (store/save! project-root tickets-dir full-id nil ticket*
-                                 {:now now :terminal-statuses terminal-statuses})]
+      (let [full-id  (get-in loaded [:frontmatter :id])
+            source   (get-in loaded [:frontmatter :status])
+            fm*      (-> (:frontmatter loaded)
+                         (update-frontmatter opts)
+                         (apply-ac-adds opts)
+                         (apply-ac-flip opts)
+                         (apply-ac-removes opts))
+            target   (if (contains? opts :status) (:status opts) source)
+            ac*      (:acceptance fm*)
+            bypass?  (when (contains? opts :status)
+                       (= :bypass
+                          (gate-acceptance!
+                           {:source            source
+                            :target            target
+                            :acceptance        ac*
+                            :active-status     active-status
+                            :terminal-statuses terminal-statuses
+                            :force?            (:force? opts)
+                            :summary           (:summary opts)})))
+            _        (when bypass?
+                       (warn! (str "knot: forcing transition with "
+                                   (count (acceptance/open-titles ac*))
+                                   " unchecked acceptance criteria; "
+                                   "recorded in summary.")))
+            fm**     (cond-> fm*
+                       (contains? opts :status) (assoc :status target))
+            body0    (update-body (:body loaded) opts)
+            body*    (if (and (contains? opts :status)
+                              (some? (:summary opts))
+                              (not (str/blank? (:summary opts))))
+                       (ticket/append-note body0 now (str/trim (:summary opts)))
+                       body0)
+            ticket*  (assoc loaded :frontmatter fm** :body body*)
+            saved    (store/save! project-root tickets-dir full-id nil ticket*
+                                  {:now now :terminal-statuses terminal-statuses})]
         (if (:json? opts)
           (output/touched-ticket-json
            (store/load-one project-root tickets-dir full-id))

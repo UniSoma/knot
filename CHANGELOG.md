@@ -14,8 +14,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Acceptance criteria are now **load-bearing on terminal transitions**.
+  `knot close`, `knot status <id> <terminal>`, and `knot update <id>
+  --status <terminal>` all enforce a v0.3 acceptance gate: when the
+  source status is `:active-status` and any frontmatter `:acceptance`
+  entry has `done: false`, the transition is blocked. Plain text on
+  stderr lists the unchecked count, indented open titles, and the
+  `--check` / `--force --summary` hint. JSON: new error code
+  `acceptance_incomplete` with `error.open_acceptance: [{title}, ...]`
+  on stdout. Exit 1.
+- `--force` flag on `knot close`, `knot status`, and `knot update` —
+  bypasses the gate when paired with a non-blank `--summary`. The
+  summary is appended as a Notes entry and serves as the override
+  record. `--force` without `--summary` (or with a blank one) fails
+  `invalid_argument`. When the gate would not fire, `--force` is a
+  silent no-op.
+- `knot update` gains `--status <new>` and `--summary <text>`. AC
+  mutations (`--ac --done`, `--add-ac`, `--remove-ac`) apply *before*
+  the gate, so `knot update <id> --ac "last AC" --done --status closed`
+  checks then closes in one disk write.
+- `knot.acceptance` exposes three pure predicates used by the gate and
+  by listing-side AC progress (forthcoming): `complete?`, `progress`
+  (returns `[done total]`), `open-titles`.
+
 ### Changed
 
+- `knot close` no longer succeeds unconditionally on an active ticket
+  with unchecked acceptance criteria. This is intentionally a behavior
+  break: prior to v0.3 the criteria were stored but never enforced.
+  Projects with multi-terminal configs (e.g. `:terminal-statuses
+  #{"closed" "wontfix"}`) hit the gate on `in_progress → wontfix` too
+  — the documented escape hatch is `--force --summary "wontfix:
+  <why>"`, where the summary becomes the abandonment record.
 - `knot prime` directive content overhauled against v0.3's CLI surface:
   - **HITL preamble** swaps the old 7-row "When the user says..." table
     for an 8-row mapping that adds the agent-write verb (`knot update`)

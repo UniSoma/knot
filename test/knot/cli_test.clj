@@ -1240,6 +1240,222 @@
         (is (= "done" (get-in loaded [:frontmatter :status])))
         (is (str/includes? (:body loaded) "delivered"))))))
 
+(deftest acceptance-gate-test
+  (testing "reopen preserves AC; the second close attempt re-fires the gate"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            ;; First close uses --force --summary to land in archive with mixed AC
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id :force? true :summary "first close"})
+            _       (cli/reopen-cmd (ctx tmp) {:id id})
+            after-r (store/load-one tmp ".tickets" id)
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            data    (try
+                      (cli/close-cmd (ctx tmp) {:id id})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= 2 (count (get-in after-r [:frontmatter :acceptance])))
+            "reopen preserves AC entries")
+        (is (true? (:acceptance-incomplete data))
+            "second close re-fires the gate"))))
+
+  (testing "close --force is a silent no-op when AC is empty (no gate to bypass, no --summary requirement)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            saved   (atom nil)
+            err     (with-err-str
+                      (reset! saved
+                              (cli/close-cmd (ctx tmp) {:id id :force? true})))]
+        (is (some #{"archive"} (map str (fs/components @saved))))
+        (is (= "" err) "no warning when the gate would not fire"))))
+
+  (testing "close --force is a silent no-op when AC is all done"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            saved   (atom nil)
+            err     (with-err-str
+                      (reset! saved
+                              (cli/close-cmd (ctx tmp) {:id id :force? true})))]
+        (is (some #{"archive"} (map str (fs/components @saved))))
+        (is (= "" err) "complete AC → gate skipped → --force silent"))))
+
+  (testing "close --force --summary bypasses gate, warns, appends summary as note"
+    (with-tmp tmp
+      (let [later   (assoc (ctx tmp) :now "2026-05-03T10:00:00Z")
+            created (cli/create-cmd later
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd later {:id id})
+            saved   (atom nil)
+            err     (with-err-str
+                      (reset! saved
+                              (cli/close-cmd later
+                                             {:id id
+                                              :force? true
+                                              :summary "wontfix: outdated"})))
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (string? @saved))
+        (is (some #{"archive"} (map str (fs/components @saved))))
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? err "forcing transition")
+            "warns on stderr before the success path")
+        (is (str/includes? err "2 unchecked")
+            "warning includes the unchecked count")
+        (is (str/includes? (:body loaded) "wontfix: outdated")
+            "summary appended via Notes")
+        (is (str/includes? (:body loaded) "**2026-05-03T10:00:00Z**")))))
+
+  (testing "close --force without --summary fails invalid_argument when gate would fire"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            data    (try
+                      (cli/close-cmd (ctx tmp) {:id id :force? true})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= :force-summary (:invalid-argument data))))))
+
+  (testing "close --force --summary \"\" (blank) fails invalid_argument when gate would fire"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            data    (try
+                      (cli/close-cmd (ctx tmp)
+                                     {:id id :force? true :summary "   "})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (= :force-summary (:invalid-argument data))))))
+
+  (testing "update --status terminal fires gate when AC has unchecked entries"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            data    (try
+                      (cli/update-cmd (ctx tmp) {:id id :status "closed"})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (true? (:acceptance-incomplete data)))
+        (is (= ["a" "b"] (:open-titles data)))
+        (is (= "in_progress"
+               (get-in (store/load-one tmp ".tickets" id) [:frontmatter :status]))))))
+
+  (testing "update --check + --status closed in one call: AC mutation applies before gate"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            saved   (cli/update-cmd (ctx tmp)
+                                    {:id id :ac "a" :done true :status "closed"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (string? saved))
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (true? (:done (first (get-in loaded [:frontmatter :acceptance])))))
+        (is (= "a" (:title (first (get-in loaded [:frontmatter :acceptance]))))))))
+
+  (testing "gate skips when AC is empty/nil — close from in_progress succeeds"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            saved   (cli/close-cmd (ctx tmp) {:id id})]
+        (is (some #{"archive"} (map str (fs/components saved)))
+            "no AC entries → gate must not fire"))))
+
+  (testing "gate skips on open→closed (intake→terminal): no work was started"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            saved   (cli/close-cmd (ctx tmp) {:id id})]
+        (is (some #{"archive"} (map str (fs/components saved)))
+            "open status is not :active-status → gate must not fire"))))
+
+  (testing "gate skips on terminal→terminal reclassification"
+    (with-tmp tmp
+      (let [ctx*    (assoc (ctx tmp)
+                           :statuses ["open" "in_progress" "closed" "wontfix"]
+                           :terminal-statuses #{"closed" "wontfix"})
+            created (cli/create-cmd ctx* {:title "T"
+                                          :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd ctx* {:id id})
+            saved   (cli/status-cmd ctx* {:id id :status "wontfix"})]
+        (is (string? saved) "terminal→terminal must not fire the gate"))))
+
+  (testing "gate skips when AC is complete — close from in_progress succeeds"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            saved   (cli/close-cmd (ctx tmp) {:id id})]
+        (is (some #{"archive"} (map str (fs/components saved)))))))
+
+  (testing "status <id> <terminal> fires gate from in_progress with mixed AC"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            data    (try
+                      (cli/status-cmd (ctx tmp) {:id id :status "closed"})
+                      nil
+                      (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (true? (:acceptance-incomplete data)))
+        (is (= ["b" "c"] (:open-titles data)))
+        (is (= [1 3] (:progress data))))))
+
+  (testing "close fires gate when in_progress ticket has any unchecked AC"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :acceptance ["a" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id id})
+            before  (slurp created)]
+        (let [thrown (try
+                       (cli/close-cmd (ctx tmp) {:id id})
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? thrown) "close should throw on incomplete AC")
+          (let [data (ex-data thrown)]
+            (is (true? (:acceptance-incomplete data)))
+            (is (= ["a" "b"] (:open-titles data)))
+            (is (= [0 2] (:progress data)))))
+        (is (= "in_progress"
+               (get-in (store/load-one tmp ".tickets" id) [:frontmatter :status]))
+            "no status change on gate firing")
+        (is (= before (slurp created))
+            "no file write on gate firing")))))
+
 (deftest init-cmd-test
   (testing "writes .knot.edn with all default keys present, each commented"
     (with-tmp tmp

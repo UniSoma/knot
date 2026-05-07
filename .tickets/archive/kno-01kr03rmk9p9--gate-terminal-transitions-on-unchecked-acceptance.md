@@ -1,64 +1,65 @@
 ---
 id: kno-01kr03rmk9p9
 title: Gate terminal transitions on unchecked acceptance criteria
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-07T02:20:13.793049170Z'
-updated: '2026-05-07T02:20:13.793049170Z'
+updated: '2026-05-07T03:02:13.264650714Z'
+closed: '2026-05-07T03:02:13.264650714Z'
 tags:
 - v0.3
 - acceptance
 acceptance:
 - title: knot.acceptance/complete? returns (every? :done acceptance), vacuously true on empty/nil.
-  done: false
+  done: true
 - title: knot.acceptance/progress returns [done-count total-count].
-  done: false
+  done: true
 - title: knot.acceptance/open-titles returns titles of unchecked entries, in original order.
-  done: false
+  done: true
 - title: status-cmd evaluates the gate predicate (and (seq ac) (not (acceptance/complete? ac))) whenever source = :active-status and target ∈ :terminal-statuses.
-  done: false
+  done: true
 - title: Gate-firing plain-text error on stderr lists the count, open titles indented, and the --check / --force --summary hint.
-  done: false
+  done: true
 - title: Exit code is 1 on gate firing.
-  done: false
+  done: true
 - title: JSON mode emits the v0.3 error envelope with error.code = "acceptance_incomplete", a count message, and error.open_acceptance = [{title}, ...].
-  done: false
+  done: true
 - title: The --force flag is declared on close, status, and update specs (coerce :boolean, default false).
-  done: false
+  done: true
 - title: When the gate would fire, --force without a non-blank --summary fails with invalid_argument.
-  done: false
+  done: true
 - title: Empty or whitespace-only --summary paired with --force fails with invalid_argument.
-  done: false
+  done: true
 - title: Bypass succeeds with --force --summary "<text>"; stderr emits a warning before the success path; summary is appended as a Notes entry.
-  done: false
+  done: true
 - title: When the gate would not fire, --force is silently accepted (no-op), and --summary rules are unchanged.
-  done: false
+  done: true
 - title: update applies AC mutations (--check, --uncheck, --add-ac, --remove-ac) before evaluating the gate; single disk write at the end.
-  done: false
+  done: true
 - title: Gate skips on empty/nil AC, intake→terminal transitions, and terminal→terminal reclassifications.
-  done: false
+  done: true
 - title: Reopen preserves AC state; subsequent close attempts re-evaluate the gate.
-  done: false
+  done: true
 - title: Predicate unit tests cover empty/nil AC, all-done, mixed, all-undone.
-  done: false
+  done: true
 - title: Gate integration tests cover firing on close, status <id> <terminal>, update --status <terminal>; skipping on empty AC, open→closed, terminal→terminal.
-  done: false
+  done: true
 - title: Bypass path tested for plain text and JSON; missing-summary failure tested for both surfaces.
-  done: false
+  done: true
 - title: Reopen → close cycle test confirms gate re-fires on the second close attempt.
-  done: false
+  done: true
 - title: references/json-protocol.md updated with the acceptance_incomplete code row and open_acceptance field documentation.
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md updated with the --force flag, gate behavior, and new error code in the same commit.
-  done: false
+  done: true
 - title: CHANGELOG entry under [Unreleased]/Changed (close behavior) and [Unreleased]/Added (--force flag, acceptance_incomplete code).
-  done: false
+  done: true
 - title: README acceptance-criteria section mentions the gate and the --force --summary escape.
-  done: false
+  done: true
 - title: bb test passes; clj-kondo --lint src test baseline preserved.
-  done: false
+  done: true
 links:
 - kno-01kqcvp72htb
 ---
@@ -89,3 +90,9 @@ The gate fires at the `status-cmd` chokepoint (single funnel for `close`, `statu
 ### Known characteristic
 
 In projects with multi-terminal config (e.g. `:terminal-statuses #{"closed" "wontfix"}`), `in_progress → wontfix` trips the gate. Expected escape: `--force --summary "wontfix: <why>"` — the summary becomes the abandonment record. Default single-terminal config is unaffected. Document in CHANGELOG.
+
+## Notes
+
+**2026-05-07T03:02:13.264650714Z**
+
+v0.3 acceptance gate live on close / status terminal / update --status terminal. --force --summary overrides; --check + --status closes in one disk write. JSON: acceptance_incomplete with open_acceptance. Tests: 337/4336, lint baseline preserved. (see knot show kno-01kr03rmk9p9)

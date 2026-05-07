@@ -79,6 +79,11 @@ knot start  <id>               # → in_progress, bumps :updated
 knot close  <id> --summary "shipped in #482"  # → closed + appended note
 knot reopen <id>               # restores from archive
 
+# Acceptance criteria are load-bearing on terminal transitions: closing
+# (or transitioning active → terminal) is blocked while any --acceptance
+# entry is unchecked. Mark them done with `knot update <id> --ac "<title>"
+# --done`, or override the gate with `--force --summary "<reason>"`.
+
 # Find what to pick up
 knot ready                     # non-terminal + non-blocked, sorted by priority
 knot ready --mode afk          # only agent-runnable

@@ -147,6 +147,7 @@ carries, and which commands surface it.
 | `ambiguous_id`    | Strict-resolved partial id matched >1 ticket.                    | `candidates: string[]`    | Same set as `not_found` plus `dep tree`.                                 |
 | `cycle`           | `dep <from> <to>` would create a cycle.                          | `cycle: string[]` (path)  | `dep`.                                                                   |
 | `invalid_argument` | Validation failure on a flag value or flag combination.         | —                         | `info --json` (e.g. unknown flag); also surfaces from `update --json` for conflicting body flags. Other commands keep argument-parse errors on stderr (see *Argument-parsing errors* below). |
+| `acceptance_incomplete` | Active→terminal transition attempted while at least one frontmatter `:acceptance` entry is unchecked. | `open_acceptance: {title}[]` | `close --json`, `status --json` (terminal target), `update --json` (with `--status <terminal>`). Pass `--force --summary "<reason>"` to override. |
 | `no_project`      | No `.knot.edn` and no `.tickets/` discoverable from cwd.         | —                         | `check --json` (exit 2), `info --json` (exit 1).                         |
 | `config_invalid`  | `.knot.edn` exists but cannot be parsed / contains invalid keys. | —                         | `check --json` (exit 2), `info --json` (exit 1).                         |
 
@@ -426,6 +427,32 @@ $ knot check --json    # integrity errors found; exits 1
   }
 }
 ```
+
+### Acceptance gate — close on incomplete AC
+
+```sh
+$ knot close kno-01abc --json    # in_progress, two unchecked AC; exits 1
+```
+```json
+{
+  "schema_version": 1,
+  "ok": false,
+  "error": {
+    "code": "acceptance_incomplete",
+    "message": "0 of 2 acceptance criteria are unchecked; use --check to mark them done, or --force --summary \"<reason>\" to override.",
+    "open_acceptance": [
+      { "title": "first AC" },
+      { "title": "second AC" }
+    ]
+  }
+}
+```
+
+The same envelope surfaces from `status <id> <terminal> --json` and
+`update <id> --status <terminal> --json` when the source status is the
+project's `:active-status` and at least one `:acceptance` entry has
+`done: false`. `--force --summary "<reason>"` overrides the gate; the
+summary is recorded as a Notes entry on the ticket.
 
 ### Cycle envelope — dep
 
