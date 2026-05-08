@@ -19,4 +19,18 @@ A Babashka file-based ticket tracker, storing tickets as markdown with YAML fron
 | Running tests            | [docs/agents/testing.md](docs/agents/testing.md)                                 |
 | Linting & formatting     | [docs/agents/linting-and-formatting.md](docs/agents/linting-and-formatting.md)   |
 | Clojure REPL evaluation  | [docs/agents/clojure-repl-evaluation.md](docs/agents/clojure-repl-evaluation.md) |
-| Issue tracking (knot)    | [docs/agents/issue-tracking.md](docs/agents/issue-tracking.md)                   |
+| Issue tracking (knot)    | [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md)                     |
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in this repo as markdown under `.tickets/`, managed exclusively via the `knot` CLI. See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+
+### Triage labels
+
+Canonical triage roles map to knot tags + modes (`triage` tag, `needs-info` tag, `afk`/`hitl` mode, close-with-`Won't do:` summary). See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+
+### Domain docs
+
+Single-context layout: `CONTEXT.md` + `docs/adr/` at the repo root. See [docs/agents/domain.md](docs/agents/domain.md).
