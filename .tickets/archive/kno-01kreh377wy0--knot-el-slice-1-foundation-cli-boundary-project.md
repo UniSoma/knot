@@ -1,12 +1,13 @@
 ---
 id: kno-01kreh377wy0
 title: 'knot.el slice 1: foundation — CLI boundary, project detection, dispatch, list view'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:42:34.108334227Z'
-updated: '2026-05-12T17:19:25.658867851Z'
+updated: '2026-05-12T17:32:25.703297258Z'
+closed: '2026-05-12T17:32:25.703297258Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -41,3 +42,9 @@ Modules introduced: `knot-cli`, `knot-info`, `knot-id` (display half — buttoni
 See docs/prd/knot-el.md (sections 'Repository layout', 'CLI invocation', 'Project detection', 'Buffer architecture', 'Modules', 'Naming & packaging', 'Lint discipline') for the design rationale.
 
 Out of scope for this slice: view switching (l/r/b/c), filter transient, show buffer, all mutations, deps tree, capture buffers, version-compat warning.
+
+## Notes
+
+**2026-05-12T17:32:25.703297258Z**
+
+Slice 1 foundation shipped at emacs/knot.el + emacs/knot-lint.el + bb lint:elisp. CLI boundary (knot-cli-call), per-directory info cache (knot-info-current / allowed-values / defaults), id display (knot-id-format), per-value faces (knot-format), M-x knot dispatch transient, knot-list tabulated-list buffer with project-qualified name and project-root default-directory. q inherits from special-mode; ? reopens dispatch in any knot.el buffer. 19/19 runtime smoke pass; bb lint:elisp clean; bb test green. Slices 2 / 6 / 7 / 8 unblocked.
