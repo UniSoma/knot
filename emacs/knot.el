@@ -20,19 +20,21 @@
 ;; boundary function, `knot-cli-call', which speaks exclusively to the
 ;; CLI's --json envelope.
 ;;
-;; This file currently lands slices 1-3 of the v0.1 plan: the CLI
+;; This file currently lands slices 1-4 of the v0.1 plan: the CLI
 ;; boundary, the project oracle (`knot-info-current'), the dispatch
 ;; transient (`M-x knot'), a single project-scoped list buffer that
 ;; flips in place between list / ready / blocked / closed views (`l'
 ;; / `r' / `b' / `c'), with a filter transient on `f' covering --mode
 ;; / --type / --status / --tag / --assignee / --limit /
-;; --acceptance-complete and `g' as the manual refresh, and a
+;; --acceptance-complete and `g' as the manual refresh, a
 ;; markdown-view-mode show buffer with buttonized ticket ids, AC-line
 ;; RET flipping done/undone, +/a / -/k for AC add/remove, ]/[ for
-;; next/previous in the originating list buffer, and a multi-level
-;; back-button on `q' that walks the entry chain across drill-ins.
-;; Mutations, capture buffers, and the deps tree arrive in
-;; subsequent slices.
+;; next/previous in the originating list buffer, a multi-level
+;; back-button on `q' that walks the entry chain across drill-ins,
+;; and an update transient on `,' that commits atomic frontmatter
+;; mutations (status / priority / mode / type / tags / assignee /
+;; parent) as one `knot update --flag value' subprocess each.
+;; Capture buffers and the deps tree arrive in subsequent slices.
 ;;
 ;; The knot binary is located via `executable-find' on
 ;; `knot-executable' (default \"knot\") and run synchronously per
@@ -897,6 +899,7 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "k") #'knot-show-remove-ac)
     (define-key map (kbd "]") #'knot-show-next-ticket)
     (define-key map (kbd "[") #'knot-show-prev-ticket)
+    (define-key map (kbd ",") #'knot-update-from-show)
     (define-key map (kbd "n") #'forward-button)
     (define-key map (kbd "p") #'backward-button)
     (define-key map (kbd "TAB") #'forward-button)
@@ -1180,6 +1183,173 @@ Preserves origin-list locals and point (clamped to buffer end)."
 ID may be a partial id, resolved by the CLI."
   (interactive (list (read-string "id: ")))
   (knot-show--open id))
+
+
+;;;; Update transient (knot-update module)
+
+(defun knot-update--ticket-id ()
+  "Return the ticket id in the current show buffer, or signal `user-error'."
+  (unless (derived-mode-p 'knot-show-mode)
+    (user-error "knot-update: not in a knot-show-mode buffer"))
+  (unless (and knot-show--id (not (string-empty-p knot-show--id)))
+    (user-error "knot-update: no ticket id in this buffer"))
+  knot-show--id)
+
+(defun knot-update--current-field (field)
+  "Return the current value for FIELD from the show buffer's parsed data."
+  (alist-get field knot-show--data))
+
+(defun knot-update--commit (id flag value)
+  "Run `knot update ID FLAG VALUE' atomically, then refresh the show buffer.
+A single subprocess per call — no batching.  Errors raised by the
+CLI envelope propagate out of `knot-cli-call' as `user-error',
+which short-circuits the refresh and leaves buffer state intact."
+  (knot-cli-call (list "update" id flag value))
+  (knot-show--refresh))
+
+(defun knot-update--read-allowed (prompt field current)
+  "Prompt for FIELD's allowed value, defaulting to CURRENT.
+FIELD names an entry in `allowed_values' (e.g. `statuses',
+`types', `modes')."
+  (let ((choices (knot-info-allowed-values field))
+        (default (and current (not (string-empty-p (format "%s" current)))
+                      (format "%s" current))))
+    (completing-read prompt choices nil t nil nil default)))
+
+(defun knot-update--read-priority (current)
+  "Prompt for a priority within `allowed_values.priority_range', default CURRENT."
+  (let* ((range (knot-info-allowed-values 'priority_range))
+         (min (alist-get 'min range))
+         (max (alist-get 'max range))
+         (choices (when (and (numberp min) (numberp max))
+                    (mapcar #'number-to-string (number-sequence min max))))
+         (default (and (numberp current) (number-to-string current)))
+         (raw (completing-read
+               (format "priority (%s..%s): " (or min "?") (or max "?"))
+               choices nil t nil nil default)))
+    (unless (string-match-p "\\`[0-9]+\\'" raw)
+      (user-error "knot-update: priority must be a non-negative integer"))
+    raw))
+
+(defun knot-update--read-tags (current)
+  "Prompt for a comma-list of tags, defaulting to CURRENT (a list of strings).
+Empty input clears the tag list."
+  (let ((default (and (listp current) current (string-join current ","))))
+    (read-string "tags (comma-list, empty to clear): " default)))
+
+(defun knot-update--read-free-string (prompt current)
+  "Prompt for a free-form value with CURRENT as the default text."
+  (read-string prompt (and current (not (string-empty-p (format "%s" current)))
+                           (format "%s" current))))
+
+(defun knot-update--read-parent (current &optional include-closed)
+  "Prompt for a parent id with completion over tickets.
+Candidates are formatted `id  title' and selection extracts the
+id.  The minibuffer pre-fills with CURRENT so plain RET keeps the
+existing parent; deleting the text and RET clears it.  By
+default only live tickets are offered; with INCLUDE-CLOSED
+non-nil, closed tickets are appended after the live set."
+  (let* ((live (knot-cli-call '("list")))
+         (closed (and include-closed
+                      (knot-cli-call '("list" "--status" "closed"))))
+         (rows (append live closed))
+         (choices (mapcar (lambda (r)
+                            (format "%s  %s"
+                                    (or (alist-get 'id r) "")
+                                    (or (alist-get 'title r) "")))
+                          rows))
+         (initial (and current (not (string-empty-p (format "%s" current)))
+                       (format "%s" current)))
+         (prompt (if include-closed
+                     "parent (live + closed, empty to clear): "
+                   "parent (live, C-u to include closed, empty to clear): "))
+         (pick (completing-read prompt choices nil nil initial)))
+    (cond
+     ((or (null pick) (string-empty-p pick)) "")
+     ((string-match "\\`\\(\\S-+\\)" pick) (match-string 1 pick))
+     (t pick))))
+
+(defun knot-update-set-status ()
+  "Replace status via `knot update --status'."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-allowed
+                 "status: " 'statuses
+                 (knot-update--current-field 'status))))
+    (knot-update--commit id "--status" value)))
+
+(defun knot-update-set-priority ()
+  "Replace priority via `knot update --priority'."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-priority
+                 (knot-update--current-field 'priority))))
+    (knot-update--commit id "--priority" value)))
+
+(defun knot-update-set-mode ()
+  "Replace mode via `knot update --mode'."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-allowed
+                 "mode: " 'modes
+                 (knot-update--current-field 'mode))))
+    (knot-update--commit id "--mode" value)))
+
+(defun knot-update-set-type ()
+  "Replace type via `knot update --type'."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-allowed
+                 "type: " 'types
+                 (knot-update--current-field 'type))))
+    (knot-update--commit id "--type" value)))
+
+(defun knot-update-set-tags ()
+  "Replace the tag list via `knot update --tags'.
+Empty input clears the tag list."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-tags
+                 (knot-update--current-field 'tags))))
+    (knot-update--commit id "--tags" value)))
+
+(defun knot-update-set-assignee ()
+  "Set or clear assignee via `knot update --assignee'.
+Empty input clears the assignee."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-free-string
+                 "assignee (empty to clear): "
+                 (knot-update--current-field 'assignee))))
+    (knot-update--commit id "--assignee" value)))
+
+(defun knot-update-set-parent (&optional include-closed)
+  "Set or clear parent via `knot update --parent'.
+Completion offers live tickets by default; with a prefix argument
+\(\\[universal-argument]\\), closed tickets are appended to the
+candidate list.  Empty input clears the parent id."
+  (interactive "P")
+  (let* ((id (knot-update--ticket-id))
+         (value (knot-update--read-parent
+                 (knot-update--current-field 'parent)
+                 include-closed)))
+    (knot-update--commit id "--parent" value)))
+
+(transient-define-prefix knot-update-from-show ()
+  "Update the current show buffer's ticket atomically.
+
+Each suffix prompts for one value and commits a single
+`knot update --flag value' subprocess; the show buffer
+auto-refreshes on success.  CLI errors raise `user-error' in the
+minibuffer and leave buffer state unchanged."
+  ["Update"
+   ("s" "status"   knot-update-set-status)
+   ("p" "priority" knot-update-set-priority)
+   ("m" "mode"     knot-update-set-mode)
+   ("t" "type"     knot-update-set-type)
+   ("T" "tags"     knot-update-set-tags)
+   ("a" "assignee" knot-update-set-assignee)
+   ("P" "parent"   knot-update-set-parent)])
 
 
 ;;;; Refresh (single-buffer; cross-buffer walk lands in slice 8)

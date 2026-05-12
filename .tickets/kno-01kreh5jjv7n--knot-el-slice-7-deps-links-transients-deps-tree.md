@@ -6,8 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:43:51.251988806Z'
-updated: '2026-05-12T16:43:51.251988806Z'
-parent: kno-01krebyvdr1w
+updated: '2026-05-12T19:38:50.591147188Z'
 tags:
 - emacs
 - knot-el
@@ -30,6 +29,7 @@ acceptance:
   done: false
 deps:
 - kno-01kreh4n6ryc
+parent: kno-01krebyvdr1w
 ---
 
 ## Description
