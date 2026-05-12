@@ -33,3 +33,17 @@ RUN bbin install https://github.com/bhauman/clojure-mcp-light.git --tag v0.2.2; 
 # clj-surgeon — structural analysis + AST refactoring CLI for Clojure.
 ARG CLJ_SURGEON_SHA=a6c0da960a59bdeb7927e9a79234893b02413ace
 RUN bbin install https://github.com/realgenekim/clj-surgeon.git --git/sha "${CLJ_SURGEON_SHA}"
+
+# Emacs 28.2 + markdown-mode + package-lint for knot.el development.
+# Bookworm ships emacs-nox 28.2 (satisfies PRD min 28.1), elpa-markdown-mode 2.5,
+# and elpa-package-lint. Debian's emacs-pkg system auto-activates the elpa-*
+# packages via /etc/emacs/site-start.d/, so `emacs --batch -L emacs/` picks
+# them up without manual (package-initialize). emacsclient is bundled with
+# emacs-nox for the capital-E escape hatch in knot.el's show buffer.
+RUN apt-get update; \
+    apt-get install -y --no-install-recommends \
+      emacs-nox \
+      elpa-markdown-mode \
+      elpa-package-lint; \
+    rm -rf /var/lib/apt/lists/*; \
+    emacs --version

@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T15:12:48.056853378Z'
-updated: '2026-05-12T15:12:48.056853378Z'
+updated: '2026-05-12T17:04:39.825174816Z'
 tags:
 - emacs
 - knot-el
@@ -35,6 +35,11 @@ acceptance:
   done: false
 - title: bb lint:elisp task byte-compiles emacs/knot.el and runs package-lint
   done: false
+deps:
+- kno-01kreh3g266x
+- kno-01kreh5wz1mb
+- kno-01kreh5jjv7n
+- kno-01kreh68sj1g
 ---
 
 ## Description
