@@ -20,7 +20,7 @@
 ;; boundary function, `knot-cli-call', which speaks exclusively to the
 ;; CLI's --json envelope.
 ;;
-;; This file currently lands slices 1-4 of the v0.1 plan: the CLI
+;; This file currently lands slices 1-5 of the v0.1 plan: the CLI
 ;; boundary, the project oracle (`knot-info-current'), the dispatch
 ;; transient (`M-x knot'), a single project-scoped list buffer that
 ;; flips in place between list / ready / blocked / closed views (`l'
@@ -31,10 +31,15 @@
 ;; RET flipping done/undone, +/a / -/k for AC add/remove, ]/[ for
 ;; next/previous in the originating list buffer, a multi-level
 ;; back-button on `q' that walks the entry chain across drill-ins,
-;; and an update transient on `,' that commits atomic frontmatter
+;; an update transient on `,' that commits atomic frontmatter
 ;; mutations (status / priority / mode / type / tags / assignee /
-;; parent) as one `knot update --flag value' subprocess each.
-;; Capture buffers and the deps tree arrive in subsequent slices.
+;; parent) as one `knot update --flag value' subprocess each, and
+;; capture buffers on `e' / `d' / `b' (edit description / design /
+;; body) and `n' (add note) that commit on `C-c C-c' or discard on
+;; `C-c C-k', plus a capital-`E' escape hatch that shells out to
+;; `knot edit <id>' with `EDITOR=emacsclient' for arbitrary
+;; structural edits.  The deps tree and cross-buffer refresh arrive
+;; in subsequent slices.
 ;;
 ;; The knot binary is located via `executable-find' on
 ;; `knot-executable' (default \"knot\") and run synchronously per
@@ -62,6 +67,15 @@
   :group 'tools
   :prefix "knot-"
   :link '(url-link :tag "Repository" "https://github.com/unisoma/knot"))
+
+(defcustom knot-emacsclient-executable "emacsclient"
+  "Executable used as `EDITOR' for the capital-E escape hatch.
+The capital-`E' show-buffer command shells out to
+`knot edit <id>' with this binary set as the child process's
+`EDITOR' (and `VISUAL') so that the ticket file opens in the
+running Emacs server."
+  :type 'string
+  :group 'knot)
 
 (defcustom knot-executable "knot"
   "Name of, or path to, the knot binary.
@@ -900,7 +914,11 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "]") #'knot-show-next-ticket)
     (define-key map (kbd "[") #'knot-show-prev-ticket)
     (define-key map (kbd ",") #'knot-update-from-show)
-    (define-key map (kbd "n") #'forward-button)
+    (define-key map (kbd "e") #'knot-show-edit-description)
+    (define-key map (kbd "d") #'knot-show-edit-design)
+    (define-key map (kbd "b") #'knot-show-edit-body)
+    (define-key map (kbd "n") #'knot-show-add-note)
+    (define-key map (kbd "E") #'knot-show-edit-via-emacsclient)
     (define-key map (kbd "p") #'backward-button)
     (define-key map (kbd "TAB") #'forward-button)
     (define-key map (kbd "<backtab>") #'backward-button)
@@ -1183,6 +1201,250 @@ Preserves origin-list locals and point (clamped to buffer end)."
 ID may be a partial id, resolved by the CLI."
   (interactive (list (read-string "id: ")))
   (knot-show--open id))
+
+
+;;;; Capture buffers (knot-capture module)
+
+(defvar-local knot-capture--id nil
+  "Ticket id this capture buffer commits to.")
+
+(defvar-local knot-capture--field nil
+  "Symbol naming the field this capture buffer commits to.
+One of `description', `design', `body', or `note'.")
+
+(defvar-local knot-capture--callback nil
+  "Thunk called after a successful commit; nil to skip.
+Used to refresh the originating show buffer.")
+
+(defconst knot-capture--field->flag
+  '((description . "--description")
+    (design      . "--design")
+    (body        . "--body"))
+  "Mapping from capture-buffer field symbols to `knot update' flags.
+Note: `note' commits via `knot add-note', not `knot update'.")
+
+(defconst knot-capture--field->label
+  '((description . "edit-description")
+    (design      . "edit-design")
+    (body        . "edit-body")
+    (note        . "add-note"))
+  "Mapping from capture-buffer field symbols to buffer-name labels.")
+
+(defvar knot-capture-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-c") #'knot-capture-commit)
+    (define-key map (kbd "C-c C-k") #'knot-capture-discard)
+    map)
+  "Keymap for `knot-capture-mode'.")
+
+(define-minor-mode knot-capture-mode
+  "Minor mode for knot long-form capture buffers.
+
+Carries the target ticket id, field, and post-commit callback as
+buffer-locals.  `C-c C-c' commits the buffer contents to the
+target ticket via `knot update --<field> ...' (or, for the `note'
+field, pipes stdin to `knot add-note <id>').  `C-c C-k' discards
+without writing.  Buffer-contents are passed as a single argv
+element with no shell escaping."
+  :lighter " Knot-Capture"
+  :keymap knot-capture-mode-map)
+
+(defun knot-capture--buffer-name (project id field)
+  "Return the canonical capture buffer name for PROJECT, ID, and FIELD."
+  (let ((label (or (alist-get field knot-capture--field->label)
+                   (symbol-name field))))
+    (format "*knot-%s: %s · %s*" label project id)))
+
+(defun knot-capture--extract-section (body section)
+  "Extract the SECTION subtree from a markdown BODY string.
+SECTION is a heading name (e.g. \"Description\").  Returns the
+content between `## SECTION' and the next `^## ' header, with
+trailing whitespace trimmed.  Returns the empty string when
+SECTION is not present."
+  (if (and body (stringp body))
+      (let ((case-fold-search nil)
+            (pattern (concat "^## " (regexp-quote section) "[ \t]*\n+")))
+        (if (string-match pattern body)
+            (let* ((start (match-end 0))
+                   (rest  (substring body start))
+                   (end   (if (string-match "^## " rest)
+                              (match-beginning 0)
+                            (length rest))))
+              (string-trim-right (substring rest 0 end)))
+          ""))
+    ""))
+
+(defun knot-capture--make-refresh-callback (origin)
+  "Return a thunk that refreshes ORIGIN (a show buffer) when it is live."
+  (lambda ()
+    (when (and origin (buffer-live-p origin))
+      (with-current-buffer origin
+        (when (derived-mode-p 'knot-show-mode)
+          (knot-show--refresh))))))
+
+(defun knot-capture--open (id field prefill callback)
+  "Pop a capture buffer for ID/FIELD prefilled with PREFILL.
+CALLBACK is a thunk called after a successful commit."
+  (let* ((info         (knot-info-current))
+         (project      (knot-info--project-name info))
+         (project-root (knot-info--project-root info))
+         (buf-name     (knot-capture--buffer-name project id field))
+         (buffer       (get-buffer-create buf-name))
+         (label        (or (alist-get field knot-capture--field->label)
+                           (symbol-name field))))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (when (and prefill (stringp prefill) (not (string-empty-p prefill)))
+          (insert prefill)))
+      (setq-local default-directory
+                  (file-name-as-directory
+                   (or project-root default-directory)))
+      (unless (derived-mode-p 'markdown-mode)
+        (markdown-mode))
+      (knot-capture-mode 1)
+      (setq knot-capture--id id
+            knot-capture--field field
+            knot-capture--callback callback)
+      (set-buffer-modified-p nil)
+      (goto-char (point-min))
+      (setq header-line-format
+            (format "knot · %s · %s · C-c C-c commit · C-c C-k cancel"
+                    label id)))
+    (pop-to-buffer buffer)
+    buffer))
+
+(defun knot-capture-commit ()
+  "Commit the current capture buffer to the target ticket."
+  (interactive)
+  (unless knot-capture-mode
+    (user-error "knot-capture: not in a knot-capture buffer"))
+  (let* ((id       knot-capture--id)
+         (field    knot-capture--field)
+         (callback knot-capture--callback)
+         (content  (buffer-substring-no-properties (point-min) (point-max))))
+    (unless (and id (stringp id) (not (string-empty-p id)))
+      (user-error "knot-capture: no target id in this buffer"))
+    (pcase field
+      ('note
+       (when (string-empty-p (string-trim content))
+         (user-error "knot-capture: empty note (use C-c C-k to discard)"))
+       (knot-cli-call (list "add-note" id) content))
+      ((or 'description 'design 'body)
+       (let ((flag (alist-get field knot-capture--field->flag)))
+         (knot-cli-call (list "update" id flag content))))
+      (_ (user-error "knot-capture: unknown field %S" field)))
+    (set-buffer-modified-p nil)
+    (let ((buffer (current-buffer)))
+      (quit-window t)
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))
+    (when (functionp callback)
+      (funcall callback))))
+
+(defun knot-capture-discard ()
+  "Discard the current capture buffer without writing."
+  (interactive)
+  (unless knot-capture-mode
+    (user-error "knot-capture: not in a knot-capture buffer"))
+  (set-buffer-modified-p nil)
+  (let ((buffer (current-buffer)))
+    (quit-window t)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
+
+;;;; Show-buffer capture entry points
+
+(defun knot-show--field-prefill (field)
+  "Return the prefill content for FIELD from the show buffer's data.
+For `body', the entire body field is returned verbatim; for
+`description' and `design', the corresponding `## Section'
+subtree is extracted."
+  (let ((body (alist-get 'body knot-show--data)))
+    (pcase field
+      ('body        (or body ""))
+      ('description (knot-capture--extract-section body "Description"))
+      ('design      (knot-capture--extract-section body "Design"))
+      (_ ""))))
+
+(defun knot-show--open-capture (field)
+  "Open a capture buffer for FIELD on the current show buffer's ticket."
+  (let* ((id (knot-update--ticket-id))
+         (prefill (knot-show--field-prefill field))
+         (origin (current-buffer)))
+    (knot-capture--open id field prefill
+                        (knot-capture--make-refresh-callback origin))))
+
+(defun knot-show-edit-description ()
+  "Pop a capture buffer to edit this ticket's Description section.
+Prefilled with the current `## Description' subtree; `C-c C-c'
+commits via `knot update --description ...'."
+  (interactive)
+  (knot-show--open-capture 'description))
+
+(defun knot-show-edit-design ()
+  "Pop a capture buffer to edit this ticket's Design section.
+Prefilled with the current `## Design' subtree; `C-c C-c'
+commits via `knot update --design ...'."
+  (interactive)
+  (knot-show--open-capture 'design))
+
+(defun knot-show-edit-body ()
+  "Pop a capture buffer to edit this ticket's full body.
+Prefilled with the current body; `C-c C-c' commits via
+`knot update --body ...'.  Destructive (no `--force'); use git
+to recover."
+  (interactive)
+  (knot-show--open-capture 'body))
+
+(defun knot-show-add-note ()
+  "Pop a capture buffer to append a note to the current ticket.
+`C-c C-c' pipes the buffer contents via stdin to
+`knot add-note <id>'."
+  (interactive)
+  (let* ((id (knot-update--ticket-id))
+         (origin (current-buffer)))
+    (knot-capture--open id 'note ""
+                        (knot-capture--make-refresh-callback origin))))
+
+(defun knot-show-edit-via-emacsclient ()
+  "Escape hatch: shell out to `knot edit <id>' with `EDITOR=emacsclient'.
+
+Runs `knot edit' asynchronously with the child process's
+`EDITOR' and `VISUAL' set to `knot-emacsclient-executable'.  The
+ticket file opens in the running Emacs server; on `C-x #'
+(`server-edit') the child process exits and this show buffer is
+refreshed.  Requires the Emacs server to be running
+(`server-start')."
+  (interactive)
+  (let* ((id     (knot-update--ticket-id))
+         (origin (current-buffer)))
+    (unless (and (fboundp 'server-running-p) (server-running-p))
+      (user-error
+       "knot-show: start the Emacs server first (M-x server-start) for `E'"))
+    (let* ((program     (knot-cli--program))
+           (emacsclient (or (executable-find knot-emacsclient-executable)
+                            knot-emacsclient-executable))
+           (process-environment
+            (cons (concat "EDITOR=" emacsclient)
+                  (cons (concat "VISUAL=" emacsclient)
+                        process-environment))))
+      (make-process
+       :name (format "knot-edit-%s" id)
+       :command (list program "edit" id)
+       :buffer (generate-new-buffer
+                (format " *knot-edit-%s*" id))
+       :noquery t
+       :sentinel
+       (lambda (proc _event)
+         (when (memq (process-status proc) '(exit signal))
+           (let ((pbuf (process-buffer proc)))
+             (when (buffer-live-p pbuf) (kill-buffer pbuf)))
+           (when (and origin (buffer-live-p origin))
+             (with-current-buffer origin
+               (when (derived-mode-p 'knot-show-mode)
+                 (knot-show--refresh))))))))))
 
 
 ;;;; Update transient (knot-update module)
