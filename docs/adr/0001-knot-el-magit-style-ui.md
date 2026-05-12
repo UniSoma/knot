@@ -1,0 +1,7 @@
+# knot.el adopts a magit-style UI, not an org-mode source representation
+
+For an Emacs mode that fronts a markdown-tickets-on-disk tool, the obvious choice is to render tickets as org headings and let users edit them in place — every Emacs user already knows org, and the file-per-ticket model maps cleanly to a single org file with one heading per ticket.
+
+We deliberately rejected that path. knot.el models tickets as opaque domain objects fronted by tabulated list and show buffers, with `transient` menus for every mutation — the magit pattern. The trigger is that org-as-source forces a bidirectional sync between two state machines that don't agree: org's TODO/DONE/WAITING and tag system would have to be projected onto and back from knot's `open/in_progress/closed`, `hitl/afk`, dep edges, acceptance criteria, and lifecycle gates. Every mode flip, status transition, or AC tick would have to be intercepted in `org-after-todo-state-change-hook` and translated into the correct `knot` CLI call, with rollback if the call fails. The magit pattern sidesteps this entirely: knot.el holds no source-of-truth state, every mutation is a single CLI call, and the UI re-renders from JSON on every refresh.
+
+The cost is that users get a magit-shaped UI instead of an org-shaped one — which means relearning navigation in a mode that doesn't otherwise need to be its own thing. We're paying that cost because the alternative is a sync layer that would dominate the codebase and break whenever knot's CLI shape evolves.
