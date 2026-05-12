@@ -20,11 +20,15 @@
 ;; boundary function, `knot-cli-call', which speaks exclusively to the
 ;; CLI's --json envelope.
 ;;
-;; This file currently lands slice 1 of the v0.1 plan: the CLI
+;; This file currently lands slices 1-2 of the v0.1 plan: the CLI
 ;; boundary, the project oracle (`knot-info-current'), the dispatch
-;; transient (`M-x knot'), and the default list view (`knot-list').
-;; View switching, the show buffer, mutations, capture buffers, and
-;; the deps tree arrive in subsequent slices.
+;; transient (`M-x knot'), and a single project-scoped list buffer
+;; that flips in place between list / ready / blocked / closed views
+;; (`l' / `r' / `b' / `c'), with a filter transient on `f' covering
+;; --mode / --type / --status / --tag / --assignee / --limit /
+;; --acceptance-complete and `g' as the manual refresh.  The show
+;; buffer, mutations, capture buffers, and the deps tree arrive in
+;; subsequent slices.
 ;;
 ;; The knot binary is located via `executable-find' on
 ;; `knot-executable' (default \"knot\") and run synchronously per
@@ -332,23 +336,23 @@ The id substring is propertized with `knot-id'."
 
 ;;;; Slice-boundary stubs
 
+;;;###autoload
 (defun knot-ready ()
-  "Open the ready view.
-Stub for slice 1; implemented in slice 2 (kno-01kreh3g266x)."
+  "Open the project's list buffer at the `ready' view."
   (interactive)
-  (user-error "knot-ready: arrives with slice 2 view switching (kno-01kreh3g266x)"))
+  (knot-list--open 'ready))
 
+;;;###autoload
 (defun knot-blocked ()
-  "Open the blocked view.
-Stub for slice 1; implemented in slice 2 (kno-01kreh3g266x)."
+  "Open the project's list buffer at the `blocked' view."
   (interactive)
-  (user-error "knot-blocked: arrives with slice 2 view switching (kno-01kreh3g266x)"))
+  (knot-list--open 'blocked))
 
+;;;###autoload
 (defun knot-closed ()
-  "Open the closed view.
-Stub for slice 1; implemented in slice 2 (kno-01kreh3g266x)."
+  "Open the project's list buffer at the `closed' view."
   (interactive)
-  (user-error "knot-closed: arrives with slice 2 view switching (kno-01kreh3g266x)"))
+  (knot-list--open 'closed))
 
 (defun knot-create ()
   "Open the create transient.
@@ -437,21 +441,110 @@ Stub for slice 1; implemented in slice 6 (kno-01kreh5wz1mb)."
   "Major mode for the knot info buffer.")
 
 
-;;;; List view (knot-list module — default view only)
+;;;; List view (knot-list module — list/ready/blocked/closed with switching)
+
+(defconst knot-list--views '(list ready blocked closed)
+  "Symbols naming every view the list buffer can render.")
+
+(defvar-local knot-list--view 'list
+  "Symbol naming the active view in this `knot-list-mode' buffer.
+One of `knot-list--views'.")
+
+(defvar-local knot-list--filters nil
+  "Active filter alist for this `knot-list-mode' buffer.
+Each entry is (KEY . VALUE) where KEY is a symbol from
+`knot-list--filter-keys' and VALUE is a string (or t / nil for
+the boolean `acceptance-complete' filter).  Filters with nil or
+empty-string values are treated as unset.")
+
+(defconst knot-list--filter-keys
+  '(mode type status tag assignee limit acceptance-complete)
+  "Filter keys accepted by the list views, in display order.")
+
+(defconst knot-list--filter-cli-flags
+  '((mode                . "--mode")
+    (type                . "--type")
+    (status              . "--status")
+    (tag                 . "--tag")
+    (assignee            . "--assignee")
+    (limit               . "--limit")
+    (acceptance-complete . "--acceptance-complete"))
+  "Map from filter key to the CLI flag string.")
+
+(defun knot-list--view-accepts-p (_view _key)
+  "Return non-nil when VIEW accepts filter KEY.
+For slice 2 every view accepts every filter; the hook stays to
+let later slices degrade gracefully when CLI flag surfaces
+diverge (see kno-01kreh3g266x AC #4)."
+  t)
+
+(defun knot-list--filter-string-value (value)
+  "Return VALUE as a non-empty filter string, or nil when unset."
+  (cond
+   ((null value) nil)
+   ((stringp value) (and (not (string-empty-p value)) value))
+   ((numberp value) (number-to-string value))
+   ((eq value t) "true")
+   (t nil)))
+
+(defun knot-list--effective-filters (view filters)
+  "Return FILTERS pruned to entries accepted by VIEW with usable values."
+  (cl-loop for (key . value) in filters
+           for canonical = (knot-list--filter-string-value value)
+           when (and canonical (knot-list--view-accepts-p view key))
+           collect (cons key canonical)))
+
+(defun knot-list--build-args (view filters)
+  "Return CLI argv for VIEW with FILTERS applied.
+Drops filters whose values are nil/empty or that VIEW does not
+accept."
+  (let ((args (list (symbol-name view))))
+    (dolist (entry (knot-list--effective-filters view filters))
+      (let* ((key (car entry))
+             (value (cdr entry))
+             (flag (cdr (assq key knot-list--filter-cli-flags))))
+        (setq args (append args (list flag value)))))
+    args))
+
+(defun knot-list--header-line (view filters)
+  "Render the header-line string for VIEW and active FILTERS."
+  (let* ((view-tag (propertize (format "[%s]" view)
+                               'face 'mode-line-emphasis))
+         (effective (knot-list--effective-filters view filters))
+         (flag-strs (mapcar (lambda (entry)
+                              (format "%s=%s"
+                                      (substring
+                                       (cdr (assq (car entry)
+                                                  knot-list--filter-cli-flags))
+                                       2)
+                                      (cdr entry)))
+                            effective)))
+    (concat view-tag
+            " "
+            (if flag-strs
+                (string-join flag-strs " ")
+              (propertize "(no filters)" 'face 'shadow)))))
 
 (defvar knot-list-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map tabulated-list-mode-map)
     (define-key map (kbd "?") #'knot)
+    (define-key map (kbd "l") #'knot-list-view-list)
+    (define-key map (kbd "r") #'knot-list-view-ready)
+    (define-key map (kbd "b") #'knot-list-view-blocked)
+    (define-key map (kbd "c") #'knot-list-view-closed)
+    (define-key map (kbd "f") #'knot-list-filter)
+    (define-key map (kbd "F") #'knot-list-clear-filters)
     map)
   "Keymap for `knot-list-mode'.")
 
 (define-derived-mode knot-list-mode tabulated-list-mode "Knot-List"
   "Major mode for the knot list buffer.
 
-Renders the live ticket list as a sortable tabulated list.  The
-columns mirror the terminal `knot list' output: id, status,
-priority, mode, type, assignee, acceptance progress, and title.
+A single project-scoped buffer renders any of the list / ready /
+blocked / closed views (see `knot-list--view').  `l', `r', `b',
+`c' switch view in place; `f' opens the filter transient; `F'
+clears active filters; `g' re-fetches.
 
 \\{knot-list-mode-map}"
   (setq tabulated-list-format
@@ -465,25 +558,88 @@ priority, mode, type, assignee, acceptance progress, and title.
          ("Title"     0 t)])
   (setq tabulated-list-padding 1)
   (setq tabulated-list-sort-key (cons "ID" nil))
+  ;; Free the header-line for view / filter status; column headers
+  ;; render as the first row of the buffer body instead.
+  (setq-local tabulated-list-use-header-line nil)
   (tabulated-list-init-header))
+
+(defun knot-list--buffer-name (project)
+  "Return the canonical list buffer name for PROJECT."
+  (format "*knot-list: %s*" project))
+
+(defun knot-list--ensure-buffer (info)
+  "Return (or create) the list buffer for INFO, initialized in `knot-list-mode'."
+  (let* ((project (knot-info--project-name info))
+         (project-root (knot-info--project-root info))
+         (buffer (get-buffer-create (knot-list--buffer-name project))))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'knot-list-mode)
+        (knot-list-mode))
+      (setq-local default-directory
+                  (file-name-as-directory (or project-root default-directory))))
+    buffer))
+
+(defun knot-list--render ()
+  "Refetch and redisplay the current buffer's view, preserving point.
+Uses buffer-local `knot-list--view' and `knot-list--filters'.
+Restores point to the row matching the previous row-id when
+possible."
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list--render: not in a knot-list-mode buffer"))
+  (let* ((prev-id (tabulated-list-get-id))
+         (args (knot-list--build-args knot-list--view knot-list--filters))
+         (rows (knot-cli-call args)))
+    (setq tabulated-list-entries (mapcar #'knot-list--row rows))
+    (setq header-line-format
+          (knot-list--header-line knot-list--view knot-list--filters))
+    (tabulated-list-print t)
+    (when prev-id
+      (goto-char (point-min))
+      (let ((found nil))
+        (while (and (not found) (not (eobp)))
+          (if (equal (tabulated-list-get-id) prev-id)
+              (setq found t)
+            (forward-line 1)))
+        (unless found
+          (goto-char (point-min)))))))
+
+(defun knot-list--open (view)
+  "Display the project's list buffer at VIEW.
+Creates the buffer when absent; otherwise reuses it and switches
+view in place (preserving active filters where the destination
+view accepts them)."
+  (let* ((info (knot-info-current))
+         (buffer (knot-list--ensure-buffer info)))
+    (with-current-buffer buffer
+      (setq knot-list--view view)
+      (knot-list--render))
+    (pop-to-buffer-same-window buffer)))
 
 ;;;###autoload
 (defun knot-list ()
-  "Open the default knot list buffer for the current project.
-Reuses `*knot-list: <project>*' when it already exists."
+  "Open the project's list buffer at the default `list' view."
   (interactive)
-  (let* ((info (knot-info-current))
-         (project (knot-info--project-name info))
-         (project-root (knot-info--project-root info))
-         (rows (knot-cli-call '("list")))
-         (buffer (get-buffer-create (format "*knot-list: %s*" project))))
-    (with-current-buffer buffer
-      (knot-list-mode)
-      (setq-local default-directory
-                  (file-name-as-directory (or project-root default-directory)))
-      (setq tabulated-list-entries (mapcar #'knot-list--row rows))
-      (tabulated-list-print t))
-    (pop-to-buffer-same-window buffer)))
+  (knot-list--open 'list))
+
+(defun knot-list-view-list ()
+  "Switch the current list buffer to the `list' view."
+  (interactive)
+  (knot-list--open 'list))
+
+(defun knot-list-view-ready ()
+  "Switch the current list buffer to the `ready' view."
+  (interactive)
+  (knot-list--open 'ready))
+
+(defun knot-list-view-blocked ()
+  "Switch the current list buffer to the `blocked' view."
+  (interactive)
+  (knot-list--open 'blocked))
+
+(defun knot-list-view-closed ()
+  "Switch the current list buffer to the `closed' view."
+  (interactive)
+  (knot-list--open 'closed))
 
 (defun knot-list--row (row)
   "Build a tabulated-list entry from a single ROW alist."
@@ -516,18 +672,143 @@ Empty acceptance lists render as \"-\"."
       "-")))
 
 
+;;;; Filter transient (knot-list module)
+
+(defun knot-list--current-filter-value (key)
+  "Return the current buffer-local value for filter KEY, or nil."
+  (cdr (assq key knot-list--filters)))
+
+(defun knot-list--set-filter (key value)
+  "Set filter KEY to VALUE in the current buffer's filter alist.
+A nil or empty-string VALUE removes the entry."
+  (setq knot-list--filters
+        (assq-delete-all key knot-list--filters))
+  (when (knot-list--filter-string-value value)
+    (push (cons key value) knot-list--filters)))
+
+(defun knot-list--read-from-allowed (prompt field current)
+  "Prompt for one of FIELD's allowed values, defaulting to CURRENT."
+  (let ((choices (cons "" (knot-info-allowed-values field))))
+    (completing-read prompt choices nil nil nil nil (or current ""))))
+
+(defun knot-list--read-free-string (prompt current)
+  "Prompt for a free-form filter value, defaulting to CURRENT."
+  (read-string prompt nil nil (or current "")))
+
+(defun knot-list--read-limit (current)
+  "Prompt for an integer limit, defaulting to CURRENT.
+Empty input clears the limit."
+  (let* ((raw (read-string "limit (empty to clear): "
+                           nil nil (and current (format "%s" current)))))
+    (cond
+     ((or (null raw) (string-empty-p raw)) nil)
+     ((string-match-p "\\`[0-9]+\\'" raw) raw)
+     (t (user-error "knot-list: --limit must be a non-negative integer")))))
+
+(defun knot-list--read-acceptance-complete (current)
+  "Prompt for an --acceptance-complete value (`true' / `false' / unset)."
+  (let* ((choices '("" "true" "false"))
+         (default (or current "")))
+    (let ((pick (completing-read
+                 "acceptance-complete (empty to clear): "
+                 choices nil t default)))
+      (if (string-empty-p pick) nil pick))))
+
+(defun knot-list-filter-set-mode ()
+  "Prompt for `--mode' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'mode (knot-list--read-from-allowed
+          "mode: " 'modes (knot-list--current-filter-value 'mode)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-type ()
+  "Prompt for `--type' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'type (knot-list--read-from-allowed
+          "type: " 'types (knot-list--current-filter-value 'type)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-status ()
+  "Prompt for `--status' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'status (knot-list--read-from-allowed
+            "status: " 'statuses (knot-list--current-filter-value 'status)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-tag ()
+  "Prompt for `--tag' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'tag (knot-list--read-free-string
+         "tag: " (knot-list--current-filter-value 'tag)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-assignee ()
+  "Prompt for `--assignee' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'assignee (knot-list--read-free-string
+              "assignee: " (knot-list--current-filter-value 'assignee)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-limit ()
+  "Prompt for `--limit' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'limit (knot-list--read-limit
+           (knot-list--current-filter-value 'limit)))
+  (knot-list--render))
+
+(defun knot-list-filter-set-acceptance-complete ()
+  "Prompt for `--acceptance-complete' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'acceptance-complete
+   (knot-list--read-acceptance-complete
+    (knot-list--current-filter-value 'acceptance-complete)))
+  (knot-list--render))
+
+(defun knot-list-clear-filters ()
+  "Clear every active filter on the current list buffer and re-render."
+  (interactive)
+  (setq knot-list--filters nil)
+  (knot-list--render))
+
+(transient-define-prefix knot-list-filter ()
+  "Filter the active list view.
+
+Each suffix prompts for the matching CLI filter value, updates
+the buffer-local filter state, and re-renders.  `C' clears every
+filter at once."
+  ["Filter"
+   ("m" "mode"                  knot-list-filter-set-mode)
+   ("t" "type"                  knot-list-filter-set-type)
+   ("s" "status"                knot-list-filter-set-status)
+   ("T" "tag"                   knot-list-filter-set-tag)
+   ("a" "assignee"              knot-list-filter-set-assignee)
+   ("l" "limit"                 knot-list-filter-set-limit)
+   ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
+  ["Other"
+   ("C" "clear all"             knot-list-clear-filters)])
+
+
 ;;;; Refresh (single-buffer; cross-buffer walk lands in slice 8)
 
 (defun knot-refresh ()
   "Refresh the current knot.el buffer in place.
-Slice 1 supports `knot-list-mode' and `knot-info-mode'."
+
+In `knot-list-mode' the active view and filter state are
+preserved and point is restored to the previous row id when
+possible.  In `knot-info-mode' the cached info envelope is
+invalidated and the buffer is re-rendered."
   (interactive)
   (knot-info-invalidate default-directory)
   (cond
    ((derived-mode-p 'knot-list-mode)
-    (let ((rows (knot-cli-call '("list"))))
-      (setq tabulated-list-entries (mapcar #'knot-list--row rows))
-      (tabulated-list-print t)))
+    (knot-list--render))
    ((derived-mode-p 'knot-info-mode)
     (let ((inhibit-read-only t))
       (erase-buffer)
