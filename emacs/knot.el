@@ -402,12 +402,12 @@ string in its `knot-id' property."
   ["Views"
    ("l" "list"      knot-list)
    ("r" "ready"     knot-ready)
-   ("b" "blocked"   knot-blocked)
-   ("c" "closed"    knot-closed)]
+   ("b" "blocked"   knot-blocked)]
   ["Create"
-   ("n" "new"       knot-create)
-   ("N" "quick new" knot-create-quick)]
+   ("c" "create"    knot-create)
+   ("C" "quick"     knot-create-quick)]
   ["Other"
+   ("o" "closed"    knot-closed)
    ("i" "info"      knot-info-show)
    ("g" "refresh"   knot-refresh)])
 
@@ -416,7 +416,7 @@ string in its `knot-id' property."
   "Dispatch entry alias.  Bind `C-c k' (or similar) to `knot' or `knot-status'.")
 
 
-;;;; Slice-boundary stubs
+;;;; View entry points (l/r/b/o suffixes on the dispatch transient)
 
 ;;;###autoload
 (defun knot-ready ()
@@ -435,19 +435,6 @@ string in its `knot-id' property."
   "Open the project's list buffer at the `closed' view."
   (interactive)
   (knot-list--open 'closed))
-
-(defun knot-create ()
-  "Open the create transient.
-Stub for slice 1; implemented in slice 6 (kno-01kreh5wz1mb)."
-  (interactive)
-  (user-error "knot-create: arrives with slice 6 create + quick-create (kno-01kreh5wz1mb)"))
-
-(defun knot-create-quick ()
-  "Run quick-create: prompt for a title and create with all defaults.
-Stub for slice 1; implemented in slice 6 (kno-01kreh5wz1mb)."
-  (interactive)
-  (user-error "knot-create-quick: arrives with slice 6 create + quick-create (kno-01kreh5wz1mb)"))
-
 
 ;;;; Info viewer
 
@@ -618,6 +605,8 @@ accept."
     (define-key map (kbd "f") #'knot-list-filter)
     (define-key map (kbd "F") #'knot-list-clear-filters)
     (define-key map (kbd "RET") #'knot-list-show-at-point)
+    (define-key map (kbd "s") #'knot-start)
+    (define-key map (kbd "x") #'knot-close)
     (define-key map (kbd "D") #'knot-deps-transient)
     (define-key map (kbd "L") #'knot-links-transient)
     map)
@@ -936,6 +925,8 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "]") #'knot-show-next-ticket)
     (define-key map (kbd "[") #'knot-show-prev-ticket)
     (define-key map (kbd ",") #'knot-update-from-show)
+    (define-key map (kbd "s") #'knot-start)
+    (define-key map (kbd "x") #'knot-close)
     (define-key map (kbd "e") #'knot-show-edit-description)
     (define-key map (kbd "d") #'knot-show-edit-design)
     (define-key map (kbd "b") #'knot-show-edit-body)
@@ -1699,6 +1690,273 @@ minibuffer and leave buffer state unchanged."
    ("T" "tags"     knot-update-set-tags)
    ("a" "assignee" knot-update-set-assignee)
    ("P" "parent"   knot-update-set-parent)])
+
+
+;;;; Create transient (knot-create module)
+;;
+;; Single transient prefix `knot-create' with infix args for every
+;; create-time flag except title.  Title is prompted in the minibuffer
+;; at commit time so the transient stays focused on options.  Repeatable
+;; flags (--dep, --link, --acceptance, --external-ref) are surfaced as
+;; comma-list infixes and expanded into multiple argv pairs at commit.
+;;
+;; Reader defaults are sourced from `knot info --json' (allowed_values
+;; and defaults), keeping the transient in sync with the project's
+;; configured values.
+
+(defun knot-create--read-allowed (field default-key)
+  "Build a `:reader' over FIELD's allowed values, defaulting via DEFAULT-KEY.
+The returned closure has the `(prompt initial-input history)' signature
+that transient `:reader' expects."
+  (lambda (prompt initial-input history)
+    (let* ((choices (knot-info-allowed-values field))
+           (default (knot-info-defaults default-key))
+           (default-str (and default (format "%s" default))))
+      (completing-read prompt choices nil t initial-input history
+                       default-str))))
+
+(defun knot-create--read-priority (prompt initial-input history)
+  "`:reader' for the priority infix, defaulting to `default_priority'.
+Accepts only a non-negative integer inside `priority_range'."
+  (let* ((range (knot-info-allowed-values 'priority_range))
+         (min (alist-get 'min range))
+         (max (alist-get 'max range))
+         (choices (when (and (numberp min) (numberp max))
+                    (mapcar #'number-to-string (number-sequence min max))))
+         (default (knot-info-defaults 'default_priority))
+         (default-str (and (numberp default) (number-to-string default)))
+         (raw (completing-read
+               (or prompt (format "priority (%s..%s): " (or min "?") (or max "?")))
+               choices nil t initial-input history default-str)))
+    (unless (string-match-p "\\`[0-9]+\\'" raw)
+      (user-error "knot-create: priority must be a non-negative integer"))
+    raw))
+
+(defun knot-create--read-tags (prompt _initial-input _history)
+  "`:reader' for the tags infix: a comma-list of tag names, empty allowed."
+  (read-string (or prompt "tags (comma-list): ")))
+
+(defun knot-create--read-assignee (prompt _initial-input _history)
+  "`:reader' for the assignee infix."
+  (read-string (or prompt "assignee: ")))
+
+(defun knot-create--read-parent (_prompt _initial-input _history)
+  "`:reader' for the parent infix.
+Delegates to `knot-update--read-parent' for completing-read across
+live + closed tickets.  Empty selection is allowed;
+`knot-create--expand-args' drops empty values so no `--parent' flag
+reaches the CLI."
+  (knot-update--read-parent nil t))
+
+(defun knot-create--read-id-list (label)
+  "Return a closure reading a comma-list of ids labelled LABEL.
+Free-form so the user can paste ids; we don't completing-read here
+because the user often wants to type several at once."
+  (lambda (prompt _initial-input _history)
+    (read-string (or prompt (format "%s (comma-list of ids): " label)))))
+
+(defun knot-create--read-acceptance (prompt _initial-input _history)
+  "`:reader' for the acceptance infix: a comma-list of AC titles."
+  (read-string (or prompt "acceptance titles (comma-list): ")))
+
+(defun knot-create--read-external-ref (prompt _initial-input _history)
+  "`:reader' for the external-ref infix: a comma-list of refs."
+  (read-string (or prompt "external refs (comma-list): ")))
+
+(transient-define-infix knot-create:--type ()
+  :description "type"
+  :class 'transient-option
+  :argument "--type="
+  :reader (knot-create--read-allowed 'types 'default_type))
+
+(transient-define-infix knot-create:--priority ()
+  :description "priority"
+  :class 'transient-option
+  :argument "--priority="
+  :reader #'knot-create--read-priority)
+
+(transient-define-infix knot-create:--mode ()
+  :description "mode"
+  :class 'transient-option
+  :argument "--mode="
+  :reader (knot-create--read-allowed 'modes 'default_mode))
+
+(transient-define-infix knot-create:--tags ()
+  :description "tags (comma)"
+  :class 'transient-option
+  :argument "--tags="
+  :reader #'knot-create--read-tags)
+
+(transient-define-infix knot-create:--assignee ()
+  :description "assignee"
+  :class 'transient-option
+  :argument "--assignee="
+  :reader #'knot-create--read-assignee)
+
+(transient-define-infix knot-create:--parent ()
+  :description "parent"
+  :class 'transient-option
+  :argument "--parent="
+  :reader #'knot-create--read-parent)
+
+(transient-define-infix knot-create:--dep ()
+  :description "deps (comma)"
+  :class 'transient-option
+  :argument "--dep="
+  :reader (knot-create--read-id-list "deps"))
+
+(transient-define-infix knot-create:--link ()
+  :description "links (comma)"
+  :class 'transient-option
+  :argument "--link="
+  :reader (knot-create--read-id-list "links"))
+
+(transient-define-infix knot-create:--acceptance ()
+  :description "acceptance (comma)"
+  :class 'transient-option
+  :argument "--acceptance="
+  :reader #'knot-create--read-acceptance)
+
+(transient-define-infix knot-create:--external-ref ()
+  :description "external refs (comma)"
+  :class 'transient-option
+  :argument "--external-ref="
+  :reader #'knot-create--read-external-ref)
+
+(defconst knot-create--repeatable-flags
+  '("--dep" "--link" "--acceptance" "--external-ref")
+  "Flags that the create transient surfaces as comma-list infixes.
+At commit time, each non-empty comma-separated value yields its own
+`--flag value' pair in argv.")
+
+(defun knot-create--expand-args (transient-args)
+  "Expand TRANSIENT-ARGS into a flat list of CLI argv strings.
+TRANSIENT-ARGS is the return of `(transient-args 'knot-create)' —
+a list of `--flag=value' strings.  Repeatable flags (see
+`knot-create--repeatable-flags') split their value on commas and
+emit one `--flag value' pair per non-empty entry.  Other flags emit
+a single pair when the value is non-empty; empty values are skipped
+so a backed-out infix doesn't reach the CLI."
+  (let (out)
+    (dolist (arg transient-args)
+      (when (string-match "\\`\\(--[a-z-]+\\)=\\(.*\\)\\'" arg)
+        (let ((flag (match-string 1 arg))
+              (value (match-string 2 arg)))
+          (cond
+           ((member flag knot-create--repeatable-flags)
+            (dolist (v (split-string value "," t "[ \t]+"))
+              (unless (string-empty-p v)
+                (push flag out)
+                (push v out))))
+           ((not (string-empty-p value))
+            (push flag out)
+            (push value out))))))
+    (nreverse out)))
+
+(defun knot-create--read-title ()
+  "Prompt for a ticket title; signal `user-error' on empty input."
+  (let ((title (read-string "title: ")))
+    (when (string-empty-p title)
+      (user-error "knot-create: title is required"))
+    title))
+
+(defun knot-show--goto-description ()
+  "Move point to the `## Description' heading if present, else point-min.
+Used by `knot-create' post-commit so the new show buffer parks point
+where the user would start writing the body."
+  (goto-char (point-min))
+  (when (re-search-forward "^## Description\\b" nil t)
+    (beginning-of-line)))
+
+(defun knot-create--run (argv)
+  "Run `knot create' with ARGV and drop into the new ticket's show buffer.
+ARGV is the list of strings after the `create' verb (title first, then
+any flag/value pairs).  Buffer point and window-point are parked on
+the `## Description' heading (or point-min when no body is rendered)."
+  (let* ((data (knot-cli-call (cons "create" argv)))
+         (id (alist-get 'id data)))
+    (unless (and id (not (string-empty-p id)))
+      (user-error "knot-create: CLI succeeded without returning an id"))
+    (let* ((buf (knot-show--open id))
+           (pt (with-current-buffer buf
+                 (knot-show--goto-description)
+                 (point)))
+           (win (get-buffer-window buf)))
+      (when win (set-window-point win pt))
+      buf)))
+
+(defun knot-create--commit (&optional args)
+  "Prompt for a title and invoke `knot create' with transient ARGS."
+  (interactive (list (transient-args 'knot-create)))
+  (let* ((title (knot-create--read-title))
+         (argv (cons title (knot-create--expand-args args))))
+    (knot-create--run argv)))
+
+;;;###autoload
+(transient-define-prefix knot-create ()
+  "Create a new knot ticket.
+
+Infix args set the create-time flags; the title is prompted in the
+minibuffer when you commit (`c').  Press `?' to see all bindings.
+Reader completions and defaults come from the cached `knot info'
+envelope, so allowed values track the project's configuration.
+
+Repeatable flags (`-d', `-L', `-A', `-r') accept a comma-list; each
+non-empty entry produces its own `--flag value' pair in argv."
+  ["Options"
+   ("-t" "type"               knot-create:--type)
+   ("-p" "priority"           knot-create:--priority)
+   ("-m" "mode"               knot-create:--mode)
+   ("-T" "tags (comma)"       knot-create:--tags)
+   ("-a" "assignee"           knot-create:--assignee)
+   ("-P" "parent"             knot-create:--parent)
+   ("-d" "deps (comma)"       knot-create:--dep)
+   ("-L" "links (comma)"      knot-create:--link)
+   ("-A" "acceptance (comma)" knot-create:--acceptance)
+   ("-r" "external (comma)"   knot-create:--external-ref)]
+  ["Commit"
+   ("c" "create"              knot-create--commit)])
+
+;;;###autoload
+(defun knot-create-quick ()
+  "Prompt for a title and create a ticket with all defaults.
+Drops into the new ticket's show buffer with point on `## Description'."
+  (interactive)
+  (knot-create--run (list (knot-create--read-title))))
+
+
+;;;; Lifecycle transitions (start / close)
+;;
+;; `s' (start) and `x' (close) in list or show buffers.  Context id is
+;; resolved via `knot-deps--context-id' (same rule: show buffer uses its
+;; ticket id; list buffer uses the row at point).  `knot close' prompts
+;; for a summary; the acceptance gate's `acceptance_incomplete' envelope
+;; surfaces via `knot-cli--parse' as a `user-error' carrying the
+;; envelope's message field.
+
+;;;###autoload
+(defun knot-start ()
+  "Transition the contextual ticket via `knot start <id>'.
+Context id comes from the show buffer's `knot-show--id' or the
+tabulated-list row at point.  Refreshes the originating buffer on
+success."
+  (interactive)
+  (let ((id (knot-deps--context-id)))
+    (knot-cli-call (list "start" id))
+    (knot-deps--refresh-origin)))
+
+;;;###autoload
+(defun knot-close ()
+  "Prompt for a closing summary and close the contextual ticket.
+Calls `knot close <id> --summary \"...\"' and refreshes.  When the
+acceptance gate fires, the CLI envelope's message surfaces as a
+`user-error' in the minibuffer (via `knot-cli-call'); buffer state is
+unchanged."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (summary (read-string "closing summary: ")))
+    (knot-cli-call (list "close" id "--summary" summary))
+    (knot-deps--refresh-origin)))
 
 
 ;;;; Deps + links transients (knot-deps / knot-links modules)
