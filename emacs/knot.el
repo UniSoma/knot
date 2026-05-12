@@ -20,26 +20,36 @@
 ;; boundary function, `knot-cli-call', which speaks exclusively to the
 ;; CLI's --json envelope.
 ;;
-;; This file currently lands slices 1-5 of the v0.1 plan: the CLI
-;; boundary, the project oracle (`knot-info-current'), the dispatch
-;; transient (`M-x knot'), a single project-scoped list buffer that
-;; flips in place between list / ready / blocked / closed views (`l'
-;; / `r' / `b' / `c'), with a filter transient on `f' covering --mode
-;; / --type / --status / --tag / --assignee / --limit /
-;; --acceptance-complete and `g' as the manual refresh, a
+;; This file currently lands slices 1-5 and slice 7 of the v0.1 plan:
+;; the CLI boundary, the project oracle (`knot-info-current'), the
+;; dispatch transient (`M-x knot'), a single project-scoped list
+;; buffer that flips in place between list / ready / blocked / closed
+;; views (`l' / `r' / `b' / `c'), with a filter transient on `f'
+;; covering --mode / --type / --status / --tag / --assignee / --limit
+;; / --acceptance-complete and `g' as the manual refresh, a
 ;; markdown-view-mode show buffer with buttonized ticket ids, AC-line
 ;; RET flipping done/undone, +/a / -/k for AC add/remove, ]/[ for
 ;; next/previous in the originating list buffer, a multi-level
 ;; back-button on `q' that walks the entry chain across drill-ins,
 ;; an update transient on `,' that commits atomic frontmatter
 ;; mutations (status / priority / mode / type / tags / assignee /
-;; parent) as one `knot update --flag value' subprocess each, and
+;; parent) as one `knot update --flag value' subprocess each,
 ;; capture buffers on `e' / `d' / `b' (edit description / design /
 ;; body) and `n' (add note) that commit on `C-c C-c' or discard on
-;; `C-c C-k', plus a capital-`E' escape hatch that shells out to
+;; `C-c C-k', a capital-`E' escape hatch that shells out to
 ;; `knot edit <id>' with `EDITOR=emacsclient' for arbitrary
-;; structural edits.  The deps tree and cross-buffer refresh arrive
-;; in subsequent slices.
+;; structural edits, a `D' deps transient and `L' links transient
+;; (in show and list) with add (live tickets via completing-read) /
+;; remove (current deps or links, archive titles merged in) /
+;; tree-open suffixes, `k' extended to undep / unlink the
+;; relationship at point in show after yes/no confirmation, and a
+;; dedicated `*knot-deps: <project> · <id>*' buffer that renders
+;; `knot dep tree --json' as an indented outline with ✓/○ status
+;; glyphs, node buttons that drill into show, `f' to toggle
+;; collapsed vs --full, and `q' to walk back to the buffer that
+;; opened it.  Create / quick-create (slice 6) and cross-buffer
+;; refresh + CLI-version compat warning (slice 8) arrive in
+;; subsequent slices.
 ;;
 ;; The knot binary is located via `executable-find' on
 ;; `knot-executable' (default \"knot\") and run synchronously per
@@ -170,6 +180,16 @@ Slice 8 will warn when the running CLI is older than this value."
 (defface knot-id
   '((t :inherit link))
   "Face for ticket ids."
+  :group 'knot)
+
+(defface knot-deps-seen-before
+  '((t :inherit shadow))
+  "Face for the ↑ marker on seen-before nodes in the deps tree."
+  :group 'knot)
+
+(defface knot-deps-missing
+  '((t :inherit font-lock-warning-face))
+  "Face for nodes in the deps tree that reference a missing ticket."
   :group 'knot)
 
 (defun knot-format-propertize (string face)
@@ -598,6 +618,8 @@ accept."
     (define-key map (kbd "f") #'knot-list-filter)
     (define-key map (kbd "F") #'knot-list-clear-filters)
     (define-key map (kbd "RET") #'knot-list-show-at-point)
+    (define-key map (kbd "D") #'knot-deps-transient)
+    (define-key map (kbd "L") #'knot-links-transient)
     map)
   "Keymap for `knot-list-mode'.")
 
@@ -910,7 +932,7 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "+") #'knot-show-add-ac)
     (define-key map (kbd "a") #'knot-show-add-ac)
     (define-key map (kbd "-") #'knot-show-remove-ac)
-    (define-key map (kbd "k") #'knot-show-remove-ac)
+    (define-key map (kbd "k") #'knot-show-remove-at-point)
     (define-key map (kbd "]") #'knot-show-next-ticket)
     (define-key map (kbd "[") #'knot-show-prev-ticket)
     (define-key map (kbd ",") #'knot-update-from-show)
@@ -919,6 +941,8 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "b") #'knot-show-edit-body)
     (define-key map (kbd "n") #'knot-show-add-note)
     (define-key map (kbd "E") #'knot-show-edit-via-emacsclient)
+    (define-key map (kbd "D") #'knot-deps-transient)
+    (define-key map (kbd "L") #'knot-links-transient)
     (define-key map (kbd "p") #'backward-button)
     (define-key map (kbd "TAB") #'forward-button)
     (define-key map (kbd "<backtab>") #'backward-button)
@@ -1017,6 +1041,61 @@ when there is nothing actionable."
       (knot-cli-call (list "update" knot-show--id "--remove-ac" title))
       (knot-show--refresh))))
 
+(defun knot-show--dep-id-at-point ()
+  "Return the `knot-dep-id' text property at point, or nil."
+  (get-text-property (point) 'knot-dep-id))
+
+(defun knot-show--rdep-id-at-point ()
+  "Return the `knot-rdep-id' text property at point, or nil.
+
+`knot-rdep-id' rows live in the `## Blocking' section: each row's
+id names a ticket that depends on this one, so removing the
+relationship runs `knot undep' with the arguments swapped relative
+to a `## Blockers' row."
+  (get-text-property (point) 'knot-rdep-id))
+
+(defun knot-show--link-id-at-point ()
+  "Return the `knot-link-id' text property at point, or nil."
+  (get-text-property (point) 'knot-link-id))
+
+(defun knot-show-remove-at-point ()
+  "Remove the relationship or AC at point after confirmation.
+
+Dispatches on the text properties added during render: a dep row
+in `## Blockers' (`knot-dep-id') triggers `knot undep <this>
+<row>'; a reverse-dep row in `## Blocking' (`knot-rdep-id')
+triggers `knot undep <row> <this>'; a link row in `## Linked'
+\(`knot-link-id') triggers `knot unlink'; an acceptance-criterion
+line (`knot-ac-title') triggers `--remove-ac'.  Errors when none
+of those properties is at point."
+  (interactive)
+  (let ((dep-id   (knot-show--dep-id-at-point))
+        (rdep-id  (knot-show--rdep-id-at-point))
+        (link-id  (knot-show--link-id-at-point))
+        (ac       (knot-show--ac-at-point))
+        (id       (knot-update--ticket-id)))
+    (cond
+     (dep-id
+      (when (yes-or-no-p (format "Remove dep %s from %s? " dep-id id))
+        (knot-cli-call (list "undep" id dep-id))
+        (knot-show--refresh)))
+     (rdep-id
+      (when (yes-or-no-p
+             (format "Remove dep %s from %s? " id rdep-id))
+        (knot-cli-call (list "undep" rdep-id id))
+        (knot-show--refresh)))
+     (link-id
+      (when (yes-or-no-p (format "Remove link %s ↔ %s? " id link-id))
+        (knot-cli-call (list "unlink" id link-id))
+        (knot-show--refresh)))
+     (ac
+      (when (yes-or-no-p (format "Remove acceptance criterion %S? " ac))
+        (knot-cli-call (list "update" id "--remove-ac" ac))
+        (knot-show--refresh)))
+     (t
+      (user-error
+       "knot-show: not on a dep, link, or acceptance criterion line")))))
+
 (defun knot-show--step (direction)
   "Move to the row DIRECTION away in the originating list buffer.
 Propagates the existing `knot-show--back-buffer' to the next
@@ -1057,18 +1136,26 @@ buffer so lateral stepping does not grow the back chain."
   (interactive)
   (knot-show--step -1))
 
-(defun knot-show--render-relationship (label entries)
-  "Render a markdown section LABEL listing relationship ENTRIES."
+(defun knot-show--render-relationship (label entries &optional relation-prop)
+  "Render a markdown section LABEL listing relationship ENTRIES.
+
+When RELATION-PROP is non-nil, every row is propertized with that
+symbol carrying the row's id, so commands at point (e.g. `k' for
+undep / unlink) can identify which relationship they target."
   (when (and entries (listp entries) (not (null entries)))
     (insert (format "## %s\n\n" label))
     (dolist (entry entries)
-      (let ((id     (alist-get 'id entry))
-            (title  (alist-get 'title entry))
-            (status (alist-get 'status entry)))
+      (let* ((id     (alist-get 'id entry))
+             (title  (alist-get 'title entry))
+             (status (alist-get 'status entry))
+             (start  (point)))
         (insert (format "- %s [%s] %s\n"
                         (or id "")
                         (or status "?")
-                        (or title "")))))
+                        (or title "")))
+        (when (and relation-prop id)
+          (add-text-properties start (point)
+                               (list relation-prop id)))))
     (insert "\n")))
 
 (defun knot-show--render-scalar-list (label items)
@@ -1137,10 +1224,10 @@ buffer so lateral stepping does not grow the back chain."
         (unless (string-suffix-p "\n" body)
           (insert "\n"))
         (insert "\n"))
-      (knot-show--render-relationship "Blockers" blockers)
-      (knot-show--render-relationship "Blocking" blocking)
+      (knot-show--render-relationship "Blockers" blockers 'knot-dep-id)
+      (knot-show--render-relationship "Blocking" blocking 'knot-rdep-id)
       (knot-show--render-relationship "Children" children)
-      (knot-show--render-relationship "Linked" linked))
+      (knot-show--render-relationship "Linked" linked 'knot-link-id))
     (knot-id-buttonize-region (point-min) (point-max))))
 
 (defun knot-show--open (id &optional origin-list-buffer origin-id back-buffer)
@@ -1614,6 +1701,334 @@ minibuffer and leave buffer state unchanged."
    ("P" "parent"   knot-update-set-parent)])
 
 
+;;;; Deps + links transients (knot-deps / knot-links modules)
+
+(defun knot-deps--context-id ()
+  "Return the contextual ticket id for the deps / links transients.
+
+In `knot-show-mode' the buffer's `knot-show--id' is used; in
+`knot-list-mode' the id of the tabulated row at point is used."
+  (cond
+   ((derived-mode-p 'knot-show-mode)
+    (unless (and knot-show--id (not (string-empty-p knot-show--id)))
+      (user-error "knot-deps: no ticket id in this show buffer"))
+    knot-show--id)
+   ((derived-mode-p 'knot-list-mode)
+    (or (tabulated-list-get-id)
+        (user-error "knot-deps: no ticket on this list row")))
+   (t
+    (user-error "knot-deps: not in a knot.el show or list buffer"))))
+
+(defun knot-deps--refresh-origin ()
+  "Refresh the originating buffer after a deps / links mutation."
+  (cond
+   ((derived-mode-p 'knot-show-mode) (knot-show--refresh))
+   ((derived-mode-p 'knot-list-mode) (knot-list--render))))
+
+(defun knot-deps--format-row (id title)
+  "Format an `id  title' completion candidate for ID and TITLE."
+  (format "%s  %s" (or id "") (or title "")))
+
+(defun knot-deps--extract-id (pick)
+  "Return the id substring from a `id  title' candidate PICK."
+  (cond
+   ((or (null pick) (string-empty-p pick))
+    (user-error "knot-deps: no selection"))
+   ((string-match "\\`\\(\\S-+\\)" pick) (match-string 1 pick))
+   (t pick)))
+
+(defun knot-deps--read-live (prompt exclude-id)
+  "Prompt for a live ticket via `completing-read', defaulting to nil.
+
+Candidates are formatted `id  title' from `knot list --json' (live
+tickets only).  EXCLUDE-ID, when non-nil, is filtered out so a
+ticket cannot depend on / link itself."
+  (let* ((rows (knot-cli-call '("list")))
+         (rows (if exclude-id
+                   (cl-remove-if (lambda (r)
+                                   (equal exclude-id (alist-get 'id r)))
+                                 rows)
+                 rows))
+         (choices (mapcar (lambda (r)
+                            (knot-deps--format-row
+                             (alist-get 'id r)
+                             (alist-get 'title r)))
+                          rows)))
+    (unless choices
+      (user-error "knot-deps: no live tickets to choose from"))
+    (knot-deps--extract-id
+     (completing-read prompt choices nil t))))
+
+(defun knot-deps--id->title-map ()
+  "Return a hash mapping every live and closed ticket id to its title.
+
+Used so undep / unlink candidate lists can show titles even for
+relationships that point to archived tickets."
+  (let ((m (make-hash-table :test 'equal)))
+    (dolist (r (knot-cli-call '("list")))
+      (puthash (alist-get 'id r) (alist-get 'title r) m))
+    (dolist (r (knot-cli-call '("list" "--status" "closed")))
+      (puthash (alist-get 'id r) (alist-get 'title r) m))
+    m))
+
+(defun knot-deps--read-current (prompt ids)
+  "Prompt for one of IDS via `completing-read'.
+
+IDS is a list of ticket id strings — typically the contextual
+ticket's `deps' or `links'.  Each candidate is rendered as `id
+title' with the title looked up across live + closed tickets so
+archived relationships display correctly."
+  (unless (and ids (listp ids) (not (null ids)))
+    (user-error "knot-deps: no relationships to remove"))
+  (let* ((titles (knot-deps--id->title-map))
+         (choices (mapcar (lambda (id)
+                            (knot-deps--format-row
+                             id (gethash id titles)))
+                          ids)))
+    (knot-deps--extract-id
+     (completing-read prompt choices nil t))))
+
+(defun knot-deps--current-field (id field)
+  "Fetch ID's FIELD list from a fresh `knot show' call."
+  (alist-get field (knot-cli-call (list "show" id))))
+
+(defun knot-deps-add ()
+  "Add a dep to the contextual ticket via `knot dep <id> <to>'."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (to (knot-deps--read-live
+              (format "Add dep to %s: " id) id)))
+    (knot-cli-call (list "dep" id to))
+    (knot-deps--refresh-origin)))
+
+(defun knot-deps-remove ()
+  "Remove one of the contextual ticket's deps via `knot undep <id> <to>'."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (deps (knot-deps--current-field id 'deps))
+         (to (knot-deps--read-current
+              (format "Remove dep from %s: " id) deps)))
+    (knot-cli-call (list "undep" id to))
+    (knot-deps--refresh-origin)))
+
+(defun knot-deps-tree ()
+  "Open the deps tree buffer for the contextual ticket."
+  (interactive)
+  (knot-deps--open (knot-deps--context-id) (current-buffer)))
+
+;;;###autoload
+(transient-define-prefix knot-deps-transient ()
+  "Manage deps for the contextual ticket."
+  ["Deps"
+   ("a" "add"          knot-deps-add)
+   ("r" "remove"       knot-deps-remove)
+   ("t" "tree (open)"  knot-deps-tree)])
+
+(defun knot-links-add ()
+  "Add a symmetric link to the contextual ticket via `knot link <id> <to>'."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (to (knot-deps--read-live
+              (format "Add link to %s: " id) id)))
+    (knot-cli-call (list "link" id to))
+    (knot-deps--refresh-origin)))
+
+(defun knot-links-remove ()
+  "Remove one of the contextual ticket's links via `knot unlink <id> <to>'."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (links (knot-deps--current-field id 'links))
+         (to (knot-deps--read-current
+              (format "Remove link from %s: " id) links)))
+    (knot-cli-call (list "unlink" id to))
+    (knot-deps--refresh-origin)))
+
+;;;###autoload
+(transient-define-prefix knot-links-transient ()
+  "Manage symmetric links for the contextual ticket."
+  ["Links"
+   ("a" "add"    knot-links-add)
+   ("r" "remove" knot-links-remove)])
+
+
+;;;; Deps tree buffer (knot-deps module — JSON tree view)
+
+(defvar-local knot-deps--id nil
+  "Ticket id rendered in this `knot-deps-mode' buffer.")
+
+(defvar-local knot-deps--full nil
+  "Non-nil when this `knot-deps-mode' buffer is rendering with `--full'.")
+
+(defvar-local knot-deps--back-buffer nil
+  "Buffer `knot-deps-quit' should switch to when this buffer is dismissed.
+
+Mirrors `knot-show--back-buffer': set on entry to the buffer that
+invoked the deps transient's tree-open suffix.  Nil falls through
+to `quit-window'.")
+
+(defvar knot-deps-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "?") #'knot)
+    (define-key map (kbd "g") #'knot-refresh)
+    (define-key map (kbd "f") #'knot-deps-toggle-full)
+    (define-key map (kbd "q") #'knot-deps-quit)
+    (define-key map (kbd "n") #'forward-button)
+    (define-key map (kbd "p") #'backward-button)
+    (define-key map (kbd "TAB") #'forward-button)
+    (define-key map (kbd "<backtab>") #'backward-button)
+    map)
+  "Keymap for `knot-deps-mode'.")
+
+(define-derived-mode knot-deps-mode special-mode "Knot-Deps"
+  "Major mode for the knot deps tree buffer.
+
+Renders `knot dep tree --json' as an indented outline with a
+status glyph per node (✓ for closed, ○ for live).  Each node is a
+`knot-id' button; RET opens that ticket's show.  `f' toggles
+between the collapsed view and `--full' (which expands duplicate
+subtrees).
+
+\\{knot-deps-mode-map}"
+  (setq truncate-lines nil)
+  (setq buffer-read-only t))
+
+(defun knot-deps--buffer-name (project id)
+  "Return the canonical deps buffer name for PROJECT and ID."
+  (format "*knot-deps: %s · %s*" project id))
+
+(defun knot-deps--status-glyph (status)
+  "Return the status glyph for STATUS — ✓ when closed, ○ otherwise."
+  (if (and status (stringp status) (string= status "closed"))
+      "✓"
+    "○"))
+
+(defun knot-deps--insert-node (node depth)
+  "Render NODE (a parsed `dep tree' entry) at indent DEPTH.
+
+Inserts `  ' × DEPTH, the status glyph, the id (as a `knot-id'
+button), and the title.  Recurses on each entry under `deps'.
+
+Two CLI-side markers are surfaced:
+
+- `missing:true' (dangling dep reference): the row uses a `?'
+  glyph, the title is replaced by `(missing)' in
+  `knot-deps-missing', and recursion stops.
+
+- `seen_before:true' (collapsed view, duplicate subtree): the
+  row renders normally with a trailing ` ↑' in
+  `knot-deps-seen-before' to signal the subtree was already
+  expanded earlier; recursion stops."
+  (let* ((id          (alist-get 'id node))
+         (title       (alist-get 'title node))
+         (status      (alist-get 'status node))
+         (missing     (alist-get 'missing node))
+         (seen-before (alist-get 'seen_before node))
+         (deps        (alist-get 'deps node))
+         (indent      (make-string (* depth 2) ?\s))
+         (glyph       (if missing "?" (knot-deps--status-glyph status)))
+         (id-str      (or id "")))
+    (insert indent glyph " ")
+    (let ((beg (point)))
+      (insert id-str)
+      (when (not (string-empty-p id-str))
+        (make-text-button beg (point)
+                          :type 'knot-id
+                          'knot-id id-str)))
+    (cond
+     (missing
+      (insert "  " (propertize "(missing)" 'face 'knot-deps-missing)))
+     ((and title (not (string-empty-p title)))
+      (insert "  " title)))
+    (when seen-before
+      (insert " " (propertize "↑" 'face 'knot-deps-seen-before)))
+    (insert "\n")
+    (when (and (not missing) (not seen-before) deps (listp deps))
+      (dolist (child deps)
+        (knot-deps--insert-node child (1+ depth))))))
+
+(defun knot-deps--render (data full)
+  "Render DATA (the parsed `dep tree' envelope) into the current buffer.
+
+FULL is the value of `knot-deps--full' captured for the header
+line."
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (setq header-line-format
+          (format "knot · deps · %s · f %s · RET open · g refresh · q back"
+                  (or (alist-get 'id data) "?")
+                  (if full "(full)" "(collapsed)")))
+    (knot-deps--insert-node data 0)))
+
+(defun knot-deps--fetch (id full)
+  "Fetch the deps tree for ID, passing `--full' when FULL is non-nil."
+  (let ((args (list "dep" "tree" id)))
+    (when full
+      (setq args (append args (list "--full"))))
+    (knot-cli-call args)))
+
+(defun knot-deps--open (id &optional back-buffer)
+  "Open the deps tree buffer for ID, reusing it when one already exists.
+
+When BACK-BUFFER is non-nil and live and not the destination
+buffer itself, it is recorded as `knot-deps--back-buffer' so `q'
+switches back to it."
+  (let* ((info         (knot-info-current))
+         (project      (knot-info--project-name info))
+         (project-root (knot-info--project-root info))
+         (buf-name     (knot-deps--buffer-name project id))
+         (buffer       (get-buffer-create buf-name))
+         (full         (and (buffer-live-p buffer)
+                            (buffer-local-value 'knot-deps--full buffer)))
+         (data         (knot-deps--fetch id full)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'knot-deps-mode)
+        (knot-deps-mode))
+      (setq-local default-directory
+                  (file-name-as-directory
+                   (or project-root default-directory)))
+      (setq knot-deps--id id)
+      (setq knot-deps--full full)
+      (when (and back-buffer
+                 (buffer-live-p back-buffer)
+                 (not (eq back-buffer buffer)))
+        (setq knot-deps--back-buffer back-buffer))
+      (knot-deps--render data full)
+      (goto-char (point-min)))
+    (pop-to-buffer-same-window buffer)
+    buffer))
+
+(defun knot-deps--refresh ()
+  "Re-fetch and re-render the current deps tree buffer."
+  (unless (derived-mode-p 'knot-deps-mode)
+    (user-error "knot-deps--refresh: not in a knot-deps-mode buffer"))
+  (let* ((id   knot-deps--id)
+         (full knot-deps--full)
+         (data (knot-deps--fetch id full))
+         (pt   (point)))
+    (knot-deps--render data full)
+    (goto-char (min pt (point-max)))))
+
+(defun knot-deps-toggle-full ()
+  "Toggle between the collapsed and `--full' rendering of this deps tree."
+  (interactive)
+  (unless (derived-mode-p 'knot-deps-mode)
+    (user-error "knot-deps-toggle-full: not in a knot-deps-mode buffer"))
+  (setq knot-deps--full (not knot-deps--full))
+  (knot-deps--refresh))
+
+(defun knot-deps-quit ()
+  "Back-button for the deps tree buffer.
+
+Switches to `knot-deps--back-buffer' when set and live, falling
+back to `quit-window' otherwise."
+  (interactive)
+  (let ((back knot-deps--back-buffer))
+    (if (and back (buffer-live-p back))
+        (switch-to-buffer back)
+      (quit-window))))
+
+
 ;;;; Refresh (single-buffer; cross-buffer walk lands in slice 8)
 
 (defun knot-refresh ()
@@ -1636,6 +2051,8 @@ the ticket is re-fetched and re-rendered."
       (goto-char (point-min))))
    ((derived-mode-p 'knot-show-mode)
     (knot-show--refresh))
+   ((derived-mode-p 'knot-deps-mode)
+    (knot-deps--refresh))
    (t
     (user-error "knot-refresh: not in a knot.el buffer"))))
 
