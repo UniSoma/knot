@@ -1,12 +1,13 @@
 ---
 id: kno-01kreh4yap1c
 title: 'knot.el slice 4: update transient for atomic frontmatter mutations'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:43:30.508447363Z'
-updated: '2026-05-12T19:31:33.541488716Z'
+updated: '2026-05-12T19:41:31.514844357Z'
+closed: '2026-05-12T19:41:31.514844357Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -62,3 +63,7 @@ Verification:
 **2026-05-12T19:31:33.541488716Z**
 
 Follow-up tweak to knot-update-set-parent: parent now uses completing-read over live tickets (id  title candidates), not read-string. C-u prefix arg includes closed tickets in the candidate list. Empty input still clears the parent. Implementation: new knot-update--read-parent helper. knot-update-set-parent is now (interactive "P"). byte-compile clean.
+
+**2026-05-12T19:41:31.514844357Z**
+
+Slice 4 shipped at emacs/knot.el. `,` in a show buffer opens knot-update-from-show with 7 atomic setters (status / priority / mode / type / tags / assignee / parent); each suffix commits one `knot update --flag value` subprocess and refreshes on success. Completion: allowed_values for enums, priority_range for priority, completing-read over `knot list` (C-u includes closed) for parent. Empty input clears assignee / tags / parent. Two follow-up tickets opened: kno-01kresz637ke (transient on list rows), kno-01kretd4pqtn (sort transient + view defaults).
