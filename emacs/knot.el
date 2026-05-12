@@ -20,14 +20,18 @@
 ;; boundary function, `knot-cli-call', which speaks exclusively to the
 ;; CLI's --json envelope.
 ;;
-;; This file currently lands slices 1-2 of the v0.1 plan: the CLI
+;; This file currently lands slices 1-3 of the v0.1 plan: the CLI
 ;; boundary, the project oracle (`knot-info-current'), the dispatch
-;; transient (`M-x knot'), and a single project-scoped list buffer
-;; that flips in place between list / ready / blocked / closed views
-;; (`l' / `r' / `b' / `c'), with a filter transient on `f' covering
-;; --mode / --type / --status / --tag / --assignee / --limit /
-;; --acceptance-complete and `g' as the manual refresh.  The show
-;; buffer, mutations, capture buffers, and the deps tree arrive in
+;; transient (`M-x knot'), a single project-scoped list buffer that
+;; flips in place between list / ready / blocked / closed views (`l'
+;; / `r' / `b' / `c'), with a filter transient on `f' covering --mode
+;; / --type / --status / --tag / --assignee / --limit /
+;; --acceptance-complete and `g' as the manual refresh, and a
+;; markdown-view-mode show buffer with buttonized ticket ids, AC-line
+;; RET flipping done/undone, +/a / -/k for AC add/remove, ]/[ for
+;; next/previous in the originating list buffer, and a multi-level
+;; back-button on `q' that walks the entry chain across drill-ins.
+;; Mutations, capture buffers, and the deps tree arrive in
 ;; subsequent slices.
 ;;
 ;; The knot binary is located via `executable-find' on
@@ -43,10 +47,10 @@
 (require 'subr-x)
 (require 'tabulated-list)
 (require 'transient)
-;; markdown-mode is declared in Package-Requires because slice 3's
-;; show buffer derives from `markdown-view-mode'.  It is loaded
-;; lazily by the show buffer when that slice lands.
-(declare-function markdown-view-mode "markdown-mode")
+(require 'button)
+;; markdown-mode is declared in Package-Requires; slice 3's show
+;; buffer derives from `markdown-view-mode'.
+(require 'markdown-mode)
 
 
 ;;;; Customization
@@ -301,7 +305,7 @@ FIELD is a symbol such as `default_type', `default_priority', or
     (alist-get 'project_root paths)))
 
 
-;;;; Id display (knot-id module — display half; buttonize lands in slice 3)
+;;;; Id display + buttonize (knot-id module)
 
 (defun knot-id-format (id &optional title)
   "Return a display string for ID, optionally followed by TITLE.
@@ -310,6 +314,48 @@ The id substring is propertized with `knot-id'."
     (if (and title (not (string-empty-p title)))
         (format "%s  %s" label title)
       label)))
+
+(defun knot-id--regexp ()
+  "Return a regexp matching ticket ids for the current project.
+The pattern is derived from `knot info --json's `project.prefix';
+falls back to a generic lowercase-prefix shape when info is
+unavailable."
+  (let ((prefix (or (alist-get 'prefix
+                               (alist-get 'project (knot-info-current)))
+                    "[a-z][a-z0-9]*")))
+    (concat "\\<" (regexp-quote prefix) "-01[0-9a-z]+\\>")))
+
+(defun knot-id--button-action (button)
+  "Open the show buffer for BUTTON's `knot-id' property.
+When invoked from a `knot-show-mode' buffer, the calling buffer
+is recorded as the destination's back-buffer so `q' walks the
+drill-in chain."
+  (let ((id (button-get button 'knot-id))
+        (back (and (derived-mode-p 'knot-show-mode)
+                   (current-buffer))))
+    (when (and id (not (string-empty-p id)))
+      (knot-show--open id nil nil back))))
+
+(define-button-type 'knot-id
+  'help-echo "RET: open ticket"
+  'follow-link t
+  'face 'knot-id
+  'action #'knot-id--button-action)
+
+(defun knot-id-buttonize-region (beg end)
+  "Buttonize every ticket id in [BEG, END].
+Each match becomes a `knot-id' text-button carrying the id
+string in its `knot-id' property."
+  (save-excursion
+    (let ((re (knot-id--regexp)))
+      (goto-char beg)
+      (while (re-search-forward re end t)
+        (let ((mb (match-beginning 0))
+              (me (match-end 0))
+              (id (match-string-no-properties 0)))
+          (make-text-button mb me
+                            :type 'knot-id
+                            'knot-id id))))))
 
 
 ;;;; Dispatch transient (knot-dispatch module)
@@ -535,8 +581,22 @@ accept."
     (define-key map (kbd "c") #'knot-list-view-closed)
     (define-key map (kbd "f") #'knot-list-filter)
     (define-key map (kbd "F") #'knot-list-clear-filters)
+    (define-key map (kbd "RET") #'knot-list-show-at-point)
     map)
   "Keymap for `knot-list-mode'.")
+
+(defun knot-list-show-at-point ()
+  "Open the show buffer for the ticket on the current list row.
+Stashes the originating list buffer + row id (for `]'/`[')
+and records the list buffer as the destination's back-buffer
+(for `q')."
+  (interactive)
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list-show-at-point: not in a knot-list-mode buffer"))
+  (let ((id (tabulated-list-get-id)))
+    (unless id
+      (user-error "knot-list: no ticket on this line"))
+    (knot-show--open id (current-buffer) id (current-buffer))))
 
 (define-derived-mode knot-list-mode tabulated-list-mode "Knot-List"
   "Major mode for the knot list buffer.
@@ -795,6 +855,333 @@ filter at once."
    ("C" "clear all"             knot-list-clear-filters)])
 
 
+;;;; Show buffer (knot-show module)
+
+(defvar-local knot-show--id nil
+  "Ticket id rendered in this `knot-show-mode' buffer.")
+
+(defvar-local knot-show--data nil
+  "Parsed `knot show --json' data alist for the current buffer.")
+
+(defvar-local knot-show--origin-list-buffer nil
+  "Originating `knot-list-mode' buffer, when opened from a list row.
+Nil when reached via a buttonized id (dep / link / parent / body
+reference) or via `M-x knot-show'.  Used by `]'/`[' to step
+through siblings.")
+
+(defvar-local knot-show--origin-list-id nil
+  "Originating list row id captured when this show buffer was opened.")
+
+(defvar-local knot-show--back-buffer nil
+  "Buffer `knot-show-quit' should switch to when this show buffer is dismissed.
+Forms the back-button chain: each entry stores the buffer that
+opened this one (a list buffer when entered via RET on a row, a
+show buffer when reached via a buttonized id).  `]'/`[' step
+laterally without growing the chain.  Nil falls through to
+`quit-window'.")
+
+(defun knot-show--buffer-name (project id)
+  "Return the canonical show buffer name for PROJECT and ID."
+  (format "*knot-show: %s · %s*" project id))
+
+(defvar knot-show-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (define-key map (kbd "?") #'knot)
+    (define-key map (kbd "g") #'knot-refresh)
+    (define-key map (kbd "q") #'knot-show-quit)
+    (define-key map (kbd "RET") #'knot-show-RET)
+    (define-key map (kbd "+") #'knot-show-add-ac)
+    (define-key map (kbd "a") #'knot-show-add-ac)
+    (define-key map (kbd "-") #'knot-show-remove-ac)
+    (define-key map (kbd "k") #'knot-show-remove-ac)
+    (define-key map (kbd "]") #'knot-show-next-ticket)
+    (define-key map (kbd "[") #'knot-show-prev-ticket)
+    (define-key map (kbd "n") #'forward-button)
+    (define-key map (kbd "p") #'backward-button)
+    (define-key map (kbd "TAB") #'forward-button)
+    (define-key map (kbd "<backtab>") #'backward-button)
+    map)
+  "Keymap for `knot-show-mode'.")
+
+(declare-function markdown-gfm-checkbox-after-change-function "markdown-mode")
+
+(define-derived-mode knot-show-mode markdown-view-mode "Knot-Show"
+  "Major mode for the knot show buffer.
+
+Renders one ticket with markdown fontification, buttonized
+ticket ids, and a per-line keymap on acceptance criterion rows.
+
+\\{knot-show-mode-map}"
+  (setq-local truncate-lines nil)
+  ;; `markdown-mode' installs an after-change hook that buttonises
+  ;; every GFM `- [ ]' / `- [x]' as its own task-list button.  Those
+  ;; would shadow `knot-show-RET' on AC rows.  AC interaction is
+  ;; owned by `knot-show-flip-ac' via the `knot-ac-title' text
+  ;; property, so remove the hook for this buffer's lifetime.
+  (remove-hook 'after-change-functions
+               #'markdown-gfm-checkbox-after-change-function t)
+  (setq buffer-read-only t))
+
+(defun knot-show--ac-at-point ()
+  "Return the `knot-ac-title' text property at point, or nil."
+  (get-text-property (point) 'knot-ac-title))
+
+(defun knot-show-quit ()
+  "Back-button for the show buffer.
+
+Switches to `knot-show--back-buffer' when set and live, falling
+back to `quit-window' otherwise.  The back-buffer chain is built
+on entry: opening a show buffer from a list row records the list
+buffer; drilling in via a buttonized id records the originating
+show buffer; `]'/`[' propagate the existing back-buffer without
+growing the chain."
+  (interactive)
+  (let ((back knot-show--back-buffer))
+    (if (and back (buffer-live-p back))
+        (switch-to-buffer back)
+      (quit-window))))
+
+(defun knot-show-RET ()
+  "Dispatch RET in a show buffer.
+
+A knot-id button at point wins (drills into that ticket).
+Otherwise an acceptance-criterion line at point wins (flips its
+done state).  Any other button at point is pushed last.  Errors
+when there is nothing actionable."
+  (interactive)
+  (let ((btn (button-at (point))))
+    (cond
+     ((and btn (button-get btn 'knot-id))
+      (push-button (point)))
+     ((knot-show--ac-at-point)
+      (knot-show-flip-ac))
+     (btn
+      (push-button (point)))
+     (t
+      (user-error "knot-show: nothing actionable at point")))))
+
+(defun knot-show-flip-ac ()
+  "Flip the acceptance criterion at point via `knot update --ac'."
+  (interactive)
+  (let ((title (knot-show--ac-at-point)))
+    (unless title
+      (user-error "knot-show: not on an acceptance criterion line"))
+    (let* ((entry (cl-find-if (lambda (a) (equal title (alist-get 'title a)))
+                              (alist-get 'acceptance knot-show--data)))
+           (done (and entry (alist-get 'done entry))))
+      (knot-cli-call (list "update" knot-show--id
+                           "--ac" title
+                           (if done "--undone" "--done")))
+      (knot-show--refresh))))
+
+(defun knot-show-add-ac ()
+  "Prompt for a new acceptance criterion and add it via `--add-ac'."
+  (interactive)
+  (unless knot-show--id
+    (user-error "knot-show: no ticket in this buffer"))
+  (let ((title (read-string "New acceptance criterion: ")))
+    (when (or (null title) (string-empty-p (string-trim title)))
+      (user-error "knot-show: empty criterion title"))
+    (knot-cli-call (list "update" knot-show--id "--add-ac" title))
+    (knot-show--refresh)))
+
+(defun knot-show-remove-ac ()
+  "Remove the acceptance criterion at point via `--remove-ac' after confirmation."
+  (interactive)
+  (let ((title (knot-show--ac-at-point)))
+    (unless title
+      (user-error "knot-show: not on an acceptance criterion line"))
+    (when (yes-or-no-p (format "Remove acceptance criterion %S? " title))
+      (knot-cli-call (list "update" knot-show--id "--remove-ac" title))
+      (knot-show--refresh))))
+
+(defun knot-show--step (direction)
+  "Move to the row DIRECTION away in the originating list buffer.
+Propagates the existing `knot-show--back-buffer' to the next
+buffer so lateral stepping does not grow the back chain."
+  (unless (and knot-show--origin-list-buffer
+               (buffer-live-p knot-show--origin-list-buffer))
+    (user-error "knot-show: no originating list buffer for ]/["))
+  (let ((origin-buf knot-show--origin-list-buffer)
+        (origin-id  knot-show--origin-list-id)
+        (back       knot-show--back-buffer)
+        (next-id nil))
+    (with-current-buffer origin-buf
+      (save-excursion
+        (goto-char (point-min))
+        (let ((found nil))
+          (while (and (not found) (not (eobp)))
+            (if (equal (tabulated-list-get-id) origin-id)
+                (setq found t)
+              (forward-line 1)))
+          (when found
+            (forward-line direction)
+            (unless (or (eobp)
+                        (and (< direction 0)
+                             (equal (tabulated-list-get-id) origin-id)))
+              (setq next-id (tabulated-list-get-id)))))))
+    (unless next-id
+      (user-error "knot-show: no %s ticket in originating list"
+                  (if (> direction 0) "next" "previous")))
+    (knot-show--open next-id origin-buf next-id back)))
+
+(defun knot-show-next-ticket ()
+  "Open the next ticket from the originating list buffer."
+  (interactive)
+  (knot-show--step 1))
+
+(defun knot-show-prev-ticket ()
+  "Open the previous ticket from the originating list buffer."
+  (interactive)
+  (knot-show--step -1))
+
+(defun knot-show--render-relationship (label entries)
+  "Render a markdown section LABEL listing relationship ENTRIES."
+  (when (and entries (listp entries) (not (null entries)))
+    (insert (format "## %s\n\n" label))
+    (dolist (entry entries)
+      (let ((id     (alist-get 'id entry))
+            (title  (alist-get 'title entry))
+            (status (alist-get 'status entry)))
+        (insert (format "- %s [%s] %s\n"
+                        (or id "")
+                        (or status "?")
+                        (or title "")))))
+    (insert "\n")))
+
+(defun knot-show--render-scalar-list (label items)
+  "Insert a `**LABEL:** csv' line for ITEMS when ITEMS is a non-empty list."
+  (when (and items (listp items) (not (null items)))
+    (insert (format "**%s:** %s\n" label (string-join items ", ")))))
+
+(defun knot-show--render (data)
+  "Render DATA (the parsed `show' envelope) into the current buffer."
+  (let ((inhibit-read-only t))
+    (erase-buffer)
+    (let* ((id        (alist-get 'id data))
+           (title     (alist-get 'title data))
+           (status    (alist-get 'status data))
+           (type      (alist-get 'type data))
+           (priority  (alist-get 'priority data))
+           (mode      (alist-get 'mode data))
+           (parent    (alist-get 'parent data))
+           (assignee  (alist-get 'assignee data))
+           (tags      (alist-get 'tags data))
+           (deps      (alist-get 'deps data))
+           (links     (alist-get 'links data))
+           (external  (alist-get 'external_refs data))
+           (created   (alist-get 'created data))
+           (updated   (alist-get 'updated data))
+           (acceptance (alist-get 'acceptance data))
+           (body      (alist-get 'body data))
+           (blockers  (alist-get 'blockers data))
+           (blocking  (alist-get 'blocking data))
+           (children  (alist-get 'children data))
+           (linked    (alist-get 'linked data)))
+      (insert (format "# %s\n\n" (or title "")))
+      (insert (format "**id:** %s\n" (or id "")))
+      (insert (format "**status:** %s · **type:** %s · **priority:** %s · **mode:** %s\n"
+                      (or status "-")
+                      (or type "-")
+                      (if (numberp priority) (number-to-string priority) "-")
+                      (or mode "-")))
+      (when (and assignee (not (string-empty-p assignee)))
+        (insert (format "**assignee:** %s\n" assignee)))
+      (when (and parent (stringp parent) (not (string-empty-p parent)))
+        (insert (format "**parent:** %s\n" parent)))
+      (knot-show--render-scalar-list "tags" tags)
+      (knot-show--render-scalar-list "deps" deps)
+      (knot-show--render-scalar-list "links" links)
+      (knot-show--render-scalar-list "external" external)
+      (when created (insert (format "**created:** %s\n" created)))
+      (when updated (insert (format "**updated:** %s\n" updated)))
+      (insert "\n")
+      (insert "## Acceptance Criteria\n\n")
+      (if (and acceptance (listp acceptance) acceptance)
+          (dolist (ac acceptance)
+            (let* ((ac-title (alist-get 'title ac))
+                   (done     (alist-get 'done ac))
+                   (start    (point)))
+              (insert (format "- [%s] %s\n"
+                              (if done "x" " ")
+                              (or ac-title "")))
+              (add-text-properties start (point)
+                                   (list 'knot-ac-title ac-title
+                                         'knot-ac-done done))))
+        (insert "_(no acceptance criteria)_\n"))
+      (insert "\n")
+      (when (and body (stringp body) (not (string-empty-p body)))
+        (insert body)
+        (unless (string-suffix-p "\n" body)
+          (insert "\n"))
+        (insert "\n"))
+      (knot-show--render-relationship "Blockers" blockers)
+      (knot-show--render-relationship "Blocking" blocking)
+      (knot-show--render-relationship "Children" children)
+      (knot-show--render-relationship "Linked" linked))
+    (knot-id-buttonize-region (point-min) (point-max))))
+
+(defun knot-show--open (id &optional origin-list-buffer origin-id back-buffer)
+  "Open the show buffer for ID, reusing it when one already exists.
+
+When ORIGIN-LIST-BUFFER is non-nil, the originating list buffer
+and ORIGIN-ID (defaulting to ID) are stashed as buffer-locals so
+`]'/`[' can step through siblings.  Drilling in via a buttonized
+id from another show buffer passes neither, preserving the
+existing stash.
+
+When BACK-BUFFER is non-nil and not the destination buffer
+itself, it is recorded as `knot-show--back-buffer' so
+`knot-show-quit' (bound to `q') walks the entry chain.  Passing
+the destination buffer (e.g. re-opening the same id) is treated
+as nil to avoid self-loops."
+  (let* ((info (knot-info-current))
+         (project (knot-info--project-name info))
+         (project-root (knot-info--project-root info))
+         (data (knot-cli-call (list "show" id)))
+         (real-id (or (alist-get 'id data) id))
+         (buf-name (knot-show--buffer-name project real-id))
+         (buffer (get-buffer-create buf-name)))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'knot-show-mode)
+        (knot-show-mode))
+      (setq-local default-directory
+                  (file-name-as-directory (or project-root default-directory)))
+      (setq knot-show--id real-id)
+      (setq knot-show--data data)
+      (when origin-list-buffer
+        (setq knot-show--origin-list-buffer origin-list-buffer
+              knot-show--origin-list-id (or origin-id real-id)))
+      (when (and back-buffer
+                 (buffer-live-p back-buffer)
+                 (not (eq back-buffer buffer)))
+        (setq knot-show--back-buffer back-buffer))
+      (knot-show--render data)
+      (goto-char (point-min)))
+    (pop-to-buffer-same-window buffer)
+    buffer))
+
+(defun knot-show--refresh ()
+  "Re-fetch and re-render the current show buffer's ticket.
+Preserves origin-list locals and point (clamped to buffer end)."
+  (unless (derived-mode-p 'knot-show-mode)
+    (user-error "knot-show--refresh: not in a knot-show-mode buffer"))
+  (let* ((id knot-show--id)
+         (data (knot-cli-call (list "show" id)))
+         (pt (point)))
+    (setq knot-show--data data)
+    (knot-show--render data)
+    (goto-char (min pt (point-max)))))
+
+;;;###autoload
+(defun knot-show (id)
+  "Open the show buffer for ticket ID.
+ID may be a partial id, resolved by the CLI."
+  (interactive (list (read-string "id: ")))
+  (knot-show--open id))
+
+
 ;;;; Refresh (single-buffer; cross-buffer walk lands in slice 8)
 
 (defun knot-refresh ()
@@ -803,7 +1190,8 @@ filter at once."
 In `knot-list-mode' the active view and filter state are
 preserved and point is restored to the previous row id when
 possible.  In `knot-info-mode' the cached info envelope is
-invalidated and the buffer is re-rendered."
+invalidated and the buffer is re-rendered.  In `knot-show-mode'
+the ticket is re-fetched and re-rendered."
   (interactive)
   (knot-info-invalidate default-directory)
   (cond
@@ -814,6 +1202,8 @@ invalidated and the buffer is re-rendered."
       (erase-buffer)
       (knot-info--render (knot-info-current))
       (goto-char (point-min))))
+   ((derived-mode-p 'knot-show-mode)
+    (knot-show--refresh))
    (t
     (user-error "knot-refresh: not in a knot.el buffer"))))
 

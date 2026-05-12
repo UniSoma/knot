@@ -32,7 +32,7 @@ The package lives in this monorepo because the CLI contract is still evolving an
 8. As Jonas, I want `RET` on a list row to open that ticket's show buffer, so that drilling in is a single key.
 9. As Jonas, I want the show buffer to render the ticket body in markdown so that section headings, lists, and code blocks fontify naturally.
 10. As Jonas, I want every ticket id rendered in any buffer (deps, links, parent, body references) to be a button, so that `RET` on an id opens that ticket's show.
-11. As Jonas, I want `quit-window` (`q`) to be the back button across all knot.el buffers, so that the standard Emacs navigation idiom works.
+11. As Jonas, I want `q` to be the back button across all knot.el buffers, walking the entry chain (list → show → drilled-in show → …) one step per press, so that the standard Emacs navigation idiom works even after multi-level drill-in.
 12. As Jonas, I want `]` and `[` in a show buffer to flip to the next/previous ticket in the originating list buffer, so that I can review a filtered batch without bouncing back to the list.
 13. As Jonas, I want `RET` on an acceptance criterion line in the show buffer to flip its done/undone state via `knot update --ac "..." --done|--undone`, so that AC management feels first-class.
 14. As Jonas, I want `+` (or `a`) in the AC section to prompt for a new criterion and add it via `--add-ac`, so that I can grow AC without leaving the buffer.
@@ -134,8 +134,8 @@ Concretely:
 
 - Ids in show buffers (deps, links, parent, free-text references in body) are buttonized via text properties + a local keymap.
 - `RET` on an id opens that ticket's show, replacing the current window.
-- `quit-window` (`q`) is the back button — relies on Emacs's existing window-history mechanics, not a custom stack.
-- `]` and `[` in a show buffer move to the next/previous ticket in the originating list buffer when applicable (the show buffer captures the originating list buffer + position as buffer-locals when opened from a list).
+- `q` is the back button. Each show buffer records the buffer that opened it (a list buffer when entered via `RET` on a row, a show buffer when reached via a buttonized id) in a buffer-local `knot-show--back-buffer`. `knot-show-quit` switches to that buffer when live and falls back to `quit-window` otherwise. This is a minimal one-pointer-per-buffer chain rather than a global stack — needed because Emacs's per-window `quit-restore` parameter is overwritten on each same-window display and so cannot natively support multi-level drill-in.
+- `]` and `[` in a show buffer move to the next/previous ticket in the originating list buffer when applicable (the show buffer captures the originating list buffer + position as buffer-locals when opened from a list). Lateral stepping propagates the existing `knot-show--back-buffer` without growing the chain — `q` from the destination still lands on the originating list, not on the intermediate ticket.
 - Drilling in from a dep/link/parent does not set the `]`/`[` stash.
 
 ### Modules
