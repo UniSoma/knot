@@ -14,6 +14,7 @@
  :tasks
  {:requires ([babashka.classpath :as cp]
              [babashka.fs :as fs]
+             [babashka.process :as p]
              [clojure.string :as str]
              [clojure.test :as t])
 
@@ -43,4 +44,71 @@
   {:doc "Run the knot CLI"
    :task (do
            (require '[knot.main])
-           (apply (resolve 'knot.main/-main) *command-line-args*))}}}
+           (apply (resolve 'knot.main/-main) *command-line-args*))}
+
+  lint:elisp
+  {:doc "Byte-compile emacs/knot.el and run package-lint when available"
+   :task
+   (let [src      "emacs/knot.el"
+         helper   "emacs/knot-lint.el"
+         emacs    (or (System/getenv "EMACS") "emacs")
+         starts?  (fn [pkg p]
+                    (str/starts-with? (str (fs/file-name p))
+                                      (str pkg "-")))
+         find-pkg (fn [elpa-dirs pkg]
+                    (->> elpa-dirs
+                         (mapcat
+                          (fn [d]
+                            (filter
+                             (fn [p] (and (fs/directory? p) (starts? pkg p)))
+                             (fs/list-dir d))))
+                         (map str)
+                         sort
+                         last))
+         shell    (fn [& args]
+                    (:exit (apply p/shell {:continue true} args)))]
+     (when-not (fs/exists? src)
+       (binding [*out* *err*]
+         (println (str "lint:elisp: " src " not found")))
+       (System/exit 1))
+     ;; Locate optional dependencies under common system-wide ELPA
+     ;; directories.  package-lint is treated as optional per the
+     ;; slice-1 acceptance ("when available").  markdown-mode is a
+     ;; Package-Requires dep and must be on the load-path for
+     ;; byte-compile to succeed.
+     (let [home      (System/getenv "HOME")
+           elpa-dirs (->> ["/usr/share/emacs/site-lisp/elpa"
+                           "/usr/share/emacs/site-lisp/elpa-src"
+                           (when home (str home "/.emacs.d/elpa"))]
+                          (remove nil?)
+                          (filter fs/exists?)
+                          distinct)
+           md-mode   (find-pkg elpa-dirs "markdown-mode")
+           pkg-lint  (find-pkg elpa-dirs "package-lint")
+           load-paths (cond-> []
+                        md-mode  (conj "-L" md-mode)
+                        pkg-lint (conj "-L" pkg-lint))]
+       (when-not md-mode
+         (binding [*out* *err*]
+           (println "lint:elisp: markdown-mode not found under any ELPA dir;"
+                    "byte-compile may fail")))
+       (println "lint:elisp: byte-compiling" src)
+       (let [bc-exit (apply shell
+                            emacs "-batch" "-Q"
+                            (concat load-paths
+                                    ["-l" helper
+                                     "-f" "knot-lint-batch-byte-compile"
+                                     src]))]
+         (when-not (zero? bc-exit)
+           (System/exit bc-exit)))
+       (if pkg-lint
+         (let [_ (println "lint:elisp: running package-lint")
+               pl-exit (apply shell
+                              emacs "-batch" "-Q"
+                              (concat load-paths
+                                      ["-l" helper
+                                       "-f" "knot-lint-batch-package-lint"
+                                       src]))]
+           (when-not (zero? pl-exit)
+             (System/exit pl-exit)))
+         (println "lint:elisp: package-lint not found; skipping"))))}}}

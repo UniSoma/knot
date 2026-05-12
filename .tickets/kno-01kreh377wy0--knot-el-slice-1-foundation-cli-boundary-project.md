@@ -1,33 +1,33 @@
 ---
 id: kno-01kreh377wy0
 title: 'knot.el slice 1: foundation — CLI boundary, project detection, dispatch, list view'
-status: open
+status: in_progress
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:42:34.108334227Z'
-updated: '2026-05-12T16:42:34.108334227Z'
+updated: '2026-05-12T17:19:25.658867851Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
 - knot-el
 acceptance:
 - title: emacs/knot.el lives at emacs/knot.el with proper Package-Requires headers (Emacs 28.1, markdown-mode 2.5), Commentary block, and matching license header
-  done: false
+  done: true
 - title: bb lint:elisp task byte-compiles emacs/knot.el cleanly and runs package-lint when available
-  done: false
+  done: true
 - title: knot-cli-call runs the knot binary synchronously via call-process, parses --json into a plist/alist, returns data on ok:true, signals user-error with the envelope's error message on ok:false
-  done: false
+  done: true
 - title: knot-info-current returns the cached info envelope per default-directory; knot-info-allowed-values and knot-info-defaults expose the relevant fields
-  done: false
+  done: true
 - title: M-x knot opens a dispatch transient with entries for list/ready/blocked/closed, create, quick-create, info, refresh; ? inside any knot.el buffer reopens it
-  done: false
+  done: true
 - title: 'knot-list renders the default list view in *knot-list: <project>* with the same columns as knot list (id, title, type, priority, mode, status, optional AC progress)'
-  done: false
+  done: true
 - title: buffer captures project root as its buffer-local default-directory; buffer name is project-qualified
-  done: false
+  done: true
 - title: q calls quit-window from any knot.el buffer
-  done: false
+  done: true
 ---
 
 ## Description
