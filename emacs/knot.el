@@ -1749,11 +1749,27 @@ reaches the CLI."
   (knot-update--read-parent nil t))
 
 (defun knot-create--read-id-list (label)
-  "Return a closure reading a comma-list of ids labelled LABEL.
-Free-form so the user can paste ids; we don't completing-read here
-because the user often wants to type several at once."
+  "Return a `:reader' closure picking multiple live ticket ids via CRM.
+
+Candidates are `id  title' rows from `knot list' (live only).  The
+user picks any number, comma-separated, with completion at each
+token; the closure returns a comma-list of the picked ids (the
+`  title' suffix is stripped).  Empty input is allowed and the
+empty value gets dropped by `knot-create--expand-args' so no flag
+reaches the CLI.
+
+Initial-input is ignored — re-press the infix to redo the picks
+(transient stores only the comma-list of ids, which is not a valid
+prefill for a `id  title'-candidate completion)."
   (lambda (prompt _initial-input _history)
-    (read-string (or prompt (format "%s (comma-list of ids): " label)))))
+    (let ((choices (knot-deps--live-choices)))
+      (when (null choices)
+        (user-error "knot-create: no live tickets to choose from"))
+      (let ((picks (completing-read-multiple
+                    (or prompt
+                        (format "%s (TAB completes, comma-separated): " label))
+                    choices nil t)))
+        (mapconcat #'knot-deps--extract-id picks ",")))))
 
 (defun knot-create--read-acceptance (prompt _initial-input _history)
   "`:reader' for the acceptance infix: a comma-list of AC titles."
@@ -1800,13 +1816,13 @@ because the user often wants to type several at once."
   :reader #'knot-create--read-parent)
 
 (transient-define-infix knot-create:--dep ()
-  :description "deps (comma)"
+  :description "deps (TAB completes)"
   :class 'transient-option
   :argument "--dep="
   :reader (knot-create--read-id-list "deps"))
 
 (transient-define-infix knot-create:--link ()
-  :description "links (comma)"
+  :description "links (TAB completes)"
   :class 'transient-option
   :argument "--link="
   :reader (knot-create--read-id-list "links"))
@@ -1910,8 +1926,8 @@ non-empty entry produces its own `--flag value' pair in argv."
    ("-T" "tags (comma)"       knot-create:--tags)
    ("-a" "assignee"           knot-create:--assignee)
    ("-P" "parent"             knot-create:--parent)
-   ("-d" "deps (comma)"       knot-create:--dep)
-   ("-L" "links (comma)"      knot-create:--link)
+   ("-d" "deps (TAB)"         knot-create:--dep)
+   ("-L" "links (TAB)"        knot-create:--link)
    ("-A" "acceptance (comma)" knot-create:--acceptance)
    ("-r" "external (comma)"   knot-create:--external-ref)]
   ["Commit"
@@ -1995,23 +2011,29 @@ In `knot-show-mode' the buffer's `knot-show--id' is used; in
    ((string-match "\\`\\(\\S-+\\)" pick) (match-string 1 pick))
    (t pick)))
 
+(defun knot-deps--live-choices (&optional exclude-id)
+  "Return a list of `id  title' completion candidates for live tickets.
+EXCLUDE-ID, when non-nil, is filtered out so a ticket cannot
+self-reference."
+  (let* ((rows (knot-cli-call '("list")))
+         (rows (if exclude-id
+                   (cl-remove-if (lambda (r)
+                                   (equal exclude-id (alist-get 'id r)))
+                                 rows)
+                 rows)))
+    (mapcar (lambda (r)
+              (knot-deps--format-row
+               (alist-get 'id r)
+               (alist-get 'title r)))
+            rows)))
+
 (defun knot-deps--read-live (prompt exclude-id)
   "Prompt for a live ticket via `completing-read', defaulting to nil.
 
 Candidates are formatted `id  title' from `knot list --json' (live
 tickets only).  EXCLUDE-ID, when non-nil, is filtered out so a
 ticket cannot depend on / link itself."
-  (let* ((rows (knot-cli-call '("list")))
-         (rows (if exclude-id
-                   (cl-remove-if (lambda (r)
-                                   (equal exclude-id (alist-get 'id r)))
-                                 rows)
-                 rows))
-         (choices (mapcar (lambda (r)
-                            (knot-deps--format-row
-                             (alist-get 'id r)
-                             (alist-get 'title r)))
-                          rows)))
+  (let ((choices (knot-deps--live-choices exclude-id)))
     (unless choices
       (user-error "knot-deps: no live tickets to choose from"))
     (knot-deps--extract-id
