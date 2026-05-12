@@ -1,12 +1,13 @@
 ---
 id: kno-01kreh4n6ryc
 title: 'knot.el slice 3: show buffer + buttonized ids + AC interaction'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:43:21.169045501Z'
-updated: '2026-05-12T18:58:37.902572429Z'
+updated: '2026-05-12T19:00:55.602056452Z'
+closed: '2026-05-12T19:00:55.602056452Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -47,3 +48,7 @@ See docs/prd/knot-el.md user stories 8-15 and 'Drill-down navigation' for the na
 **2026-05-12T18:58:37.902572429Z**
 
 q semantics changed: was 'calls quit-window'; now walks a buffer-local back-pointer chain so multi-level drill-in (list → A → B → C) pops one level per q press. Single-pointer (not stack) — see knot-show--back-buffer in emacs/knot.el. Caused by Emacs's per-window quit-restore being overwritten on every same-window display. PRD user story 11 + 'Drill-down navigation' updated to match.
+
+**2026-05-12T19:00:55.602056452Z**
+
+Slice 3 shipped at emacs/knot.el (commit dd83602). knot-show-mode derives markdown-view-mode and renders frontmatter + AC + body + relationships; knot-id-buttonize-region (driven by knot info's project.prefix) buttonises every id occurrence. RET dispatches button → AC flip → other-button. + / a add ACs (knot update --add-ac); - / k remove with yes-or-no confirmation (--remove-ac); RET on an AC line flips done/undone (--ac --done|--undone). ]/[ step through the originating list buffer without growing the back chain. q walks a buffer-local knot-show--back-buffer chain (list → show → drilled-in show), falling back to quit-window when exhausted — needed because Emacs's per-window quit-restore is overwritten on each same-window display. Side effects: markdown-mode promoted to a hard require; markdown-mode's GFM-checkbox after-change hook removed locally so  AC rows don't get shadowed. Verified via byte-compile + package-lint clean, 347/347 bb test pass, end-to-end CLI round-trip on AC ops, keybinding audit, and a three-level drill-in q-chain walk. PRD user story 11 + 'Drill-down navigation' updated to document the back-pointer chain; AGENTS.md / SKILL.md untouched (no CLI surface change).
