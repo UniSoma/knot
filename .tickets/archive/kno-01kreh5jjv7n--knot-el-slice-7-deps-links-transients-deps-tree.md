@@ -1,12 +1,13 @@
 ---
 id: kno-01kreh5jjv7n
 title: 'knot.el slice 7: deps + links transients + deps tree buffer'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:43:51.251988806Z'
-updated: '2026-05-12T20:28:25.755983936Z'
+updated: '2026-05-12T20:54:27.413439488Z'
+closed: '2026-05-12T20:54:27.413439488Z'
 tags:
 - emacs
 - knot-el
@@ -43,3 +44,9 @@ D in show or on a list row opens a deps transient with add / remove / tree-open 
 Modules introduced: `knot-deps` (shallow — JSON-rendered tree view, status glyphs, node buttons).
 
 See docs/prd/knot-el.md user stories 30-37 and 'Buffer architecture' for the tree-buffer model.
+
+## Notes
+
+**2026-05-12T20:54:27.413439488Z**
+
+Slice 7 shipped at emacs/knot.el. `knot-deps-transient` (D) and `knot-links-transient` (L) — bound in show + list maps — expose a/add (completing-read over live tickets via `knot list`), r/remove (current deps/links, archive titles merged in via live + closed lookup), and t/tree-open (deps only). `knot-show-remove-at-point` widens `-` (and previously-AC-only `k`) to dispatch on text properties: Blockers rows (`knot-dep-id`) route to `knot undep <this> <row>`; Blocking rows (`knot-rdep-id`) route to `knot undep <row> <this>` so reverse-deps can be cleaned from either side; Linked rows (`knot-link-id`) route to `knot unlink`; AC lines (`knot-ac-title`) keep the existing `--remove-ac` path. All gated by `yes-or-no-p`. New `*knot-deps: <project> · <id>*` buffer (`knot-deps-mode`, derived from `special-mode`) renders `knot dep tree --json` as an indented outline: ✓ for closed, ○ for live, `?  (missing)` for dangling refs, trailing ` ↑` for seen-before duplicates in collapsed mode. Each node is a `knot-id` button; RET drills into show. `f` toggles collapsed vs --full via `knot-deps--full` buffer-local; `g` refreshes; `q` walks back via `knot-deps--back-buffer` mirroring the show buffer chain. `knot-refresh` extended to recognise `knot-deps-mode`. Two new faces: `knot-deps-seen-before` (inherits shadow) and `knot-deps-missing` (inherits font-lock-warning-face). bb lint:elisp clean, bb test 347/347 passing.
