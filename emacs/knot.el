@@ -68,6 +68,14 @@
 ;; markdown-mode is declared in Package-Requires; slice 3's show
 ;; buffer derives from `markdown-view-mode'.
 (require 'markdown-mode)
+;; evil is a soft dependency: `knot-evil-mode' is the opt-in
+;; toggle that rewires the read-only mode maps for evil normal
+;; state.  When evil is absent the package loads as usual and
+;; toggling the mode raises `user-error'.
+(require 'evil nil t)
+
+(declare-function evil-define-key* "evil-core")
+(declare-function evil-set-initial-state "evil-core")
 
 
 ;;;; Customization
@@ -2009,18 +2017,24 @@ candidate list.  Empty input clears the parent id."
 (transient-define-prefix knot-update-from-show ()
   "Update the current show buffer's ticket atomically.
 
-Each suffix prompts for one value and commits a single
+Each frontmatter suffix prompts for one value and commits a single
 `knot update --flag value' subprocess; the show buffer
 auto-refreshes on success.  CLI errors raise `user-error' in the
-minibuffer and leave buffer state unchanged."
-  ["Update"
+minibuffer and leave buffer state unchanged.  The long-form
+suffixes pop a capture buffer for the matching section."
+  ["Frontmatter"
    ("s" "status"   knot-update-set-status)
    ("p" "priority" knot-update-set-priority)
    ("m" "mode"     knot-update-set-mode)
    ("t" "type"     knot-update-set-type)
    ("T" "tags"     knot-update-set-tags)
    ("a" "assignee" knot-update-set-assignee)
-   ("P" "parent"   knot-update-set-parent)])
+   ("P" "parent"   knot-update-set-parent)]
+  ["Long-form"
+   ("e" "description" knot-show-edit-description)
+   ("d" "design"      knot-show-edit-design)
+   ("b" "body"        knot-show-edit-body)
+   ("n" "note"        knot-show-add-note)])
 
 
 ;;;; Create transient (knot-create module)
@@ -2722,6 +2736,134 @@ buffer."
     (user-error "knot-refresh: not in a knot.el buffer"))
   (knot-info-invalidate default-directory)
   (knot--refresh-current-buffer))
+
+
+;;;; Evil integration (knot-evil module)
+;;
+;; `knot-evil-mode' is an opt-in global minor mode that rewires the
+;; read-only knot.el mode maps for Doom / vanilla evil users.  evil
+;; is a soft dependency: vanilla-Emacs users see no evil code paths
+;; until they toggle the mode on.
+;;
+;; The setup function is destructive in the evil-collection sense —
+;; it (a) strips the colliding stock-Emacs bindings from each
+;; `knot-*-mode-map' so evil normal-state defaults survive, and
+;; (b) installs the new bindings via `evil-define-key*' into the
+;; per-mode evil normal-state auxiliary map.  Idempotent: re-running
+;; converges on the same state.  Toggle-off is a no-op (no symmetric
+;; restore); reload `knot.el' to revert.
+
+(defvar knot-evil--stock-keys
+  '((knot-list-mode-map . ("l" "r" "b" "c" "F"))
+    (knot-show-mode-map . ("," "e" "d" "b" "n" "p" "k" "g"))
+    (knot-info-mode-map . ("g"))
+    (knot-deps-mode-map . ("g" "n" "p")))
+  "Per-mode stock bindings dropped by `knot-evil-mode' setup.
+Each entry pairs a mode-map symbol with the keys (as
+`kbd'-readable strings) whose mode-map bindings collide with
+evil motions/operators or have been folded into another
+binding under the evil scheme.")
+
+(defvar knot-evil--bindings
+  '((knot-list-mode-map
+     ("?"       . knot)
+     ("gr"      . knot-refresh)
+     ("q"       . quit-window)
+     ("RET"     . knot-list-show-at-point)
+     ("f"       . knot-list-filter)
+     ("o"       . knot-list-sort)
+     ("s"       . knot-start)
+     ("x"       . knot-close)
+     ("D"       . knot-deps-transient)
+     ("L"       . knot-links-transient))
+    (knot-show-mode-map
+     ("?"       . knot)
+     ("gr"      . knot-refresh)
+     ("q"       . knot-show-quit)
+     ("RET"     . knot-show-RET)
+     ("+"       . knot-show-add-ac)
+     ("a"       . knot-show-add-ac)
+     ("-"       . knot-show-remove-ac)
+     ("s"       . knot-start)
+     ("x"       . knot-close)
+     ("M"       . knot-update-from-show)
+     ("["       . knot-show-prev-ticket)
+     ("]"       . knot-show-next-ticket)
+     ("K"       . knot-show-remove-at-point)
+     ("D"       . knot-deps-transient)
+     ("L"       . knot-links-transient)
+     ("E"       . knot-show-edit-via-emacsclient))
+    (knot-info-mode-map
+     ("?"       . knot)
+     ("gr"      . knot-refresh)
+     ("q"       . quit-window))
+    (knot-deps-mode-map
+     ("?"       . knot)
+     ("gr"      . knot-refresh)
+     ("q"       . knot-deps-quit)
+     ("f"       . knot-deps-toggle-full)
+     ("TAB"     . forward-button)
+     ("<backtab>" . backward-button)))
+  "Per-mode bindings installed into evil normal state by `knot-evil-mode'.
+Each entry pairs a mode-map symbol with an alist of KEY → command
+pairs to be passed through `evil-define-key*' for evil normal
+state.")
+
+(defvar knot-evil--initial-states
+  '((knot-list-mode    . normal)
+    (knot-show-mode    . normal)
+    (knot-info-mode    . normal)
+    (knot-deps-mode    . normal)
+    (knot-capture-mode . insert))
+  "Modes whose evil initial state is set by `knot-evil-mode'.")
+
+(defun knot-evil--strip-stock-bindings ()
+  "Drop colliding stock-Emacs bindings from each knot mode-map."
+  (dolist (entry knot-evil--stock-keys)
+    (let ((map (symbol-value (car entry))))
+      (dolist (key (cdr entry))
+        (define-key map (kbd key) nil)))))
+
+(defun knot-evil--install-bindings ()
+  "Install evil-normal-state bindings via per-mode auxiliary maps."
+  (dolist (entry knot-evil--bindings)
+    (let ((map (symbol-value (car entry))))
+      (dolist (kv (cdr entry))
+        (evil-define-key* 'normal map (kbd (car kv)) (cdr kv))))))
+
+(defun knot-evil--install-initial-states ()
+  "Wire `evil-set-initial-state' for each knot major mode."
+  (dolist (entry knot-evil--initial-states)
+    (evil-set-initial-state (car entry) (cdr entry))))
+
+(defun knot-evil--setup ()
+  "Idempotently rewire knot.el's mode-maps for evil normal state."
+  (unless (featurep 'evil)
+    (user-error "knot-evil-mode: `evil' is not installed"))
+  (knot-evil--strip-stock-bindings)
+  (knot-evil--install-bindings)
+  (knot-evil--install-initial-states))
+
+;;;###autoload
+(define-minor-mode knot-evil-mode
+  "Opt-in evil bindings for knot.el's read-only buffers.
+
+When enabled, knot.el's `knot-list-mode', `knot-show-mode',
+`knot-info-mode', and `knot-deps-mode' open in evil normal state
+with a Doom/evil-collection-style binding scheme that preserves
+evil motions and operators.  See the `Evil / Doom users' section
+of `emacs/README.md' for the binding table and a paste-ready
+Doom snippet.
+
+Activation is destructive in the evil-collection sense — the
+setup function mutates each `knot-*-mode-map' to drop colliding
+bindings and adds new bindings via `evil-define-key*' into the
+per-mode auxiliary map for normal state.  Toggle-off is a no-op;
+reload `knot.el' to revert."
+  :global t
+  :group 'knot
+  (when knot-evil-mode
+    (knot-evil--setup)))
 
 
 (provide 'knot)
