@@ -440,6 +440,25 @@ string in its `knot-id' property."
                             :type 'knot-id
                             'knot-id id))))))
 
+(defun knot--id-at-point ()
+  "Return the ticket id at point, or nil.
+Point may be on or adjacent to the id, mirroring the feel of
+`find-file-at-point'."
+  (when (thing-at-point-looking-at (knot-id--regexp))
+    (match-string-no-properties 0)))
+
+;;;###autoload
+(defun knot-find-id-at-point ()
+  "Open the show buffer for the knot ticket id under point.
+With no id at point, signal `user-error'.  The calling buffer is
+recorded as the show buffer's back-buffer so `q' returns to it,
+including when the show buffer already existed."
+  (interactive)
+  (let ((id (knot--id-at-point)))
+    (unless id
+      (user-error "No knot id at point"))
+    (knot-show--open id nil nil (current-buffer))))
+
 
 ;;;; Dispatch transient (knot-dispatch module)
 
@@ -1378,19 +1397,25 @@ ticket ids, and a per-line keymap on acceptance criterion rows.
   (get-text-property (point) 'knot-ac-title))
 
 (defun knot-show-quit ()
-  "Back-button for the show buffer.
+  "Back-button for the show buffer; kills the buffer on exit.
 
-Switches to `knot-show--back-buffer' when set and live, falling
-back to `quit-window' otherwise.  The back-buffer chain is built
-on entry: opening a show buffer from a list row records the list
-buffer; drilling in via a buttonized id records the originating
-show buffer; `]'/`[' propagate the existing back-buffer without
-growing the chain."
+Switches to `knot-show--back-buffer' when set and live, then
+kills this buffer.  With no back-buffer, falls back to
+`quit-window' with KILL non-nil.  Killing is safe because
+`knot-show--open' re-runs `knot show' and re-renders on every
+visit — there is no buffer-resident state to preserve.
+
+The back-buffer chain is built on entry: opening a show buffer
+from a list row records the list buffer; drilling in via a
+buttonized id records the originating show buffer; `]'/`['
+propagate the existing back-buffer without growing the chain."
   (interactive)
-  (let ((back knot-show--back-buffer))
+  (let ((back knot-show--back-buffer)
+        (this (current-buffer)))
     (if (and back (buffer-live-p back))
-        (switch-to-buffer back)
-      (quit-window))))
+        (progn (switch-to-buffer back)
+               (kill-buffer this))
+      (quit-window t))))
 
 (defconst knot-show--field->command
   '((status   . knot-update-set-status)

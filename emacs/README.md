@@ -21,6 +21,25 @@ The package is a single file (`knot.el`) and depends on
 `magit-toplevel` — the buffer's `default-directory` is anchored to
 the project root resolved by `knot info --json`.
 
+## Global navigation
+
+`knot-find-id-at-point` opens the show buffer for the ticket id
+under point from any buffer — prose notes, source comments, magit
+log, dired, anywhere the project's id shape (`<prefix>-01<base32>`)
+appears as plain text. Point may be on or adjacent to the id, like
+`find-file-at-point`. Partial ids resolve via the CLI's partial-id
+contract. `q` in the resulting show buffer returns to the call
+site, including when the show buffer already existed from an
+earlier session. With no id at point the command signals
+`user-error "No knot id at point"` rather than prompting — use
+`M-x knot-show` (or `?` → `s`) for the prompt path.
+
+Suggested global bind:
+
+```elisp
+(global-set-key (kbd "C-c k v") #'knot-find-id-at-point)
+```
+
 ## Evil / Doom users
 
 `knot-evil-mode` is an opt-in global minor mode that rewires knot.el's
