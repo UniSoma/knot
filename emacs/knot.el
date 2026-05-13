@@ -2057,6 +2057,49 @@ Errors when called from any other mode."
    (t
     (user-error "knot-update: not in a knot-show-mode or knot-list-mode buffer"))))
 
+(defun knot-list--marks-in-display-order ()
+  "Return `knot-list--marks' filtered and ordered to match display order.
+Walks the rendered buffer top-down and collects every id that
+appears in `knot-list--marks', dropping stranded ids not present
+in the rendered set."
+  (let (ordered)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((id (tabulated-list-get-id)))
+          (when (and id (member id knot-list--marks))
+            (push id ordered)))
+        (forward-line 1)))
+    (nreverse ordered)))
+
+(defun knot-update--ticket-ids ()
+  "Return the list of ticket ids for the current update context.
+In `knot-show-mode' returns a singleton list with the buffer-local
+`knot-show--id'.  In `knot-list-mode' returns the marked ids in
+display order when `knot-list--marks' is non-empty, otherwise a
+singleton list with the row-at-point id.  Errors when called from
+any other mode."
+  (cond
+   ((derived-mode-p 'knot-show-mode)
+    (unless (and knot-show--id (not (string-empty-p knot-show--id)))
+      (user-error "knot-update: no ticket id in this buffer"))
+    (list knot-show--id))
+   ((derived-mode-p 'knot-list-mode)
+    (cond
+     (knot-list--marks
+      (or (knot-list--marks-in-display-order)
+          (let ((id (tabulated-list-get-id)))
+            (unless id
+              (user-error "knot-update: no ticket on this line"))
+            (list id))))
+     (t
+      (let ((id (tabulated-list-get-id)))
+        (unless id
+          (user-error "knot-update: no ticket on this line"))
+        (list id)))))
+   (t
+    (user-error "knot-update: not in a knot-show-mode or knot-list-mode buffer"))))
+
 (defun knot-update--current-field (field)
   "Return the current value for FIELD for the update context.
 In `knot-show-mode' the buffer's parsed `knot-show--data' alist
@@ -2071,15 +2114,47 @@ frontmatter field (tags / parent / assignee may be absent)."
            (data (and id (knot-cli-call (list "show" id)))))
       (alist-get field data)))))
 
-(defun knot-update--commit (id flag value)
-  "Run `knot update ID FLAG VALUE' atomically, then refresh.
-A single subprocess per call — no batching.  Errors raised by the
-CLI envelope propagate out of `knot-cli-call' as `user-error',
-which short-circuits the refresh and leaves buffer state intact.
-Refresh propagates to every visible knot.el buffer for this
-project via `knot--after-mutation'."
-  (knot-cli-call (list "update" id flag value))
-  (knot--after-mutation))
+(defun knot-update--commit (ids flag value)
+  "Run `knot update <id> FLAG VALUE' for each id in IDS, then refresh.
+IDS may be a single id string (single-id path, current behavior:
+CLI errors propagate as `user-error', short-circuiting the
+refresh) or a list of id strings (bulk path: one subprocess per
+id, `user-error' from the CLI envelope is caught, recorded as
+`(id . reason)' in a failure accumulator, and the loop continues;
+`knot--after-mutation' runs exactly once after the loop, and a
+summary `message' of the form `M: K ok' or `M: K ok, F failed:
+<id> (reason), ...' fires).  Refresh propagates to every visible
+knot.el buffer for this project via `knot--after-mutation'."
+  (let* ((id-list (if (listp ids) ids (list ids)))
+         (total (length id-list)))
+    (cond
+     ((= total 0)
+      (user-error "knot-update: no ticket ids to update"))
+     ((= total 1)
+      (knot-cli-call (list "update" (car id-list) flag value))
+      (knot--after-mutation))
+     (t
+      (let ((ok-count 0)
+            (failures nil))
+        (dolist (id id-list)
+          (condition-case err
+              (progn
+                (knot-cli-call (list "update" id flag value))
+                (setq ok-count (1+ ok-count)))
+            (user-error
+             (push (cons id (error-message-string err)) failures))))
+        (knot--after-mutation)
+        (let* ((failures (nreverse failures))
+               (failure-str
+                (when failures
+                  (mapconcat (lambda (entry)
+                               (format "%s (%s)" (car entry) (cdr entry)))
+                             failures ", "))))
+          (message
+           (if failures
+               (format "%d: %d ok, %d failed: %s"
+                       total ok-count (length failures) failure-str)
+             (format "%d: %d ok" total ok-count)))))))))
 
 (defun knot-update--read-allowed (prompt field current)
   "Prompt for FIELD's allowed value, defaulting to CURRENT.
@@ -2090,39 +2165,56 @@ FIELD names an entry in `allowed_values' (e.g. `statuses',
                       (format "%s" current))))
     (completing-read prompt choices nil t nil nil default)))
 
-(defun knot-update--read-priority (current)
-  "Prompt for a priority within `allowed_values.priority_range', default CURRENT."
+(defun knot-update--read-priority (current &optional count)
+  "Prompt for a priority within `allowed_values.priority_range', default CURRENT.
+When COUNT is a number > 1, the prompt gains a `(N marked)' chunk
+and the default is suppressed so plain RET does not silently pick
+a value."
   (let* ((range (knot-info-allowed-values 'priority_range))
          (min (alist-get 'min range))
          (max (alist-get 'max range))
          (choices (when (and (numberp min) (numberp max))
                     (mapcar #'number-to-string (number-sequence min max))))
-         (default (and (numberp current) (number-to-string current)))
-         (raw (completing-read
-               (format "priority (%s..%s): " (or min "?") (or max "?"))
-               choices nil t nil nil default)))
+         (bulk (and (numberp count) (> count 1)))
+         (default (and (not bulk) (numberp current) (number-to-string current)))
+         (prompt (if bulk
+                     (format "priority (%d marked, %s..%s): "
+                             count (or min "?") (or max "?"))
+                   (format "priority (%s..%s): "
+                           (or min "?") (or max "?"))))
+         (raw (completing-read prompt choices nil t nil nil default)))
     (unless (string-match-p "\\`[0-9]+\\'" raw)
       (user-error "knot-update: priority must be a non-negative integer"))
     raw))
 
-(defun knot-update--read-tags (current)
+(defun knot-update--read-tags (current &optional count)
   "Prompt for a comma-list of tags, defaulting to CURRENT (a list of strings).
-Empty input clears the tag list."
-  (let ((default (and (listp current) current (string-join current ","))))
-    (read-string "tags (comma-list, empty to clear): " default)))
+Empty input clears the tag list.  When COUNT is a number > 1, the
+prompt gains a `(N marked)' chunk and the default is suppressed
+so plain RET does not silently pick a value."
+  (let* ((bulk (and (numberp count) (> count 1)))
+         (default (and (not bulk) (listp current) current
+                       (string-join current ",")))
+         (prompt (if bulk
+                     (format "tags (%d marked, comma-list, empty to clear): "
+                             count)
+                   "tags (comma-list, empty to clear): ")))
+    (read-string prompt default)))
 
 (defun knot-update--read-free-string (prompt current)
   "Prompt for a free-form value with CURRENT as the default text."
   (read-string prompt (and current (not (string-empty-p (format "%s" current)))
                            (format "%s" current))))
 
-(defun knot-update--read-parent (current &optional include-closed)
+(defun knot-update--read-parent (current &optional include-closed count)
   "Prompt for a parent id with completion over tickets.
 Candidates are formatted `id  title' and selection extracts the
 id.  The minibuffer pre-fills with CURRENT so plain RET keeps the
 existing parent; deleting the text and RET clears it.  By
 default only live tickets are offered; with INCLUDE-CLOSED
-non-nil, closed tickets are appended after the live set."
+non-nil, closed tickets are appended after the live set.  When
+COUNT is a number > 1, the prompt gains a `(N marked)' chunk and
+the pre-fill is suppressed."
   (let* ((live (knot-cli-call '("list")))
          (closed (and include-closed
                       (knot-cli-call '("list" "--status" "closed"))))
@@ -2132,11 +2224,20 @@ non-nil, closed tickets are appended after the live set."
                                     (or (alist-get 'id r) "")
                                     (or (alist-get 'title r) "")))
                           rows))
-         (initial (and current (not (string-empty-p (format "%s" current)))
+         (bulk (and (numberp count) (> count 1)))
+         (initial (and (not bulk) current
+                       (not (string-empty-p (format "%s" current)))
                        (format "%s" current)))
-         (prompt (if include-closed
-                     "parent (live + closed, empty to clear): "
-                   "parent (live, C-u to include closed, empty to clear): "))
+         (prompt (cond
+                  (bulk
+                   (format (if include-closed
+                               "parent (%d marked, live + closed, empty to clear): "
+                             "parent (%d marked, live, C-u to include closed, empty to clear): ")
+                           count))
+                  (include-closed
+                   "parent (live + closed, empty to clear): ")
+                  (t
+                   "parent (live, C-u to include closed, empty to clear): ")))
          (pick (completing-read prompt choices nil nil initial)))
     (cond
      ((or (null pick) (string-empty-p pick)) "")
@@ -2144,70 +2245,113 @@ non-nil, closed tickets are appended after the live set."
      (t pick))))
 
 (defun knot-update-set-status ()
-  "Replace status via `knot update --status'."
+  "Replace status via `knot update --status'.
+In `knot-list-mode' with marks, fans out across the marked set;
+the prompt prefixes a `(N marked)' chunk and no default is
+offered.  See `knot-update--commit' for fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-allowed
-                 "status: " 'statuses
-                 (knot-update--current-field 'status))))
-    (knot-update--commit id "--status" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'status)))
+         (prompt (if bulk
+                     (format "status (%d marked): " count)
+                   "status: "))
+         (value (knot-update--read-allowed prompt 'statuses current)))
+    (knot-update--commit ids "--status" value)))
 
 (defun knot-update-set-priority ()
-  "Replace priority via `knot update --priority'."
+  "Replace priority via `knot update --priority'.
+In `knot-list-mode' with marks, fans out across the marked set;
+the prompt prefixes a `(N marked)' chunk and no default is
+offered.  See `knot-update--commit' for fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-priority
-                 (knot-update--current-field 'priority))))
-    (knot-update--commit id "--priority" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'priority)))
+         (value (knot-update--read-priority current (and bulk count))))
+    (knot-update--commit ids "--priority" value)))
 
 (defun knot-update-set-mode ()
-  "Replace mode via `knot update --mode'."
+  "Replace mode via `knot update --mode'.
+In `knot-list-mode' with marks, fans out across the marked set;
+the prompt prefixes a `(N marked)' chunk and no default is
+offered.  See `knot-update--commit' for fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-allowed
-                 "mode: " 'modes
-                 (knot-update--current-field 'mode))))
-    (knot-update--commit id "--mode" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'mode)))
+         (prompt (if bulk
+                     (format "mode (%d marked): " count)
+                   "mode: "))
+         (value (knot-update--read-allowed prompt 'modes current)))
+    (knot-update--commit ids "--mode" value)))
 
 (defun knot-update-set-type ()
-  "Replace type via `knot update --type'."
+  "Replace type via `knot update --type'.
+In `knot-list-mode' with marks, fans out across the marked set;
+the prompt prefixes a `(N marked)' chunk and no default is
+offered.  See `knot-update--commit' for fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-allowed
-                 "type: " 'types
-                 (knot-update--current-field 'type))))
-    (knot-update--commit id "--type" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'type)))
+         (prompt (if bulk
+                     (format "type (%d marked): " count)
+                   "type: "))
+         (value (knot-update--read-allowed prompt 'types current)))
+    (knot-update--commit ids "--type" value)))
 
 (defun knot-update-set-tags ()
   "Replace the tag list via `knot update --tags'.
-Empty input clears the tag list."
+Empty input clears the tag list.  In `knot-list-mode' with marks,
+fans out across the marked set; the prompt prefixes a `(N marked)'
+chunk and no default is offered.  See `knot-update--commit' for
+fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-tags
-                 (knot-update--current-field 'tags))))
-    (knot-update--commit id "--tags" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'tags)))
+         (value (knot-update--read-tags current (and bulk count))))
+    (knot-update--commit ids "--tags" value)))
 
 (defun knot-update-set-assignee ()
   "Set or clear assignee via `knot update --assignee'.
-Empty input clears the assignee."
+Empty input clears the assignee.  In `knot-list-mode' with marks,
+fans out across the marked set; the prompt prefixes a `(N marked)'
+chunk and no default is offered.  See `knot-update--commit' for
+fan-out semantics."
   (interactive)
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-free-string
-                 "assignee (empty to clear): "
-                 (knot-update--current-field 'assignee))))
-    (knot-update--commit id "--assignee" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'assignee)))
+         (prompt (if bulk
+                     (format "assignee (%d marked, empty to clear): " count)
+                   "assignee (empty to clear): "))
+         (value (knot-update--read-free-string prompt current)))
+    (knot-update--commit ids "--assignee" value)))
 
 (defun knot-update-set-parent (&optional include-closed)
   "Set or clear parent via `knot update --parent'.
 Completion offers live tickets by default; with a prefix argument
 \(\\[universal-argument]\\), closed tickets are appended to the
-candidate list.  Empty input clears the parent id."
+candidate list.  Empty input clears the parent id.  In
+`knot-list-mode' with marks, fans out across the marked set; the
+prompt prefixes a `(N marked)' chunk and no pre-fill is offered.
+See `knot-update--commit' for fan-out semantics."
   (interactive "P")
-  (let* ((id (knot-update--ticket-id))
-         (value (knot-update--read-parent
-                 (knot-update--current-field 'parent)
-                 include-closed)))
-    (knot-update--commit id "--parent" value)))
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (current (unless bulk (knot-update--current-field 'parent)))
+         (value (knot-update--read-parent current include-closed
+                                          (and bulk count))))
+    (knot-update--commit ids "--parent" value)))
 
 (transient-define-prefix knot-update-from-show ()
   "Update a ticket atomically from a show buffer or list row.
@@ -2219,10 +2363,21 @@ buffers for the project auto-refresh on success via
 the originating row id.  CLI errors raise `user-error' in the
 minibuffer and leave buffer state unchanged.
 
+In `knot-list-mode' with `knot-list--marks' non-empty, each
+frontmatter suffix fans out across the marked set: the prompt
+prefixes a `(N marked)' chunk and offers no default, then one
+`knot update' subprocess per id runs in sequence, continuing past
+per-id `user-error' failures.  A single `knot--after-mutation'
+refresh fires at the end, followed by a summary `message' of the
+form `M: K ok' or `M: K ok, F failed: <id> (reason), ...'.  Marks
+persist across the run; rows that fall out of the current view
+auto-prune via `knot-list--repaint-marks'.
+
 The long-form group (capture buffers for description / design /
 body / note) is shown only in `knot-show-mode'.  From a list row
 only frontmatter mutations are offered; drill in via RET first
-to edit long-form sections."
+to edit long-form sections.  Bulk long-form mutation across a
+marked set is intentionally excluded."
   ["Frontmatter"
    ("s" "status"   knot-update-set-status)
    ("p" "priority" knot-update-set-priority)

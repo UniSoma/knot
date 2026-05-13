@@ -1,28 +1,29 @@
 ---
 id: kno-01krh0y8g4sq
 title: 'knot.el: mark-aware update dispatch on list rows'
-status: open
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-13T15:57:57.628361095Z'
-updated: '2026-05-13T15:57:57.628361095Z'
+updated: '2026-05-13T17:16:14.130330445Z'
+closed: '2026-05-13T17:16:14.130330445Z'
 tags:
 - emacs
 - knot-el
 acceptance:
 - title: knot-update-from-show invoked in knot-list-mode with knot-list--marks non-empty fans out across the marked set; with empty marks, falls back to (tabulated-list-get-id) (current behavior)
-  done: false
+  done: true
 - title: Bulk prompts prefix the prompt with '(N marked)' and pass nil default to completing-read / read-string so plain RET does not silently pick a value
-  done: false
+  done: true
 - title: Bulk commit loops one knot update subprocess per id, continues past user-error failures, accumulates (id . reason), and runs knot--after-mutation exactly once after the loop
-  done: false
+  done: true
 - title: 'On completion, a message of the form ''M: K ok'' or ''M: K ok, F failed: <id> (reason), ...'' summarizes the run'
-  done: false
+  done: true
 - title: Marks persist across a successful or partially-failed bulk run; auto-prune (slice 1) handles rows that disappear from the current view
-  done: false
+  done: true
 - title: 'Show-mode invocation path is unchanged: single ticket, current-value default still prefills, no ''(N marked)'' prefix'
-  done: false
+  done: true
 deps:
 - kno-01krh0xhf31f
 ---
@@ -62,3 +63,9 @@ Each `knot-update-set-*` suffix iterates over the returned list. For len=1 paths
 **No tests.** `knot.el` has no elisp test infrastructure yet; manual user-test via the README walkthrough. When elisp tests land, backfill coverage for the fan-out path, the continue-on-error contract, and the empty-marks fallback to row-at-point.
 
 **Out of scope.** Bulk `s` (start) and `x` (close) — explicitly excluded; they keep operating on row-at-point. Bulk long-form (description / design / body / note) — semantically dubious across N tickets.
+
+## Notes
+
+**2026-05-13T17:16:14.130330445Z**
+
+Shipped at emacs/knot.el + emacs/README.md. knot-update-from-show in knot-list-mode now fans out across knot-list--marks: new resolver knot-update--ticket-ids returns marked ids in display order (helper knot-list--marks-in-display-order walks the rendered buffer), each knot-update-set-* builds a bulk-aware prompt with a '(N marked)' chunk and suppresses the default, and knot-update--commit accepts a list of ids — for >1 it loops one knot update subprocess per id, catches user-error from the CLI envelope as (id . reason), continues past failures, runs knot--after-mutation once after the loop, and emits 'M: K ok' or 'M: K ok, F failed: <id> (reason), ...'. Readers --read-priority / --read-tags / --read-parent gained an optional count param. Single-id paths (show-mode + list-mode without marks) preserve current behavior. Marks persist across the run; rows that fall out of view auto-prune via the existing repaint intersect. README's marks section replaces the 'follow-up slice' placeholder with the bulk fan-out contract. byte-compile clean; bb test 347 / 4399 green.

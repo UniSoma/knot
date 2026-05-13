@@ -83,8 +83,23 @@ changes — point is preserved across refresh on the same row id,
 and ids that fall out of view (e.g. after a filter change or an
 external mutation) silently drop. Switching view with `l` / `r` /
 `b` / `c` clears the set, since the row set is conceptually
-different across views. Bulk-aware commands consuming the set
-ship in a follow-up slice.
+different across views.
+
+When `knot-update-from-show` (`,` / `M`) is invoked in
+`knot-list-mode` with marks non-empty, each frontmatter suffix
+fans out across the marked set: the prompt prefixes a
+`(N marked)` chunk and offers no default value, then one
+`knot update --<flag> <value>` subprocess runs per id in display
+order. Per-id `user-error` failures are caught and the loop
+continues; a single `knot--after-mutation` refresh fires once at
+the end. The minibuffer reports the outcome as `M: K ok` or
+`M: K ok, F failed: <id> (reason), …`. Marks persist across the
+run, and rows that fall out of the current view (e.g. status
+flipped to closed under the `ready` view) auto-prune at refresh
+time. With marks empty the existing single-id behavior applies
+(operate on the row at point, current-value default still
+prefills). `s` (start) and `x` (close) remain single-id; bulk
+long-form mutation (`e d b n`) is intentionally excluded.
 
 `+` in `knot-show-mode` is section-aware. It reads the
 `knot-section` text property at point and dispatches:
