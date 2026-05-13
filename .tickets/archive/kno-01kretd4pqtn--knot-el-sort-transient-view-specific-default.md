@@ -1,12 +1,13 @@
 ---
 id: kno-01kretd4pqtn
 title: 'knot.el: sort transient + view-specific default orderings for list view'
-status: in_progress
+status: closed
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-12T19:25:16.375278085Z'
-updated: '2026-05-13T01:22:07.262176645Z'
+updated: '2026-05-13T01:23:28.297010240Z'
+closed: '2026-05-13T01:23:28.297010240Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -56,3 +57,9 @@ Currently knot-list-mode inherits tabulated-list-mode's sort machinery: every co
 ## Acceptance gotchas
 
 - The built-in `S` binding from `tabulated-list-mode-map` must keep working — it currently mutates `tabulated-list-sort-key` directly, so the new buffer-local `knot-list--sort` should hydrate from `tabulated-list-sort-key` on render to stay consistent.
+
+## Notes
+
+**2026-05-13T01:23:28.297010240Z**
+
+Shipped at emacs/knot.el. Sort transient bound to 'o' in knot-list-mode-map with single-key suffixes for id/title/priority/status/type/mode/created/updated plus 'd' toggle-direction and 'R' reset-to-view-default. Buffer-local knot-list--sort persists across filter changes, view switches, and 'g' refresh; per-view defaults (list/ready/blocked → priority asc + id-asc tiebreak; closed → updated desc) hydrate when unset. Sort is client-side over knot-list--rows; knot-list--render was split into fetch+rerender so sort changes never hit the CLI. Header-line shows 'sort=KEY↑|↓' alongside view + filter chips. Built-in 'S' interop preserved via knot-list--last-table-sort-key tracking — render hydrates only when the table key was externally mutated.
