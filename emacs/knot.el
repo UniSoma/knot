@@ -292,16 +292,47 @@ subprocess emits no parseable output, or when JSON parsing fails."
 (defvar knot-info--cache (make-hash-table :test 'equal)
   "Cache mapping directory paths to the `data' field of `knot info --json'.")
 
+(defvar knot-info--version-warned (make-hash-table :test 'equal)
+  "Set of project roots for which the CLI version warning has already fired.
+Keyed by `file-truename'-ed project root; values are non-nil sentinels.")
+
+(defun knot-info--check-cli-version (data key)
+  "Warn once per project when DATA's CLI version is below the declared minimum.
+KEY is the truename of the project root the warning should be
+remembered against.  Compares `data.project.knot_version' to
+`knot-minimum-cli-version' via `version<' and calls `lwarn'
+without refusing to load when the running CLI is older.  Silent
+when the version is missing or unparseable."
+  (let* ((project (alist-get 'project data))
+         (running (alist-get 'knot_version project))
+         (minimum knot-minimum-cli-version))
+    (when (and (stringp running)
+               (not (string-empty-p running))
+               (stringp minimum)
+               (not (string-empty-p minimum))
+               (not (gethash key knot-info--version-warned)))
+      (condition-case nil
+          (when (version< running minimum)
+            (lwarn 'knot :warning
+                   "knot CLI %s is older than knot.el's declared minimum %s — \
+some commands may behave unexpectedly.  Upgrade the CLI to silence this warning."
+                   running minimum))
+        (error nil))
+      (puthash key t knot-info--version-warned))))
+
 (defun knot-info-current (&optional directory)
   "Return the cached info envelope for DIRECTORY (default `default-directory').
 On a cache miss, runs `knot info --json' from DIRECTORY and caches
-the parsed `data' field."
+the parsed `data' field.  Fires `knot-info--check-cli-version' on
+each fresh fetch so the version-compat warning surfaces in
+`*Warnings*' the first time a project is touched."
   (let* ((key (file-truename (or directory default-directory)))
          (hit (gethash key knot-info--cache)))
     (or hit
         (let* ((default-directory key)
                (data (knot-cli-call '("info"))))
           (puthash key data knot-info--cache)
+          (knot-info--check-cli-version data key)
           data))))
 
 (defun knot-info-allowed-values (field)
@@ -321,7 +352,10 @@ FIELD is a symbol such as `default_type', `default_priority', or
     (alist-get field defaults)))
 
 (defun knot-info-invalidate (&optional directory)
-  "Clear the info cache for DIRECTORY, or all entries when DIRECTORY is nil."
+  "Clear the info cache for DIRECTORY, or all entries when DIRECTORY is nil.
+Does not clear `knot-info--version-warned'; the version warning
+is intentionally one-shot per Emacs session even after manual
+`g' refreshes invalidate the data cache."
   (if directory
       (remhash (file-truename directory) knot-info--cache)
     (clrhash knot-info--cache)))
@@ -1009,7 +1043,7 @@ when there is nothing actionable."
       (knot-cli-call (list "update" knot-show--id
                            "--ac" title
                            (if done "--undone" "--done")))
-      (knot-show--refresh))))
+      (knot--after-mutation))))
 
 (defun knot-show-add-ac ()
   "Prompt for a new acceptance criterion and add it via `--add-ac'."
@@ -1020,7 +1054,7 @@ when there is nothing actionable."
     (when (or (null title) (string-empty-p (string-trim title)))
       (user-error "knot-show: empty criterion title"))
     (knot-cli-call (list "update" knot-show--id "--add-ac" title))
-    (knot-show--refresh)))
+    (knot--after-mutation)))
 
 (defun knot-show-remove-ac ()
   "Remove the acceptance criterion at point via `--remove-ac' after confirmation."
@@ -1030,7 +1064,7 @@ when there is nothing actionable."
       (user-error "knot-show: not on an acceptance criterion line"))
     (when (yes-or-no-p (format "Remove acceptance criterion %S? " title))
       (knot-cli-call (list "update" knot-show--id "--remove-ac" title))
-      (knot-show--refresh))))
+      (knot--after-mutation))))
 
 (defun knot-show--dep-id-at-point ()
   "Return the `knot-dep-id' text property at point, or nil."
@@ -1069,20 +1103,20 @@ of those properties is at point."
      (dep-id
       (when (yes-or-no-p (format "Remove dep %s from %s? " dep-id id))
         (knot-cli-call (list "undep" id dep-id))
-        (knot-show--refresh)))
+        (knot--after-mutation)))
      (rdep-id
       (when (yes-or-no-p
              (format "Remove dep %s from %s? " id rdep-id))
         (knot-cli-call (list "undep" rdep-id id))
-        (knot-show--refresh)))
+        (knot--after-mutation)))
      (link-id
       (when (yes-or-no-p (format "Remove link %s ↔ %s? " id link-id))
         (knot-cli-call (list "unlink" id link-id))
-        (knot-show--refresh)))
+        (knot--after-mutation)))
      (ac
       (when (yes-or-no-p (format "Remove acceptance criterion %S? " ac))
         (knot-cli-call (list "update" id "--remove-ac" ac))
-        (knot-show--refresh)))
+        (knot--after-mutation)))
      (t
       (user-error
        "knot-show: not on a dep, link, or acceptance criterion line")))))
@@ -1353,12 +1387,17 @@ SECTION is not present."
     ""))
 
 (defun knot-capture--make-refresh-callback (origin)
-  "Return a thunk that refreshes ORIGIN (a show buffer) when it is live."
+  "Return a thunk that refreshes ORIGIN's project after a capture commit.
+
+ORIGIN is the show buffer the capture was launched from.  The
+thunk re-enters ORIGIN (when still live) so the cross-buffer
+walker sees the right `default-directory' / project scope, then
+propagates to every visible knot.el buffer in the same project."
   (lambda ()
     (when (and origin (buffer-live-p origin))
       (with-current-buffer origin
         (when (derived-mode-p 'knot-show-mode)
-          (knot-show--refresh))))))
+          (knot--after-mutation))))))
 
 (defun knot-capture--open (id field prefill callback)
   "Pop a capture buffer for ID/FIELD prefilled with PREFILL.
@@ -1522,7 +1561,7 @@ refreshed.  Requires the Emacs server to be running
            (when (and origin (buffer-live-p origin))
              (with-current-buffer origin
                (when (derived-mode-p 'knot-show-mode)
-                 (knot-show--refresh))))))))))
+                 (knot--after-mutation))))))))))
 
 
 ;;;; Update transient (knot-update module)
@@ -1540,12 +1579,14 @@ refreshed.  Requires the Emacs server to be running
   (alist-get field knot-show--data))
 
 (defun knot-update--commit (id flag value)
-  "Run `knot update ID FLAG VALUE' atomically, then refresh the show buffer.
+  "Run `knot update ID FLAG VALUE' atomically, then refresh.
 A single subprocess per call — no batching.  Errors raised by the
 CLI envelope propagate out of `knot-cli-call' as `user-error',
-which short-circuits the refresh and leaves buffer state intact."
+which short-circuits the refresh and leaves buffer state intact.
+Refresh propagates to every visible knot.el buffer for this
+project via `knot--after-mutation'."
   (knot-cli-call (list "update" id flag value))
-  (knot-show--refresh))
+  (knot--after-mutation))
 
 (defun knot-update--read-allowed (prompt field current)
   "Prompt for FIELD's allowed value, defaulting to CURRENT.
@@ -1888,7 +1929,10 @@ where the user would start writing the body."
   "Run `knot create' with ARGV and drop into the new ticket's show buffer.
 ARGV is the list of strings after the `create' verb (title first, then
 any flag/value pairs).  Buffer point and window-point are parked on
-the `## Description' heading (or point-min when no body is rendered)."
+the `## Description' heading (or point-min when no body is rendered).
+Other visible knot.el buffers for this project are refreshed via
+`knot--after-mutation' so a visible list buffer picks up the new
+row alongside the popped show buffer."
   (let* ((data (knot-cli-call (cons "create" argv)))
          (id (alist-get 'id data)))
     (unless (and id (not (string-empty-p id)))
@@ -1899,6 +1943,7 @@ the `## Description' heading (or point-min when no body is rendered)."
                  (point)))
            (win (get-buffer-window buf)))
       (when win (set-window-point win pt))
+      (knot--after-mutation)
       buf)))
 
 (defun knot-create--commit (&optional args)
@@ -1954,12 +1999,12 @@ Drops into the new ticket's show buffer with point on `## Description'."
 (defun knot-start ()
   "Transition the contextual ticket via `knot start <id>'.
 Context id comes from the show buffer's `knot-show--id' or the
-tabulated-list row at point.  Refreshes the originating buffer on
-success."
+tabulated-list row at point.  Refresh propagates to every visible
+knot.el buffer for this project via `knot--after-mutation'."
   (interactive)
   (let ((id (knot-deps--context-id)))
     (knot-cli-call (list "start" id))
-    (knot-deps--refresh-origin)))
+    (knot--after-mutation)))
 
 ;;;###autoload
 (defun knot-close ()
@@ -1967,12 +2012,13 @@ success."
 Calls `knot close <id> --summary \"...\"' and refreshes.  When the
 acceptance gate fires, the CLI envelope's message surfaces as a
 `user-error' in the minibuffer (via `knot-cli-call'); buffer state is
-unchanged."
+unchanged.  Refresh propagates to every visible knot.el buffer
+for this project via `knot--after-mutation'."
   (interactive)
   (let* ((id (knot-deps--context-id))
          (summary (read-string "closing summary: ")))
     (knot-cli-call (list "close" id "--summary" summary))
-    (knot-deps--refresh-origin)))
+    (knot--after-mutation)))
 
 
 ;;;; Deps + links transients (knot-deps / knot-links modules)
@@ -1994,10 +2040,10 @@ In `knot-show-mode' the buffer's `knot-show--id' is used; in
     (user-error "knot-deps: not in a knot.el show or list buffer"))))
 
 (defun knot-deps--refresh-origin ()
-  "Refresh the originating buffer after a deps / links mutation."
-  (cond
-   ((derived-mode-p 'knot-show-mode) (knot-show--refresh))
-   ((derived-mode-p 'knot-list-mode) (knot-list--render))))
+  "Refresh every visible knot.el buffer in this project after a deps mutation.
+Thin wrapper around `knot--after-mutation' kept for call-site
+clarity at the deps / links transient suffixes."
+  (knot--after-mutation))
 
 (defun knot-deps--format-row (id title)
   "Format an `id  title' completion candidate for ID and TITLE."
@@ -2309,18 +2355,27 @@ back to `quit-window' otherwise."
       (quit-window))))
 
 
-;;;; Refresh (single-buffer; cross-buffer walk lands in slice 8)
+;;;; Refresh (single-buffer `g' + cross-buffer mutation walker)
 
-(defun knot-refresh ()
-  "Refresh the current knot.el buffer in place.
+(defconst knot--buffer-modes
+  '(knot-list-mode knot-info-mode knot-show-mode knot-deps-mode)
+  "Major modes that count as knot.el buffers for refresh propagation.")
 
-In `knot-list-mode' the active view and filter state are
-preserved and point is restored to the previous row id when
-possible.  In `knot-info-mode' the cached info envelope is
-invalidated and the buffer is re-rendered.  In `knot-show-mode'
-the ticket is re-fetched and re-rendered."
-  (interactive)
-  (knot-info-invalidate default-directory)
+(defun knot--buffer-project-root (buffer)
+  "Return BUFFER's project root truename when it is a knot.el buffer.
+Returns nil otherwise.  Used by the cross-buffer refresh walker
+to gate propagation by project."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and (apply #'derived-mode-p knot--buffer-modes)
+                 default-directory)
+        (file-truename default-directory)))))
+
+(defun knot--refresh-current-buffer ()
+  "Re-render the current knot.el buffer in place.
+Dispatch helper shared by `knot-refresh' (manual `g') and the
+cross-buffer mutation walker.  Assumes the cached info envelope
+is already invalid for this project; callers handle invalidation."
   (cond
    ((derived-mode-p 'knot-list-mode)
     (knot-list--render))
@@ -2332,9 +2387,51 @@ the ticket is re-fetched and re-rendered."
    ((derived-mode-p 'knot-show-mode)
     (knot-show--refresh))
    ((derived-mode-p 'knot-deps-mode)
-    (knot-deps--refresh))
-   (t
-    (user-error "knot-refresh: not in a knot.el buffer"))))
+    (knot-deps--refresh))))
+
+(defun knot--after-mutation (&optional project-root)
+  "Invalidate the info cache and refresh visible knot.el buffers in PROJECT-ROOT.
+
+PROJECT-ROOT defaults to the originating buffer's
+`default-directory'.  A buffer is considered visible when it
+appears in at least one window on any visible frame (see
+`get-buffer-window-list').  Buried (live but undisplayed) buffers
+are intentionally not refreshed; `g' (`knot-refresh') remains the
+manual escape hatch in any knot.el buffer.
+
+Every mutating command (`knot-update--commit', `knot-start',
+`knot-close', the AC and dep / link interactions, the capture
+commit, the emacsclient escape hatch, and `knot-create--run') calls
+this in place of a self-only `knot-show--refresh' so a status
+change in show propagates to a visible list buffer alongside it."
+  (let ((root (file-truename (or project-root default-directory))))
+    (knot-info-invalidate root)
+    (dolist (buf (buffer-list))
+      (when (and (equal (knot--buffer-project-root buf) root)
+                 (get-buffer-window-list buf nil 0))
+        (with-current-buffer buf
+          (knot--refresh-current-buffer))))))
+
+(defun knot-refresh ()
+  "Refresh the current knot.el buffer in place.
+
+In `knot-list-mode' the active view and filter state are
+preserved and point is restored to the previous row id when
+possible.  In `knot-info-mode' the cached info envelope is
+invalidated and the buffer is re-rendered.  In `knot-show-mode'
+the ticket is re-fetched and re-rendered.  In `knot-deps-mode'
+the deps tree is re-fetched and re-rendered.
+
+Does not propagate to other knot.el buffers for the same project;
+cross-buffer refresh is reserved for mutating commands (see
+`knot--after-mutation').  External edits (from another agent or
+terminal session) surface only on the next manual `g' in each
+buffer."
+  (interactive)
+  (unless (apply #'derived-mode-p knot--buffer-modes)
+    (user-error "knot-refresh: not in a knot.el buffer"))
+  (knot-info-invalidate default-directory)
+  (knot--refresh-current-buffer))
 
 
 (provide 'knot)

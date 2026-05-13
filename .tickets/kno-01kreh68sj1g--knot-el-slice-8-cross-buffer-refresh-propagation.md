@@ -1,29 +1,29 @@
 ---
 id: kno-01kreh68sj1g
 title: 'knot.el slice 8: cross-buffer refresh propagation + CLI version compat warning'
-status: open
+status: in_progress
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:44:13.993865613Z'
-updated: '2026-05-12T16:44:13.993865613Z'
+updated: '2026-05-13T00:25:04.871313434Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
 - knot-el
 acceptance:
 - title: After a successful mutating command, knot.el walks (window-list) and refreshes every visible knot.el buffer scoped to the same project
-  done: false
+  done: true
 - title: Buried (live but undisplayed) buffers are not auto-refreshed
-  done: false
+  done: true
 - title: g in any knot.el buffer manually re-fetches and re-renders
-  done: false
+  done: true
 - title: knot.el declares a minimum CLI version constant
-  done: false
+  done: true
 - title: On first knot-info-current call per project, knot.el compares data.project.knot_version against the declared minimum
-  done: false
+  done: true
 - title: If older, knot.el calls lwarn with a clear message; the mode still loads
-  done: false
+  done: true
 deps:
 - kno-01kreh4yap1c
 ---
