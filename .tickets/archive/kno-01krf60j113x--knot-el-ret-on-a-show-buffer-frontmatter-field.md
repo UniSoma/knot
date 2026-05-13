@@ -1,12 +1,13 @@
 ---
 id: kno-01krf60j113x
 title: 'knot.el: RET on a show-buffer frontmatter field opens the matching update prompt'
-status: in_progress
+status: closed
 type: feature
 priority: 3
 mode: afk
 created: '2026-05-12T22:48:06.944937966Z'
-updated: '2026-05-13T00:29:15.890355944Z'
+updated: '2026-05-13T00:29:35.942968131Z'
+closed: '2026-05-13T00:29:35.942968131Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -62,3 +63,9 @@ Lower friction than the `,' transient for the common single-field flip (RET = 1 
 - Manual: open a show buffer, point on each editable value, press RET, confirm the right prompt fires and the buffer refreshes on commit.
 - Regression: AC flip, id drill-in, and `q'/`g'/`,' still work as before.
 - byte-compile clean; existing `knot-show-RET' user-error message still fires for un-actionable lines.
+
+## Notes
+
+**2026-05-13T00:29:35.942968131Z**
+
+knot-show--render at emacs/knot.el now annotates each editable value's char span with 'knot-field <symbol>' (status/type/priority/mode/assignee/parent/tags) via a new knot-show--insert-field helper; **label:** markup and the trailing newline stay unannotated. knot-show--field->command maps the symbols to the existing knot-update-set-* commands. knot-show-RET grows a new cond branch (precedence 4 of 5): knot-id button → drill-in, AC row → flip, any other button → push, knot-field at point → call-interactively the matching update command, else nothing-actionable user-error. Parent's buttonized id still wins via cond ordering (use ,P to edit parent). Tags edit as a whole via knot-update-set-tags. Deps / links / external / relationship sections and id / created / updated stay deliberately unannotated. byte-compile clean under Emacs 28.1 with byte-compile-error-on-warn t; pre-existing stale-warning on Package-Requires emacs 28.1 is unchanged.
