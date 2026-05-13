@@ -1,12 +1,13 @@
 ---
 id: kno-01kremvgac07
 title: knot.el evil bindings — opt-in knot-evil-mode or upstream to evil-collection
-status: open
+status: closed
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-12T17:48:15.564075490Z'
-updated: '2026-05-13T02:11:00.443929560Z'
+updated: '2026-05-13T02:34:16.999263694Z'
+closed: '2026-05-13T02:34:16.999263694Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -15,17 +16,17 @@ tags:
 - v0.2
 acceptance:
 - title: knot-evil-mode defined in knot.el as a :global t opt-in minor mode; evil is a soft require ((require 'evil nil t) at load); enabling the mode runs an idempotent setup that (a) mutates each knot-*-mode-map to drop colliding bindings and (b) adds the new bindings via evil-define-key into the per-mode auxiliary map for evil normal state
-  done: false
+  done: true
 - title: 'evil-set-initial-state wired: normal for knot-list-mode / knot-show-mode / knot-info-mode / knot-deps-mode; insert for knot-capture-mode'
-  done: false
+  done: true
 - title: Binding table from this ticket applied in full — global (? gr q), list (RET f o s x D L), show (RET + a - s x M [ ] K D L E), deps (TAB <backtab> f q ? gr); the M transient gains long-form suffixes e/d/b/n alongside existing frontmatter s/p/m/t/T/a/P
-  done: false
+  done: true
 - title: README (or emacs/README.md) gains an 'Evil / Doom users' section with the paste-ready use-package! knot block including (knot-evil-mode +1) and the map! :localleader snippet
-  done: false
+  done: true
 - title: bb lint:elisp passes with no new byte-compile warnings or package-lint errors after the changes
-  done: false
+  done: true
 - title: 'Manual smoke in a Doom session: every listed binding fires correctly in evil normal state across all four read-only knot major modes; buffers open in normal state automatically'
-  done: false
+  done: true
 ---
 
 ## Description
@@ -116,3 +117,9 @@ Not auto-wired — avoids a hard `map!` macro dependency from `knot.el`. README 
 - Doom detection inside `knot-evil-mode` (snippet is paste-yourself).
 - `knot-capture-mode` keybinding changes (`C-c C-c` / `C-c C-k` are already state-agnostic).
 - Non-evil keybinding scheme (slice 1 unchanged when `knot-evil-mode` is off).
+
+## Notes
+
+**2026-05-13T02:34:16.999263694Z**
+
+Shipped at emacs/knot.el + emacs/README.md. knot-evil-mode is a :global t opt-in minor mode wrapping a soft (require 'evil nil t); enabling it destructively rewires knot-list/show/info/deps mode-maps via evil-define-key* in each mode's normal-state aux map (and sets initial states normal for read-only modes, insert for capture). Setup is idempotent and data-driven through knot-evil--stock-keys / knot-evil--bindings / knot-evil--initial-states. The renamed M transient (knot-update-from-show) gains a Long-form group with e/d/b/n suffixes alongside the existing frontmatter s/p/m/t/T/a/P. emacs/README.md documents install, the full binding table, and a paste-ready Doom use-package! + map! :localleader snippet. bb lint:elisp + bb test both clean.
