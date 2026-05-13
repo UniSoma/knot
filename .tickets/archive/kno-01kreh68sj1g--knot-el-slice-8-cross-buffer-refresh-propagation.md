@@ -1,12 +1,13 @@
 ---
 id: kno-01kreh68sj1g
 title: 'knot.el slice 8: cross-buffer refresh propagation + CLI version compat warning'
-status: in_progress
+status: closed
 type: feature
 priority: 2
 mode: afk
 created: '2026-05-12T16:44:13.993865613Z'
-updated: '2026-05-13T00:25:04.871313434Z'
+updated: '2026-05-13T00:25:25.586810031Z'
+closed: '2026-05-13T00:25:25.586810031Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -39,3 +40,9 @@ On the first knot-info-current call in a project, compare `data.project.knot_ver
 No filewatch — external edits (from another agent or terminal session) surface only on next manual g (see docs/prd/knot-el.md 'Out of Scope').
 
 See docs/prd/knot-el.md user stories 38-40 and 46, 'Refresh model', and 'Version compatibility'.
+
+## Notes
+
+**2026-05-13T00:25:25.586810031Z**
+
+Slice 8 shipped at emacs/knot.el. knot--after-mutation walks (buffer-list) and refreshes every visible knot.el buffer (knot-list/info/show/deps) whose default-directory matches the originating buffer's project root, via get-buffer-window-list buf nil 0; buried buffers are intentionally untouched. Every mutating command — AC flip/add/remove, dep + link add/remove + remove-at-point, knot-update--commit, knot-start, knot-close, knot-capture-commit, the emacsclient sentinel, and knot-create--run — now calls knot--after-mutation in place of a self-only knot-show--refresh. knot-refresh (g) still does single-buffer refresh and now guards against non-knot buffers up front. CLI compat: knot-info-current fires knot-info--check-cli-version on each cache miss; it compares data.project.knot_version against knot-minimum-cli-version (0.3.0) via version< and lwarns once per project under the 'knot category when older, silent when the version field is missing or unparseable. Knot-info--version-warned persists across info-cache invalidations so the warning stays one-shot per Emacs session. Byte-compile + package-lint clean (the pre-existing 'stale-warning' on the Package-Requires Emacs 28.1 floor is unchanged).
