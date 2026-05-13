@@ -52,6 +52,9 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `s`          | `knot-start`                       |
 |                        | `x`          | `knot-close`                       |
 |                        | `M`          | `knot-update-from-show` (transient)|
+|                        | `m`          | `knot-list-mark`                   |
+|                        | `u`          | `knot-list-unmark`                 |
+|                        | `U`          | `knot-list-unmark-all`             |
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
 | `knot-show-mode`       | `RET`        | context action                     |
@@ -67,6 +70,21 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 | `knot-deps-mode`       | `TAB` / `<backtab>` | navigation                  |
 |                        | `f`          | `knot-deps-toggle-full`            |
 |                        | `q`          | `knot-deps-quit`                   |
+
+`m` / `u` / `U` add dired-style marks to `knot-list-mode` rows. `m`
+marks the row at point and advances one line; `u` unmarks and
+advances; `U` clears the entire set. With an active region, `m` and
+`u` operate on every overlapping row and deactivate the mark.
+Marked rows render a `*` in the padding column and the
+`knot-marked` face on the row body; the header-line gains a
+`[N marked]` chunk while the set is non-empty. The set is buffer-
+local and survives refresh (`g` / `gr`), filter changes, and sort
+changes — point is preserved across refresh on the same row id,
+and ids that fall out of view (e.g. after a filter change or an
+external mutation) silently drop. Switching view with `l` / `r` /
+`b` / `c` clears the set, since the row set is conceptually
+different across views. Bulk-aware commands consuming the set
+ship in a follow-up slice.
 
 `+` in `knot-show-mode` is section-aware. It reads the
 `knot-section` text property at point and dispatches:

@@ -200,6 +200,11 @@ Slice 8 will warn when the running CLI is older than this value."
   "Face for nodes in the deps tree that reference a missing ticket."
   :group 'knot)
 
+(defface knot-marked
+  '((t :inherit region :extend t))
+  "Face overlaid on rows that are part of the `knot-list-mode' mark set."
+  :group 'knot)
+
 (defun knot-format-propertize (string face)
   "Return STRING propertized with FACE when FACE is non-nil."
   (if (and string face)
@@ -661,6 +666,19 @@ non-nil means ascending; nil means descending.")
 Used by `knot-list--hydrate-sort-from-table' to detect mutation by the
 built-in `S' binding since the previous render.")
 
+(defvar-local knot-list--marks nil
+  "Dired-style mark set for this `knot-list-mode' buffer.
+List of ticket id strings.  Survives refresh / filter / sort
+changes; cleared by `knot-list--open' on view switch and by
+`knot-list-unmark-all'.  After every render, intersected with the
+rendered row set (`knot-list--repaint-marks'), so ids that fall
+out of view silently drop.")
+
+(defvar-local knot-list--mark-overlays nil
+  "Overlays painting the `knot-marked' face on rows in `knot-list--marks'.
+Recreated from scratch by `knot-list--repaint-marks' on every
+repaint; never managed incrementally.")
+
 (defun knot-list--effective-sort ()
   "Return the active sort: pinned `knot-list--sort' or the view default."
   (or knot-list--sort
@@ -737,7 +755,8 @@ sort-key symbol, so `knot-list--sort' is left untouched."
 (defun knot-list--header-line (view filters &optional sort)
   "Render the header-line string for VIEW with active FILTERS.
 When SORT is non-nil, render its key + direction between the view tag
-and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\")."
+and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\").
+Appends a `[N marked]' chunk when `knot-list--marks' is non-empty."
   (let* ((view-tag (propertize (format "[%s]" view)
                                'face 'mode-line-emphasis))
          (sort-tag (when sort
@@ -755,12 +774,17 @@ and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\")."
                                        2)
                                       (cdr entry)))
                             effective))
+         (marks-tag (when knot-list--marks
+                      (propertize (format "[%d marked]"
+                                          (length knot-list--marks))
+                                  'face 'mode-line-emphasis)))
          (parts (delq nil
                       (list view-tag
                             sort-tag
                             (if flag-strs
                                 (string-join flag-strs " ")
-                              (propertize "(no filters)" 'face 'shadow))))))
+                              (propertize "(no filters)" 'face 'shadow))
+                            marks-tag))))
     (string-join parts " ")))
 
 (defvar knot-list-mode-map
@@ -774,10 +798,14 @@ and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\")."
     (define-key map (kbd "f") #'knot-list-filter)
     (define-key map (kbd "F") #'knot-list-clear-filters)
     (define-key map (kbd "o") #'knot-list-sort)
+    (define-key map (kbd "g") #'knot-refresh)
     (define-key map (kbd "RET") #'knot-list-show-at-point)
     (define-key map (kbd "s") #'knot-start)
     (define-key map (kbd "x") #'knot-close)
     (define-key map (kbd ",") #'knot-update-from-show)
+    (define-key map (kbd "m") #'knot-list-mark)
+    (define-key map (kbd "u") #'knot-list-unmark)
+    (define-key map (kbd "U") #'knot-list-unmark-all)
     (define-key map (kbd "D") #'knot-deps-transient)
     (define-key map (kbd "L") #'knot-links-transient)
     map)
@@ -869,9 +897,8 @@ case."
     (setq tabulated-list-entries (mapcar #'knot-list--row sorted))
     (setq tabulated-list-sort-key (knot-list--sort->table-key eff))
     (setq knot-list--last-table-sort-key tabulated-list-sort-key)
-    (setq header-line-format
-          (knot-list--header-line knot-list--view knot-list--filters eff))
     (tabulated-list-print t)
+    (knot-list--repaint-marks)
     (when prev-id
       (goto-char (point-min))
       (let ((found nil))
@@ -882,15 +909,127 @@ case."
         (unless found
           (goto-char (point-min)))))))
 
+(defun knot-list--clear-mark-overlays ()
+  "Delete every overlay in `knot-list--mark-overlays' and reset the list."
+  (mapc #'delete-overlay knot-list--mark-overlays)
+  (setq knot-list--mark-overlays nil))
+
+(defun knot-list--repaint-marks ()
+  "Re-paint mark glyph + face for every row whose id is in `knot-list--marks'.
+Walks the printed buffer, sets each row's padding-column tag to
+`*' or a single space, and overlays the `knot-marked' face on
+marked rows.  Also intersects `knot-list--marks' with the
+rendered row set so stranded ids silently drop, and refreshes
+the header-line so the `[N marked]' chunk reflects the post-
+intersect count."
+  (knot-list--clear-mark-overlays)
+  (let ((rendered nil))
+    (save-excursion
+      (let ((inhibit-read-only t))
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let ((id (tabulated-list-get-id)))
+            (when id
+              (push id rendered)
+              (if (member id knot-list--marks)
+                  (progn
+                    (tabulated-list-put-tag "*")
+                    (let ((ov (make-overlay (line-beginning-position)
+                                            (min (point-max)
+                                                 (1+ (line-end-position))))))
+                      (overlay-put ov 'face 'knot-marked)
+                      (overlay-put ov 'evaporate t)
+                      (push ov knot-list--mark-overlays)))
+                (tabulated-list-put-tag " "))))
+          (forward-line 1))))
+    (setq knot-list--marks
+          (cl-intersection knot-list--marks rendered :test #'equal)))
+  (setq header-line-format
+        (knot-list--header-line knot-list--view knot-list--filters
+                                (knot-list--effective-sort))))
+
+(defun knot-list--region-row-bounds ()
+  "Return (BEG . END) covering every full line touched by the active region.
+END is the position at the start of the line after the last row
+the region overlaps."
+  (let* ((beg (save-excursion
+                (goto-char (region-beginning))
+                (line-beginning-position)))
+         (end (save-excursion
+                (goto-char (region-end))
+                (if (bolp) (point) (line-beginning-position 2)))))
+    (cons beg end)))
+
+(defun knot-list--apply-to-region (fn)
+  "Call FN with each row id whose line is covered by the active region.
+Deactivates the mark after iterating."
+  (let* ((bounds (knot-list--region-row-bounds))
+         (beg (car bounds))
+         (end (cdr bounds)))
+    (save-excursion
+      (goto-char beg)
+      (while (< (point) end)
+        (let ((id (tabulated-list-get-id)))
+          (when id (funcall fn id)))
+        (forward-line 1))))
+  (deactivate-mark))
+
+(defun knot-list--mark-add (id)
+  "Add ID to `knot-list--marks' (idempotent, equal-based)."
+  (when id
+    (cl-pushnew id knot-list--marks :test #'equal)))
+
+(defun knot-list--mark-remove (id)
+  "Remove ID from `knot-list--marks' (no-op when absent)."
+  (when id
+    (setq knot-list--marks (delete id knot-list--marks))))
+
+(defun knot-list-mark ()
+  "Mark the row at point, or every row touched by the active region.
+Without a region, advances point one line after marking so a
+sequence of `m' presses builds up a contiguous selection.
+With a region, marks every overlapping row and deactivates the
+region."
+  (interactive)
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list-mark: not in a knot-list-mode buffer"))
+  (if (use-region-p)
+      (knot-list--apply-to-region #'knot-list--mark-add)
+    (knot-list--mark-add (tabulated-list-get-id))
+    (forward-line 1))
+  (knot-list--repaint-marks))
+
+(defun knot-list-unmark ()
+  "Unmark the row at point, or every row touched by the active region.
+Without a region, advances point one line after unmarking."
+  (interactive)
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list-unmark: not in a knot-list-mode buffer"))
+  (if (use-region-p)
+      (knot-list--apply-to-region #'knot-list--mark-remove)
+    (knot-list--mark-remove (tabulated-list-get-id))
+    (forward-line 1))
+  (knot-list--repaint-marks))
+
+(defun knot-list-unmark-all ()
+  "Clear the entire `knot-list--marks' set in the current buffer."
+  (interactive)
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list-unmark-all: not in a knot-list-mode buffer"))
+  (setq knot-list--marks nil)
+  (knot-list--repaint-marks))
+
 (defun knot-list--open (view)
   "Display the project's list buffer at VIEW.
 Creates the buffer when absent; otherwise reuses it and switches
 view in place (preserving active filters where the destination
-view accepts them)."
+view accepts them).  Clears `knot-list--marks' since the row set
+is conceptually different across views."
   (let* ((info (knot-info-current))
          (buffer (knot-list--ensure-buffer info)))
     (with-current-buffer buffer
       (setq knot-list--view view)
+      (setq knot-list--marks nil)
       (knot-list--render))
     (pop-to-buffer-same-window buffer)))
 
@@ -2844,7 +2983,7 @@ buffer."
 ;; restore); reload `knot.el' to revert.
 
 (defvar knot-evil--stock-keys
-  '((knot-list-mode-map . ("l" "r" "b" "c" "F" ","))
+  '((knot-list-mode-map . ("l" "r" "b" "c" "F" "," "g"))
     (knot-show-mode-map . ("," "e" "d" "b" "n" "p" "g"))
     (knot-info-mode-map . ("g"))
     (knot-deps-mode-map . ("g" "n" "p")))
@@ -2865,6 +3004,9 @@ binding under the evil scheme.")
      ("s"       . knot-start)
      ("x"       . knot-close)
      ("M"       . knot-update-from-show)
+     ("m"       . knot-list-mark)
+     ("u"       . knot-list-unmark)
+     ("U"       . knot-list-unmark-all)
      ("D"       . knot-deps-transient)
      ("L"       . knot-links-transient))
     (knot-show-mode-map
