@@ -14,7 +14,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-05-13
+
 ### Added
+
+- **New Emacs UI: `emacs/knot.el`.** Single-file magit-style mode
+  fronting the `knot` CLI. Project detection mirrors `magit-toplevel`
+  via cached `knot info --json`. `M-x knot` opens a dispatch transient.
+  Every CLI subprocess goes through one boundary function
+  (`knot-cli-call`) that parses `--json` and surfaces `ok:false`
+  envelopes as `user-error` in the minibuffer. Buffer names are
+  project-qualified throughout (`*knot-list: <project>*`,
+  `*knot-show: <project> · <id>*`, etc.) so the mode is multi-project
+  safe. A startup `lwarn` fires when the on-disk `knot` is older than
+  `knot-minimum-cli-version` (currently 0.3.0). A new `bb lint:elisp`
+  task byte-compiles `emacs/knot.el` and runs `package-lint`.
+  - **List buffer** (`knot-list-mode`): one project-scoped
+    `tabulated-list` buffer with `l`/`r`/`b`/`c` view switching across
+    list/ready/blocked/closed, a filter transient on `f`, and a sort
+    transient on `o` with single-key suffixes
+    (id/title/priority/status/type/mode/created/updated, `d` toggle
+    direction, `R` reset to view default). Per-view default orderings
+    (list/ready/blocked → priority asc with id tiebreak; closed →
+    updated desc) hydrate when unset. Sort is client-side over the
+    buffered rows so toggling never re-hits the CLI. `,` (or `M` under
+    `knot-evil-mode`) opens the update transient on the row at point.
+  - **Show buffer** (`knot-show-mode`): `markdown-view-mode` rendering
+    with buttonized ids, `RET`-on-AC flips done/undone, and `RET` on
+    any other editable frontmatter field
+    (status/type/priority/mode/assignee/parent/tags) opens the matching
+    update prompt. Dep / link rows support remove-at-point.
+  - **Create transient** (capital-`C` quick-create + full transient
+    with per-flag readers) lands post-create in the show buffer on
+    `## Description`. Deps and links autocomplete against live and
+    archived tickets.
+  - **Update transient** covers
+    status/priority/mode/type/tags/assignee/parent inline (no buffer
+    pops), with a Long-form group that routes
+    description/design/body/note edits to capture buffers.
+  - **Capture buffers** for long-form fields commit via `C-c C-c`
+    (`knot update --description|--design|--body` or `knot add-note`)
+    and discard via `C-c C-k`. Capital-`E` is an escape-hatch to
+    `knot edit` via emacsclient.
+  - **Deps tree buffer** (`knot-deps-mode`) renders `knot dep tree
+    --json` with status glyphs and buttonized nodes.
+  - **Cross-buffer refresh** propagates mutations across sibling
+    list/show/deps buffers in the same project, preserving point on
+    the originating row id.
+
+- **Evil / Doom support: `knot-evil-mode`** is a `:global t` opt-in
+  minor mode wrapping a soft `(require 'evil nil t)`. Enabling it
+  destructively rewires `knot-list` / `knot-show` / `knot-info` /
+  `knot-deps` mode-maps via `evil-define-key*` in each mode's
+  normal-state auxiliary keymap, and sets normal initial state on the
+  read-only modes (insert on capture; `C-c C-c` / `C-c C-k` commit and
+  discard regardless of state). Setup is data-driven through
+  `knot-evil--stock-keys` / `knot-evil--bindings` /
+  `knot-evil--initial-states` and idempotent. `evil` is a soft
+  dependency — the package loads without it and toggling the mode on
+  raises `user-error` when evil is missing. `emacs/README.md`
+  documents install, the full binding table, and a paste-ready Doom
+  `use-package!` + `map! :localleader` snippet.
+
+- `knot create` now **hints when a value starting with `-` is
+  mistaken for a flag** by babashka.cli. Detected via the spec-shape
+  signature (a flag listed in the `:spec` lands in `:opts` as implicit
+  `true` / `[true]` despite not being `:coerce :boolean`); the cryptic
+  `Unknown option: :e` / `Unknown option: :test` message is replaced
+  with an actionable hint pointing at the `--<flag>=<value>` form and
+  the broader pre-extract follow-up
+  ([kno-01kr0129m0y9](.tickets/kno-01kr0129m0y9--pre-extract-dash-leading-safe-handling-for-value.md)).
+  Genuine unknown-flag errors are unaffected.
+
+- `knot check` emits a new `legacy_acceptance_section` **warning**
+  (severity `warning`, not `error`) when a ticket body still contains
+  a `## Acceptance Criteria` heading after the v0.3 frontmatter
+  migration. Filterable by `--code legacy_acceptance_section` and
+  `--severity warning`. Self-cleans: the warning disappears after
+  `knot migrate-ac` lifts the section into structured frontmatter.
+  Closes the silent half-broken state that v0.2 → v0.3 upgraders hit
+  when they skipped the migration — the only prior discovery path was
+  reading the CHANGELOG.
 
 - Acceptance criteria are now **load-bearing on terminal transitions**.
   `knot close`, `knot status <id> <terminal>`, and `knot update <id>
