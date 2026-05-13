@@ -1012,15 +1012,38 @@ growing the chain."
         (switch-to-buffer back)
       (quit-window))))
 
+(defconst knot-show--field->command
+  '((status   . knot-update-set-status)
+    (type     . knot-update-set-type)
+    (priority . knot-update-set-priority)
+    (mode     . knot-update-set-mode)
+    (assignee . knot-update-set-assignee)
+    (tags     . knot-update-set-tags)
+    (parent   . knot-update-set-parent))
+  "Mapping from `knot-field' value-span symbols to update commands.
+`knot-show-RET' looks up the `knot-field' text property at point
+and dispatches to the matching `knot-update-set-*' command — the
+RET-on-frontmatter-field path that complements the `,' transient.
+Symbols match the keys passed to `knot-show--insert-field'.")
+
 (defun knot-show-RET ()
   "Dispatch RET in a show buffer.
 
-A knot-id button at point wins (drills into that ticket).
-Otherwise an acceptance-criterion line at point wins (flips its
-done state).  Any other button at point is pushed last.  Errors
-when there is nothing actionable."
+Precedence:
+1. A `knot-id' button at point wins (drills into that ticket).
+2. An acceptance-criterion line at point flips its done state.
+3. Any other button at point is pushed.
+4. A `knot-field' value span (status, type, priority, mode,
+   assignee, tags, parent) dispatches to the matching
+   `knot-update-set-*' command via `knot-show--field->command'.
+5. Otherwise, errors with `nothing actionable at point'.
+
+Step 4 only fires when no button overlaps the value span, so the
+parent line's RET still drills into the buttonized id; use `,P'
+to edit parent."
   (interactive)
-  (let ((btn (button-at (point))))
+  (let ((btn   (button-at (point)))
+        (field (get-text-property (point) 'knot-field)))
     (cond
      ((and btn (button-get btn 'knot-id))
       (push-button (point)))
@@ -1028,6 +1051,11 @@ when there is nothing actionable."
       (knot-show-flip-ac))
      (btn
       (push-button (point)))
+     (field
+      (let ((cmd (alist-get field knot-show--field->command)))
+        (if cmd
+            (call-interactively cmd)
+          (user-error "knot-show: no update command for field %s" field))))
      (t
       (user-error "knot-show: nothing actionable at point")))))
 
@@ -1184,9 +1212,25 @@ undep / unlink) can identify which relationship they target."
     (insert "\n")))
 
 (defun knot-show--render-scalar-list (label items)
-  "Insert a `**LABEL:** csv' line for ITEMS when ITEMS is a non-empty list."
+  "Insert a `**LABEL:** csv' line for ITEMS when ITEMS is a non-empty list.
+Non-editable: no `knot-field' property is added.  Tags are
+rendered separately via `knot-show--insert-field' so RET can edit
+the list as a whole."
   (when (and items (listp items) (not (null items)))
     (insert (format "**%s:** %s\n" label (string-join items ", ")))))
+
+(defun knot-show--insert-field (field value)
+  "Insert VALUE at point and annotate its character span with `knot-field' FIELD.
+VALUE is coerced to a string (numbers stringified, nil rendered
+as \"-\").  The value's span carries the `knot-field' text
+property only; surrounding `**label:**' markup is left
+unannotated so RET there falls through to the no-op user-error."
+  (let ((p (point)))
+    (insert (cond ((stringp value) value)
+                  ((numberp value) (number-to-string value))
+                  ((null value) "-")
+                  (t (format "%s" value))))
+    (add-text-properties p (point) (list 'knot-field field))))
 
 (defun knot-show--render (data)
   "Render DATA (the parsed `show' envelope) into the current buffer."
@@ -1214,16 +1258,28 @@ undep / unlink) can identify which relationship they target."
            (linked    (alist-get 'linked data)))
       (insert (format "# %s\n\n" (or title "")))
       (insert (format "**id:** %s\n" (or id "")))
-      (insert (format "**status:** %s · **type:** %s · **priority:** %s · **mode:** %s\n"
-                      (or status "-")
-                      (or type "-")
-                      (if (numberp priority) (number-to-string priority) "-")
-                      (or mode "-")))
+      (insert "**status:** ")
+      (knot-show--insert-field 'status (or status "-"))
+      (insert " · **type:** ")
+      (knot-show--insert-field 'type (or type "-"))
+      (insert " · **priority:** ")
+      (knot-show--insert-field 'priority
+                               (if (numberp priority) priority "-"))
+      (insert " · **mode:** ")
+      (knot-show--insert-field 'mode (or mode "-"))
+      (insert "\n")
       (when (and assignee (not (string-empty-p assignee)))
-        (insert (format "**assignee:** %s\n" assignee)))
+        (insert "**assignee:** ")
+        (knot-show--insert-field 'assignee assignee)
+        (insert "\n"))
       (when (and parent (stringp parent) (not (string-empty-p parent)))
-        (insert (format "**parent:** %s\n" parent)))
-      (knot-show--render-scalar-list "tags" tags)
+        (insert "**parent:** ")
+        (knot-show--insert-field 'parent parent)
+        (insert "\n"))
+      (when (and tags (listp tags) tags)
+        (insert "**tags:** ")
+        (knot-show--insert-field 'tags (string-join tags ", "))
+        (insert "\n"))
       (knot-show--render-scalar-list "deps" deps)
       (knot-show--render-scalar-list "links" links)
       (knot-show--render-scalar-list "external" external)

@@ -1,33 +1,33 @@
 ---
 id: kno-01krf60j113x
 title: 'knot.el: RET on a show-buffer frontmatter field opens the matching update prompt'
-status: open
+status: in_progress
 type: feature
 priority: 3
 mode: afk
 created: '2026-05-12T22:48:06.944937966Z'
-updated: '2026-05-12T22:48:06.944937966Z'
+updated: '2026-05-13T00:29:15.890355944Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
 - knot-el
 acceptance:
 - title: RET on a frontmatter value span (status/type/priority/mode/assignee, tag list, parent) opens the matching knot-update-set-* flow
-  done: false
+  done: true
 - title: knot-show--render annotates each editable value span with a 'knot-field <symbol> text property
-  done: false
+  done: true
 - title: 'id-button drill-in keeps RET precedence on lines where the value is a buttonized id (e.g. parent: <id>) — edit fires only when no id button at point'
-  done: false
+  done: true
 - title: AC line flip keeps RET precedence on AC rows (existing knot-show-flip-ac path)
-  done: false
+  done: true
 - title: Tag list edits as a whole via knot-update-set-tags (no per-tag editing)
-  done: false
+  done: true
 - title: Non-editable spans (id, created, updated, deps/links and the relationship sections) do not trigger edit on RET
-  done: false
+  done: true
 - title: Existing , transient and ,<key> suffixes continue to work — RET-to-edit is additive, not a replacement
-  done: false
+  done: true
 - title: byte-compile clean under Emacs 28.1; no regressions in existing RET behaviour (AC flip, id drill-in, button push, no-op user-error)
-  done: false
+  done: true
 ---
 
 ## Description
