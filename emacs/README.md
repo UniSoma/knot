@@ -55,19 +55,35 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
 | `knot-show-mode`       | `RET`        | context action                     |
-|                        | `+` / `a`    | `knot-show-add-ac`                 |
-|                        | `-`          | `knot-show-remove-ac`              |
+|                        | `+`          | `knot-show-add-at-point`           |
+|                        | `-` / `K`    | `knot-show-remove-at-point`        |
 |                        | `s`          | `knot-start`                       |
 |                        | `x`          | `knot-close`                       |
 |                        | `M`          | `knot-update-from-show` (transient)|
 |                        | `[` / `]`    | prev / next ticket                 |
-|                        | `K`          | `knot-show-remove-at-point`        |
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
 |                        | `E`          | `knot-show-edit-via-emacsclient`   |
 | `knot-deps-mode`       | `TAB` / `<backtab>` | navigation                  |
 |                        | `f`          | `knot-deps-toggle-full`            |
 |                        | `q`          | `knot-deps-quit`                   |
+
+`+` in `knot-show-mode` is section-aware. It reads the
+`knot-section` text property at point and dispatches:
+`## Acceptance Criteria` → `knot-show-add-ac`, `## Blockers` →
+`knot-deps-add`, `## Linked` → `knot-links-add`, `## Blocking` →
+`knot-show-add-rdep` (adds a ticket that depends on the current
+one). When point is outside any of those four sections, `+` pops
+`knot-show-add-transient` (`a` acceptance, `d` dep, `l` link). The
+four `+`-aware sections are always rendered, with an italic
+placeholder when empty.
+
+`-` and `K` both call `knot-show-remove-at-point`, the symmetric
+remover — dispatching on the row's text property: a `## Blockers`
+row → `knot undep`, a `## Blocking` row → reverse `knot undep`, a
+`## Linked` row → `knot unlink`, an acceptance row → `--remove-ac`.
+`-` shadows evil's `evil-previous-line-first-non-blank` motion in
+knot-show buffers; use `k` for up-line.
 
 The `M` transient owns every field mutation and opens from both
 `knot-show-mode` and `knot-list-mode` (operating on the row at point

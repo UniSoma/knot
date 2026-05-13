@@ -1195,10 +1195,8 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "g") #'knot-refresh)
     (define-key map (kbd "q") #'knot-show-quit)
     (define-key map (kbd "RET") #'knot-show-RET)
-    (define-key map (kbd "+") #'knot-show-add-ac)
-    (define-key map (kbd "a") #'knot-show-add-ac)
-    (define-key map (kbd "-") #'knot-show-remove-ac)
-    (define-key map (kbd "k") #'knot-show-remove-at-point)
+    (define-key map (kbd "+") #'knot-show-add-at-point)
+    (define-key map (kbd "-") #'knot-show-remove-at-point)
     (define-key map (kbd "]") #'knot-show-next-ticket)
     (define-key map (kbd "[") #'knot-show-prev-ticket)
     (define-key map (kbd ",") #'knot-update-from-show)
@@ -1327,16 +1325,6 @@ to edit parent."
     (knot-cli-call (list "update" knot-show--id "--add-ac" title))
     (knot--after-mutation)))
 
-(defun knot-show-remove-ac ()
-  "Remove the acceptance criterion at point via `--remove-ac' after confirmation."
-  (interactive)
-  (let ((title (knot-show--ac-at-point)))
-    (unless title
-      (user-error "knot-show: not on an acceptance criterion line"))
-    (when (yes-or-no-p (format "Remove acceptance criterion %S? " title))
-      (knot-cli-call (list "update" knot-show--id "--remove-ac" title))
-      (knot--after-mutation))))
-
 (defun knot-show--dep-id-at-point ()
   "Return the `knot-dep-id' text property at point, or nil."
   (get-text-property (point) 'knot-dep-id))
@@ -1392,6 +1380,30 @@ of those properties is at point."
       (user-error
        "knot-show: not on a dep, link, or acceptance criterion line")))))
 
+(defun knot-show--section-at-point ()
+  "Return the `knot-section' text property at point, or nil."
+  (get-text-property (point) 'knot-section))
+
+(defun knot-show-add-at-point ()
+  "Add a thing based on the section at point.
+
+Reads the `knot-section' text property at point and dispatches:
+
+  `acceptance' → `knot-show-add-ac' (prompts for new AC title)
+  `blockers'   → `knot-deps-add' (`knot dep <this> <to>')
+  `linked'     → `knot-links-add' (`knot link <this> <to>')
+  `blocking'   → `knot-show-add-rdep' (`knot dep <to> <this>')
+
+When point is not in any of those sections, pops
+`knot-show-add-transient' so the action can still be chosen."
+  (interactive)
+  (pcase (knot-show--section-at-point)
+    ('acceptance (call-interactively #'knot-show-add-ac))
+    ('blockers   (call-interactively #'knot-deps-add))
+    ('linked     (call-interactively #'knot-links-add))
+    ('blocking   (call-interactively #'knot-show-add-rdep))
+    (_           (call-interactively #'knot-show-add-transient))))
+
 (defun knot-show--step (direction)
   "Move to the row DIRECTION away in the originating list buffer.
 Propagates the existing `knot-show--back-buffer' to the next
@@ -1432,27 +1444,42 @@ buffer so lateral stepping does not grow the back chain."
   (interactive)
   (knot-show--step -1))
 
-(defun knot-show--render-relationship (label entries &optional relation-prop)
+(defun knot-show--render-relationship (label entries &optional relation-prop section-sym empty-placeholder)
   "Render a markdown section LABEL listing relationship ENTRIES.
 
 When RELATION-PROP is non-nil, every row is propertized with that
-symbol carrying the row's id, so commands at point (e.g. `k' for
-undep / unlink) can identify which relationship they target."
-  (when (and entries (listp entries) (not (null entries)))
-    (insert (format "## %s\n\n" label))
-    (dolist (entry entries)
-      (let* ((id     (alist-get 'id entry))
-             (title  (alist-get 'title entry))
-             (status (alist-get 'status entry))
-             (start  (point)))
-        (insert (format "- %s [%s] %s\n"
-                        (or id "")
-                        (or status "?")
-                        (or title "")))
-        (when (and relation-prop id)
-          (add-text-properties start (point)
-                               (list relation-prop id)))))
-    (insert "\n")))
+symbol carrying the row's id, so commands at point (e.g. `-' for
+undep / unlink) can identify which relationship they target.
+
+When SECTION-SYM is non-nil, the section is always rendered — even
+when ENTRIES is empty, in which case EMPTY-PLACEHOLDER is shown —
+and the full rendered span (heading through trailing blank) is
+propertized with `knot-section' set to SECTION-SYM, so
+`knot-show-add-at-point' can dispatch by section.  When SECTION-SYM
+is nil the section is skipped on empty ENTRIES (legacy behaviour,
+used for `## Children')."
+  (let ((non-empty (and entries (listp entries) entries)))
+    (when (or non-empty section-sym)
+      (let ((section-start (point)))
+        (insert (format "## %s\n\n" label))
+        (if non-empty
+            (dolist (entry entries)
+              (let* ((id     (alist-get 'id entry))
+                     (title  (alist-get 'title entry))
+                     (status (alist-get 'status entry))
+                     (row-start (point)))
+                (insert (format "- %s [%s] %s\n"
+                                (or id "")
+                                (or status "?")
+                                (or title "")))
+                (when (and relation-prop id)
+                  (add-text-properties row-start (point)
+                                       (list relation-prop id)))))
+          (insert (format "%s\n" (or empty-placeholder "_(none)_"))))
+        (insert "\n")
+        (when section-sym
+          (add-text-properties section-start (point)
+                               (list 'knot-section section-sym)))))))
 
 (defun knot-show--render-scalar-list (label items)
   "Insert a `**LABEL:** csv' line for ITEMS when ITEMS is a non-empty list.
@@ -1529,29 +1556,35 @@ unannotated so RET there falls through to the no-op user-error."
       (when created (insert (format "**created:** %s\n" created)))
       (when updated (insert (format "**updated:** %s\n" updated)))
       (insert "\n")
-      (insert "## Acceptance Criteria\n\n")
-      (if (and acceptance (listp acceptance) acceptance)
-          (dolist (ac acceptance)
-            (let* ((ac-title (alist-get 'title ac))
-                   (done     (alist-get 'done ac))
-                   (start    (point)))
-              (insert (format "- [%s] %s\n"
-                              (if done "x" " ")
-                              (or ac-title "")))
-              (add-text-properties start (point)
-                                   (list 'knot-ac-title ac-title
-                                         'knot-ac-done done))))
-        (insert "_(no acceptance criteria)_\n"))
-      (insert "\n")
+      (let ((ac-section-start (point)))
+        (insert "## Acceptance Criteria\n\n")
+        (if (and acceptance (listp acceptance) acceptance)
+            (dolist (ac acceptance)
+              (let* ((ac-title (alist-get 'title ac))
+                     (done     (alist-get 'done ac))
+                     (start    (point)))
+                (insert (format "- [%s] %s\n"
+                                (if done "x" " ")
+                                (or ac-title "")))
+                (add-text-properties start (point)
+                                     (list 'knot-ac-title ac-title
+                                           'knot-ac-done done))))
+          (insert "_(no acceptance criteria)_\n"))
+        (insert "\n")
+        (add-text-properties ac-section-start (point)
+                             (list 'knot-section 'acceptance)))
       (when (and body (stringp body) (not (string-empty-p body)))
         (insert body)
         (unless (string-suffix-p "\n" body)
           (insert "\n"))
         (insert "\n"))
-      (knot-show--render-relationship "Blockers" blockers 'knot-dep-id)
-      (knot-show--render-relationship "Blocking" blocking 'knot-rdep-id)
+      (knot-show--render-relationship
+       "Blockers" blockers 'knot-dep-id 'blockers "_(no blockers)_")
+      (knot-show--render-relationship
+       "Blocking" blocking 'knot-rdep-id 'blocking "_(not blocking any tickets)_")
       (knot-show--render-relationship "Children" children)
-      (knot-show--render-relationship "Linked" linked 'knot-link-id))
+      (knot-show--render-relationship
+       "Linked" linked 'knot-link-id 'linked "_(no linked tickets)_"))
     (knot-id-buttonize-region (point-min) (point-max))))
 
 (defun knot-show--open (id &optional origin-list-buffer origin-id back-buffer)
@@ -2510,6 +2543,33 @@ archived relationships display correctly."
    ("a" "add"    knot-links-add)
    ("r" "remove" knot-links-remove)])
 
+(defun knot-show-add-rdep ()
+  "Add a reverse dep — pick a ticket that should depend on the current one.
+
+Runs `knot dep <to> <this>', so the picked ticket ends up in this
+ticket's `## Blocking' section.  Mirrors `knot-deps-add' from the
+other side; used by `+' inside `## Blocking' and reachable directly
+from anywhere a contextual id is available."
+  (interactive)
+  (let* ((id (knot-deps--context-id))
+         (to (knot-deps--read-live
+              (format "Add to Blocking (ticket that depends on %s): " id)
+              id)))
+    (knot-cli-call (list "dep" to id))
+    (knot-deps--refresh-origin)))
+
+;;;###autoload
+(transient-define-prefix knot-show-add-transient ()
+  "Off-section fallback for `+' in `knot-show-mode'.
+
+Invoked by `knot-show-add-at-point' when point is not in one of
+the recognized `knot-section' spans.  Reverse-dep is intentionally
+absent here — it is reachable only via `+' inside `## Blocking'."
+  ["Add"
+   ("a" "acceptance criterion" knot-show-add-ac)
+   ("d" "dep"                  knot-deps-add)
+   ("l" "link"                 knot-links-add)])
+
 
 ;;;; Deps tree buffer (knot-deps module — JSON tree view)
 
@@ -2785,7 +2845,7 @@ buffer."
 
 (defvar knot-evil--stock-keys
   '((knot-list-mode-map . ("l" "r" "b" "c" "F" ","))
-    (knot-show-mode-map . ("," "e" "d" "b" "n" "p" "k" "g"))
+    (knot-show-mode-map . ("," "e" "d" "b" "n" "p" "g"))
     (knot-info-mode-map . ("g"))
     (knot-deps-mode-map . ("g" "n" "p")))
   "Per-mode stock bindings dropped by `knot-evil-mode' setup.
@@ -2812,9 +2872,8 @@ binding under the evil scheme.")
      ("gr"      . knot-refresh)
      ("q"       . knot-show-quit)
      ("RET"     . knot-show-RET)
-     ("+"       . knot-show-add-ac)
-     ("a"       . knot-show-add-ac)
-     ("-"       . knot-show-remove-ac)
+     ("+"       . knot-show-add-at-point)
+     ("-"       . knot-show-remove-at-point)
      ("s"       . knot-start)
      ("x"       . knot-close)
      ("M"       . knot-update-from-show)
