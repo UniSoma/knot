@@ -147,6 +147,12 @@ offered; long-form suffixes (`e` description, `d` design, `b` body,
 bindings for `e d b n` are dropped when `knot-evil-mode` is on; they
 collide with evil operators and motions.
 
+The `f` transient (`knot-list-filter`) scopes the active view via the
+same flags the CLI accepts: `m` mode, `t` type, `s` status, `T` tag,
+`a` assignee, `p` priority (0..4), `l` limit, `A` acceptance-complete,
+`C` clear all. Empty input on any prompt clears the filter for that
+dimension.
+
 ### Doom Emacs
 
 Paste-ready snippet for `~/.doom.d/packages.el` + `config.el`:

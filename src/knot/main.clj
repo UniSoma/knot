@@ -290,6 +290,16 @@
     (sequential? v)  (when (seq v) (set v))
     :else            nil))
 
+(defn- validate-priority-filter!
+  "Reject `--priority` values outside the 0..4 enum at parse time. Unlike
+   `--type` or `--status` (open enums in the config), priority is a closed
+   integer range enforced across `config.clj`/`check.clj`; a silent
+   zero-row result for `--priority 5` would just confuse the user."
+  [opts]
+  (when-let [vs (seq (:priority opts))]
+    (when-let [bad (some #(when-not (<= 0 % 4) %) vs)]
+      (die (str "knot: --priority must be 0..4; got " bad)))))
+
 (defn- filter-opts-from-cli
   "Project the parsed CLI `opts` map onto the keyword-set shape that
    the listing commands expect for `query/filter-tickets`. Used by every
@@ -301,7 +311,7 @@
               (assoc acc k s)
               acc))
           {}
-          [:status :assignee :tag :type :mode :acceptance-complete]))
+          [:status :assignee :tag :type :mode :priority :acceptance-complete]))
 
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
@@ -323,6 +333,7 @@
 
 (defn- ls-handler [argv]
   (let [{:keys [opts]} (bcli/parse-args argv (spec :list))
+        _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -480,6 +491,7 @@
    that survive parsing apply BEFORE `--limit` truncation."
   [cmd-key list-fn argv]
   (let [{:keys [opts]} (bcli/parse-args argv (spec cmd-key))
+        _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
         tty?     (output/tty?)
         color?   (output/color-enabled?
@@ -911,6 +923,7 @@
   [argv]
   (let [out (try
               (let [{:keys [opts]} (bcli/parse-args argv (spec :prime))
+                    _            (validate-priority-filter! opts)
                     filter-opts  (dissoc (filter-opts-from-cli opts) :mode)]
                 (cli/prime-cmd (discover-ctx)
                                (merge filter-opts

@@ -113,17 +113,19 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 ### Filter, don't eyeball
 
 When the user's question targets a *subset* — a type, mode, tag, status,
-or assignee — pass the matching filter rather than running bare `list` /
-`ready` / `blocked` / `closed` / `prime` and scanning the columns. All
-five listing commands accept the same six-flag set (each repeatable):
+assignee, or priority — pass the matching filter rather than running bare
+`list` / `ready` / `blocked` / `closed` / `prime` and scanning the columns.
+All five listing commands accept the same filter set (each repeatable):
 
 ```
 --type <type>      --mode <afk|hitl>    --tag <tag>
---status <status>  --assignee <user>    --limit <n>
+--status <status>  --assignee <user>    --priority <0-4>
+--limit <n>
 ```
 
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
-afk --tag p0`, `knot blocked --mode afk`, `knot closed --type bug --limit 5`.
+afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
+`knot closed --type bug --limit 5`.
 On `prime`, filters apply across **all** sections (in_progress + ready +
 recently_closed) — `knot prime --assignee me` shows only your tickets
 everywhere. Visual filtering is error-prone (titles wrap, columns shift,

@@ -920,6 +920,65 @@
         (is (str/includes? out "Will close"))
         (is (not (str/includes? out "Live one")))))))
 
+(deftest ls-priority-filter-end-to-end-test
+  (testing "ls --priority N scopes results to tickets with that priority"
+    (with-tmp tmp
+      (run-knot tmp "create" "Top one"  "-p" "0")
+      (run-knot tmp "create" "Mid one"  "-p" "2")
+      (run-knot tmp "create" "Mid two"  "-p" "2")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--priority" "0")]
+        (is (zero? exit) (str "ls --priority 0 err=" err))
+        (is (str/includes? out "Top one"))
+        (is (not (str/includes? out "Mid one")))
+        (is (not (str/includes? out "Mid two"))))))
+
+  (testing "ls --priority 5 rejects out-of-range with a clear message"
+    (with-tmp tmp
+      (run-knot tmp "create" "Anything")
+      (let [{:keys [exit err]} (run-knot tmp "ls" "--priority" "5")]
+        (is (= 1 exit) "out-of-range priority must exit non-zero")
+        (is (str/includes? err "--priority")
+            "error message must name the offending flag")
+        (is (str/includes? err "0..4")
+            "error message must spell out the allowed range"))))
+
+  (testing "--priority works on ready/blocked/closed/prime in addition to ls"
+    (with-tmp tmp
+      (run-knot tmp "create" "Top one" "-p" "0")
+      (run-knot tmp "create" "Mid one" "-p" "2")
+      (testing "ready"
+        (let [{:keys [out]} (run-knot tmp "ready" "--priority" "0")]
+          (is (str/includes? out "Top one"))
+          (is (not (str/includes? out "Mid one")))))
+      (testing "closed"
+        (let [{:keys [out]} (run-knot tmp "closed" "--priority" "0")]
+          ;; no closed tickets — just smoke-test that --priority is accepted
+          (is (string? out))))
+      (testing "blocked"
+        (let [{:keys [exit]} (run-knot tmp "blocked" "--priority" "0")]
+          (is (zero? exit))))
+      (testing "prime"
+        (let [{:keys [out]} (run-knot tmp "prime" "--priority" "0")]
+          (is (str/includes? out "Top one"))
+          (is (not (str/includes? out "Mid one")))))
+      (testing "out-of-range is rejected on every command"
+        (doseq [cmd ["ready" "blocked" "closed" "prime"]]
+          (let [{:keys [exit err]} (run-knot tmp cmd "--priority" "5")]
+            (is (= 1 exit) (str cmd " must reject --priority 5"))
+            (is (str/includes? err "0..4") (str cmd " err=" err)))))))
+
+  (testing "ls --priority N --priority M enumerates (set union)"
+    (with-tmp tmp
+      (run-knot tmp "create" "Top one" "-p" "0")
+      (run-knot tmp "create" "Mid one" "-p" "2")
+      (run-knot tmp "create" "Low one" "-p" "4")
+      (let [{:keys [out]} (run-knot tmp "ls"
+                                    "--priority" "0"
+                                    "--priority" "2")]
+        (is (str/includes? out "Top one"))
+        (is (str/includes? out "Mid one"))
+        (is (not (str/includes? out "Low one")))))))
+
 (deftest ready-mode-filter-end-to-end-test
   (testing "ready --mode afk hides hitl tickets even when ready"
     (with-tmp tmp

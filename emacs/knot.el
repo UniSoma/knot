@@ -593,7 +593,7 @@ the boolean `acceptance-complete' filter).  Filters with nil or
 empty-string values are treated as unset.")
 
 (defconst knot-list--filter-keys
-  '(mode type status tag assignee limit acceptance-complete)
+  '(mode type status tag assignee priority limit acceptance-complete)
   "Filter keys accepted by the list views, in display order.")
 
 (defconst knot-list--filter-cli-flags
@@ -602,6 +602,7 @@ empty-string values are treated as unset.")
     (status              . "--status")
     (tag                 . "--tag")
     (assignee            . "--assignee")
+    (priority            . "--priority")
     (limit               . "--limit")
     (acceptance-complete . "--acceptance-complete"))
   "Map from filter key to the CLI flag string.")
@@ -1151,6 +1152,23 @@ Empty input clears the limit."
                  choices nil t default)))
       (if (string-empty-p pick) nil pick))))
 
+(defun knot-list--read-priority (current)
+  "Prompt for a `--priority' value, defaulting to CURRENT.
+Choices come from `allowed_values.priority_range' on `knot info'
+\(typically 0..4).  Empty input clears the filter."
+  (let* ((range (knot-info-allowed-values 'priority_range))
+         (min (alist-get 'min range))
+         (max (alist-get 'max range))
+         (nums (when (and (numberp min) (numberp max))
+                 (mapcar #'number-to-string (number-sequence min max))))
+         (choices (cons "" nums))
+         (default (or (and current (format "%s" current)) "")))
+    (let ((pick (completing-read
+                 (format "priority (%s..%s, empty to clear): "
+                         (or min "?") (or max "?"))
+                 choices nil t default)))
+      (if (string-empty-p pick) nil pick))))
+
 (defun knot-list-filter-set-mode ()
   "Prompt for `--mode' and update the active filter."
   (interactive)
@@ -1191,6 +1209,14 @@ Empty input clears the limit."
               "assignee: " (knot-list--current-filter-value 'assignee)))
   (knot-list--render))
 
+(defun knot-list-filter-set-priority ()
+  "Prompt for `--priority' and update the active filter."
+  (interactive)
+  (knot-list--set-filter
+   'priority (knot-list--read-priority
+              (knot-list--current-filter-value 'priority)))
+  (knot-list--render))
+
 (defun knot-list-filter-set-limit ()
   "Prompt for `--limit' and update the active filter."
   (interactive)
@@ -1226,6 +1252,7 @@ filter at once."
    ("s" "status"                knot-list-filter-set-status)
    ("T" "tag"                   knot-list-filter-set-tag)
    ("a" "assignee"              knot-list-filter-set-assignee)
+   ("p" "priority"              knot-list-filter-set-priority)
    ("l" "limit"                 knot-list-filter-set-limit)
    ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
   ["Other"

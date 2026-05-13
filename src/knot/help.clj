@@ -165,7 +165,8 @@
                   {:name :status   :coerce [] :desc "Filter all sections by status (repeatable)."}
                   {:name :assignee :coerce [] :desc "Filter all sections by assignee (repeatable)."}
                   {:name :tag      :coerce [] :desc "Filter all sections by tag (repeatable)."}
-                  {:name :type     :coerce [] :desc "Filter all sections by type (repeatable)."}]
+                  {:name :type     :coerce [] :desc "Filter all sections by type (repeatable)."}
+                  {:name :priority :coerce [:long] :desc "Filter all sections by priority 0-4 (repeatable)."}]
     :examples    [{:cmd "knot prime"
                    :note "Print the markdown primer for the current project."}
                   {:cmd "knot prime --type bug --mode afk"
@@ -225,6 +226,7 @@
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot list --mode afk --tag p0"
@@ -343,6 +345,7 @@
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot ready --mode afk"
@@ -361,6 +364,7 @@
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot blocked"
@@ -381,6 +385,7 @@
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
+                  {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot closed --limit 10"

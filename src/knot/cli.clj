@@ -936,7 +936,7 @@
         (keep (fn [k]
                 (when-let [v (get opts k)]
                   (when (seq v) [k v]))))
-        [:status :assignee :tag :type :mode :acceptance-complete]))
+        [:status :assignee :tag :type :mode :priority :acceptance-complete]))
 
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
@@ -1289,7 +1289,7 @@
    `--mode afk --limit 5` yields up to 5 afk-mode ready tickets. The
    recently_closed section is filtered before the compact projection so
    the full ticket fields are available for matching."
-  [ctx {:keys [json? mode limit status assignee tag type]}]
+  [ctx {:keys [json? mode limit status assignee tag type priority]}]
   (if-not (:project-found? ctx)
     (let [data {:project          {:found? false}
                 :in-progress      []
@@ -1314,7 +1314,8 @@
                          (seq status)     (assoc :status   status)
                          (seq assignee)   (assoc :assignee assignee)
                          (seq tag)        (assoc :tag      tag)
-                         (seq type)       (assoc :type     type))
+                         (seq type)       (assoc :type     type)
+                         (seq priority)   (assoc :priority priority))
           active*      (query/filter-tickets
                         (prime-in-progress-tickets all active-status now)
                         criteria)

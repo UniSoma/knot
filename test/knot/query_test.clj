@@ -406,6 +406,22 @@
              (mapv #(get-in % [:frontmatter :id])
                    (query/filter-tickets ts {:type #{"bug"}}))))))
 
+  (testing ":priority criteria filters by ticket priority (integer equality)"
+    (let [ts [(ft "a" :priority 0)
+              (ft "b" :priority 1)
+              (ft "c" :priority 0)
+              (ft "no-prio")]]
+      (is (= ["a" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:priority #{0}})))
+          "matches integer priority")
+      (is (= ["a" "b" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:priority #{0 1}})))
+          "set semantics: a value-set unions matches across priorities")
+      (is (empty? (query/filter-tickets [(ft "no-prio")] {:priority #{0}}))
+          "nil priority is excluded — mirrors :assignee/:mode")))
+
   (testing ":tag criteria matches when any tag overlaps"
     (let [ts [(ft "a" :tags ["urgent" "backend"])
               (ft "b" :tags ["frontend"])

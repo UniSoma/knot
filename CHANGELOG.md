@@ -14,6 +14,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`--priority N` filter on listing commands.** `knot list`, `ready`,
+  `blocked`, `closed`, and `prime` now accept `--priority` (repeatable,
+  integer 0..4) so callers can scope results by priority — e.g.
+  `knot ready --priority 0` for top-priority work, or
+  `--priority 0 --priority 1` for the high band. Out-of-range values
+  are rejected at parse time with a clear message; unlike the open
+  enums (`--type`, `--status`), priority is a closed range across
+  config/check.
+
 ## [0.4.0] - 2026-05-13
 
 ### Added

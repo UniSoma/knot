@@ -14,7 +14,7 @@ No `Read`, `cat`, `grep`, `Write`, `Edit`, `sed`, or `mv` against files under `.
 
 - **Create an issue**: `knot create --type <bug|feature|task|chore|epic> --title "..." --description "..." --priority <1-4> --mode <hitl|afk> --tags tag1,tag2`. Prefer the `knot:create` skill for richer framing (auto-detected links/deps).
 - **Read an issue**: `knot show <id>` (resolves partial IDs across live + archive).
-- **List issues**: `knot list` with `--type`, `--tag`, `--mode`, `--status`, `--assignee`, `--limit`, `--json` filters.
+- **List issues**: `knot list` with `--type`, `--tag`, `--mode`, `--status`, `--assignee`, `--priority`, `--limit`, `--json` filters.
 - **Comment on an issue**: `knot add-note <id> "..."`.
 - **Apply / remove labels (tags)**: `knot update <id> --tags <comma-list>` (replaces the full set).
 - **Close**: `knot close <id> --summary "..."`. Won't-do is closed with `--summary "Won't do: ..."`.
