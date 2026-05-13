@@ -1,48 +1,51 @@
 ---
 id: kno-01kresz637ke
 title: 'knot.el: expose update transient on list rows ('','' in list)'
-status: open
+status: in_progress
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-12T19:17:39.039590208Z'
-updated: '2026-05-12T19:17:39.039590208Z'
+updated: '2026-05-13T02:45:16.540215315Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
 - knot-el
 acceptance:
-- title: ''','' on a list row opens the same update transient as in show'
-  done: false
-- title: Suffixes invoke the same knot-update-set-* setters (status, priority, mode, type, tags, assignee, parent)
-  done: false
-- title: Each commit is exactly one knot update --flag value subprocess (atomic — no batching)
-  done: false
-- title: After a successful update, the list buffer re-renders preserving point on the originating row id
-  done: false
-- title: ok:false envelopes raise user-error in the minibuffer; list buffer state is unchanged on failure
-  done: false
-- title: Works without a live show buffer for that id (no coupling to knot-show--id / knot-show--data)
-  done: false
+- title: From a list row, knot-update-from-show opens via ',' (non-evil) and via 'M' under knot-evil-mode; knot-update--ticket-id and knot-update--current-field are refactored to resolve id (tabulated-list-get-id) and defaults (one-shot knot show --json) from knot-list-mode
+  done: true
+- title: The Long-form group (e d b n) is conditional on knot-show-mode and hidden when the transient opens from a list row; the frontmatter group (s p m t T a P) is unchanged
+  done: true
+- title: Each commit is exactly one knot update --flag value subprocess (atomic — no batching); ok:false envelopes raise user-error and leave list buffer state unchanged
+  done: true
+- title: After a successful commit, knot--after-mutation re-renders the list buffer with point preserved on the originating row id (no new list-side refresh code needed)
+  done: true
+- title: knot-evil--bindings's knot-list-mode-map entry includes ("M" . knot-update-from-show); emacs/README.md binding table gains the new list-mode rows (',' / 'M' for the Modify transient)
+  done: true
 deps:
 - kno-01kreh4yap1c
 ---
 
 ## Description
 
-Slice 4 (kno-01kreh4yap1c) put the atomic frontmatter update transient at `,` in show buffers only. Per the originating PRD story ('bumping priority' without context-switching) and parity with slice 6's start/close and slice 7's deps/links — both of which work on list rows and show — the frontmatter transient should reach list rows too.
+Slice 4 (kno-01kreh4yap1c) put the atomic frontmatter update transient at `,` in show buffers; slice 9 (kno-01kremvgac07) added `knot-evil-mode`, rebinding the show-buffer entry point to `M` under evil and folding long-form `e d b n` into the same transient as a second group. Per the originating PRD story (bumping priority without context-switching) and parity with `s` / `x` and the deps / links transients — all of which work on list rows and show — the frontmatter transient should reach list rows too.
 
-Currently `knot-update--ticket-id` requires `knot-show-mode` and reads field values from buffer-local `knot-show--data`. To support list rows the resolver needs to be source-aware:
+## Design
 
-- In `knot-show-mode`: id from `knot-show--id`, defaults from `knot-show--data`.
-- In `knot-list-mode`: id from `tabulated-list-get-id`, defaults from the parsed CLI row (or a one-shot `knot show --json` lookup, since the list row may not carry every field — tags, parent, assignee).
+**Reuse the existing transient.** `knot-update-from-show` becomes source-aware rather than spawning a sibling `knot-update-from-list`. The name stays for backwards compatibility with the Doom snippet in `emacs/README.md`.
 
-Refresh dispatch on success: `knot-show--refresh` in show, `knot-list--render` in list. (Slice 8's cross-buffer refresh walk will subsume both call sites eventually.)
+**Source-aware resolvers.**
 
-Suggested shape:
+- `knot-update--ticket-id`: in `knot-show-mode` returns `knot-show--id`; in `knot-list-mode` returns `(tabulated-list-get-id)`; signals `user-error` outside these modes.
+- `knot-update--current-field`: in `knot-show-mode` reads from `knot-show--data` (today's behavior); in `knot-list-mode` does a one-shot `knot show <id> --json` to populate defaults, since list rows do not carry every field (tags / parent / assignee may be absent from the row).
 
-- Factor `knot-update--commit` so the refresh callback is the caller's choice.
-- Add `knot-update-from-list` transient (identical suffix layout to `knot-update-from-show`).
-- Bind `,` in `knot-list-mode-map`.
+**Hide Long-form in list.** The Long-form group (`e` description, `d` design, `b` body, `n` note) is conditional on `knot-show-mode` (`:if-derived knot-show-mode` or equivalent). From a list row only the frontmatter group (`s p m t T a P`) shows — long-form requires drilling into the ticket first via `RET`.
 
-Out of scope: status transitions on list rows (start/close land in slice 6 with their own `s` / `x` bindings).
+**Bindings.**
+
+- `knot-list-mode-map`: bind `,` to `knot-update-from-show` (mirrors the non-evil show-buffer binding).
+- `knot-evil--bindings`'s `knot-list-mode-map` entry: add `("M" . knot-update-from-show)` so the evil normal-state binding mirrors show under `knot-evil-mode`.
+
+**Refresh.** `knot-update--commit` already calls `knot--after-mutation`, which walks every visible knot.el buffer for the project and re-renders. The list buffer's existing render path (`knot-list--rerender`) preserves point on the originating row id, so no list-side changes are needed beyond the binding.
+
+**Out of scope.** Status transitions on list rows (already covered by slice 6's standalone `s` / `x`); long-form edits from list rows (drill into show first).

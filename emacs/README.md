@@ -51,6 +51,7 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `o`          | `knot-list-sort`                   |
 |                        | `s`          | `knot-start`                       |
 |                        | `x`          | `knot-close`                       |
+|                        | `M`          | `knot-update-from-show` (transient)|
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
 | `knot-show-mode`       | `RET`        | context action                     |
@@ -68,12 +69,15 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `f`          | `knot-deps-toggle-full`            |
 |                        | `q`          | `knot-deps-quit`                   |
 
-The `M` transient owns every field mutation — frontmatter suffixes
-(`s` status, `p` priority, `m` mode, `t` type, `T` tags, `a` assignee,
-`P` parent) alongside long-form suffixes (`e` description, `d` design,
-`b` body, `n` note). The standalone show-mode bindings for `e d b n`
-are dropped when `knot-evil-mode` is on; they collide with evil
-operators and motions.
+The `M` transient owns every field mutation and opens from both
+`knot-show-mode` and `knot-list-mode` (operating on the row at point
+in the latter). Frontmatter suffixes (`s` status, `p` priority, `m`
+mode, `t` type, `T` tags, `a` assignee, `P` parent) are always
+offered; long-form suffixes (`e` description, `d` design, `b` body,
+`n` note) are shown only in `knot-show-mode` — drill into a row via
+`RET` first to edit long-form sections. The standalone show-mode
+bindings for `e d b n` are dropped when `knot-evil-mode` is on; they
+collide with evil operators and motions.
 
 ### Doom Emacs
 
@@ -109,4 +113,5 @@ Paste-ready snippet for `~/.doom.d/packages.el` + `config.el`:
 
 Doom users typically alias `,` to localleader, so `,` is not bound by
 `knot-evil-mode`; the `M` binding replaces the non-evil `,` keymap
-entry that opens the update transient.
+entry that opens the update transient in both `knot-show-mode` and
+`knot-list-mode`.

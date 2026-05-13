@@ -777,6 +777,7 @@ and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\")."
     (define-key map (kbd "RET") #'knot-list-show-at-point)
     (define-key map (kbd "s") #'knot-start)
     (define-key map (kbd "x") #'knot-close)
+    (define-key map (kbd ",") #'knot-update-from-show)
     (define-key map (kbd "D") #'knot-deps-transient)
     (define-key map (kbd "L") #'knot-links-transient)
     map)
@@ -1865,16 +1866,38 @@ refreshed.  Requires the Emacs server to be running
 ;;;; Update transient (knot-update module)
 
 (defun knot-update--ticket-id ()
-  "Return the ticket id in the current show buffer, or signal `user-error'."
-  (unless (derived-mode-p 'knot-show-mode)
-    (user-error "knot-update: not in a knot-show-mode buffer"))
-  (unless (and knot-show--id (not (string-empty-p knot-show--id)))
-    (user-error "knot-update: no ticket id in this buffer"))
-  knot-show--id)
+  "Return the ticket id for the current update context, or signal `user-error'.
+In `knot-show-mode' the buffer-local `knot-show--id' wins.  In
+`knot-list-mode' the id is read from the row at point via
+`tabulated-list-get-id', so the transient can mutate the
+originating row without first drilling into a show buffer.
+Errors when called from any other mode."
+  (cond
+   ((derived-mode-p 'knot-show-mode)
+    (unless (and knot-show--id (not (string-empty-p knot-show--id)))
+      (user-error "knot-update: no ticket id in this buffer"))
+    knot-show--id)
+   ((derived-mode-p 'knot-list-mode)
+    (let ((id (tabulated-list-get-id)))
+      (unless id
+        (user-error "knot-update: no ticket on this line"))
+      id))
+   (t
+    (user-error "knot-update: not in a knot-show-mode or knot-list-mode buffer"))))
 
 (defun knot-update--current-field (field)
-  "Return the current value for FIELD from the show buffer's parsed data."
-  (alist-get field knot-show--data))
+  "Return the current value for FIELD for the update context.
+In `knot-show-mode' the buffer's parsed `knot-show--data' alist
+wins.  In `knot-list-mode' a one-shot `knot show <id> --json' is
+fetched to populate defaults, since list rows do not carry every
+frontmatter field (tags / parent / assignee may be absent)."
+  (cond
+   ((derived-mode-p 'knot-show-mode)
+    (alist-get field knot-show--data))
+   ((derived-mode-p 'knot-list-mode)
+    (let* ((id (tabulated-list-get-id))
+           (data (and id (knot-cli-call (list "show" id)))))
+      (alist-get field data)))))
 
 (defun knot-update--commit (id flag value)
   "Run `knot update ID FLAG VALUE' atomically, then refresh.
@@ -2015,13 +2038,19 @@ candidate list.  Empty input clears the parent id."
     (knot-update--commit id "--parent" value)))
 
 (transient-define-prefix knot-update-from-show ()
-  "Update the current show buffer's ticket atomically.
+  "Update a ticket atomically from a show buffer or list row.
 
-Each frontmatter suffix prompts for one value and commits a single
-`knot update --flag value' subprocess; the show buffer
-auto-refreshes on success.  CLI errors raise `user-error' in the
-minibuffer and leave buffer state unchanged.  The long-form
-suffixes pop a capture buffer for the matching section."
+Each frontmatter suffix prompts for one value and commits a
+single `knot update --flag value' subprocess; visible knot.el
+buffers for the project auto-refresh on success via
+`knot--after-mutation', and the list buffer preserves point on
+the originating row id.  CLI errors raise `user-error' in the
+minibuffer and leave buffer state unchanged.
+
+The long-form group (capture buffers for description / design /
+body / note) is shown only in `knot-show-mode'.  From a list row
+only frontmatter mutations are offered; drill in via RET first
+to edit long-form sections."
   ["Frontmatter"
    ("s" "status"   knot-update-set-status)
    ("p" "priority" knot-update-set-priority)
@@ -2031,6 +2060,7 @@ suffixes pop a capture buffer for the matching section."
    ("a" "assignee" knot-update-set-assignee)
    ("P" "parent"   knot-update-set-parent)]
   ["Long-form"
+   :if-derived knot-show-mode
    ("e" "description" knot-show-edit-description)
    ("d" "design"      knot-show-edit-design)
    ("b" "body"        knot-show-edit-body)
@@ -2754,7 +2784,7 @@ buffer."
 ;; restore); reload `knot.el' to revert.
 
 (defvar knot-evil--stock-keys
-  '((knot-list-mode-map . ("l" "r" "b" "c" "F"))
+  '((knot-list-mode-map . ("l" "r" "b" "c" "F" ","))
     (knot-show-mode-map . ("," "e" "d" "b" "n" "p" "k" "g"))
     (knot-info-mode-map . ("g"))
     (knot-deps-mode-map . ("g" "n" "p")))
@@ -2774,6 +2804,7 @@ binding under the evil scheme.")
      ("o"       . knot-list-sort)
      ("s"       . knot-start)
      ("x"       . knot-close)
+     ("M"       . knot-update-from-show)
      ("D"       . knot-deps-transient)
      ("L"       . knot-links-transient))
     (knot-show-mode-map
