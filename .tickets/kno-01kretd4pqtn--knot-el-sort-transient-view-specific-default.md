@@ -1,33 +1,33 @@
 ---
 id: kno-01kretd4pqtn
 title: 'knot.el: sort transient + view-specific default orderings for list view'
-status: open
+status: in_progress
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-12T19:25:16.375278085Z'
-updated: '2026-05-12T19:25:16.375278085Z'
+updated: '2026-05-13T01:22:07.262176645Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
 - knot-el
 acceptance:
 - title: A sort transient (e.g. 'o' for order) exposes single-key sort by id, title, priority, status, type, mode, created, updated
-  done: false
+  done: true
 - title: Sort key + direction are buffer-local in knot-list-mode and persist across filter changes, manual 'g' refresh, and view switches
-  done: false
+  done: true
 - title: 'On initial buffer creation, each view applies its own default: list/ready/blocked → priority asc then id asc; closed → updated desc'
-  done: false
+  done: true
 - title: The sort transient has a 'reset to view default' suffix that re-applies the active view's default
-  done: false
+  done: true
 - title: The transient has a 'toggle direction' suffix that flips asc ↔ desc without re-picking the column
-  done: false
+  done: true
 - title: Header line shows the current sort key + direction alongside the view + filter chips (e.g. [ready] sort=priority↑ mode=afk)
-  done: false
+  done: true
 - title: Sorting is client-side over the existing CLI response — no extra subprocess per sort change
-  done: false
+  done: true
 - title: The built-in 'S' binding from tabulated-list-mode-map continues to sort by the column at point (no regression)
-  done: false
+  done: true
 ---
 
 ## Description

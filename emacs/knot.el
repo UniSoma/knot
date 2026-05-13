@@ -609,10 +609,135 @@ accept."
         (setq args (append args (list flag value)))))
     args))
 
-(defun knot-list--header-line (view filters)
-  "Render the header-line string for VIEW and active FILTERS."
+;;;; Sort state (knot-list module)
+
+(defconst knot-list--sort-keys
+  '(id title priority status type mode created updated)
+  "Keys accepted by the sort transient and persisted in `knot-list--sort'.")
+
+(defconst knot-list--view-default-sort
+  '((list    priority . t)
+    (ready   priority . t)
+    (blocked priority . t)
+    (closed  updated  . nil))
+  "Initial sort applied per view when the buffer-local sort is unset.
+Each entry is (VIEW KEY . ASCENDING-P).  Used by
+`knot-list--effective-sort' to resolve a nil `knot-list--sort'.")
+
+(defconst knot-list--column->sort-key
+  '(("ID"     . id)
+    ("Status" . status)
+    ("Pri"    . priority)
+    ("Mode"   . mode)
+    ("Type"   . type)
+    ("Title"  . title))
+  "Map from `tabulated-list-format' column name to a `knot-list--sort' key.
+Used to hydrate `knot-list--sort' after the built-in `S' binding mutates
+`tabulated-list-sort-key'.  \"Assignee\" and \"AC\" are sortable as
+columns but absent from the sort key set; `S' on those columns reorders
+the buffer without updating `knot-list--sort'.")
+
+(defvar-local knot-list--rows nil
+  "Cached raw rows from the most recent CLI fetch.
+Reused by `knot-list--rerender' so a sort change does not run a fresh
+subprocess.")
+
+(defvar-local knot-list--sort nil
+  "Buffer-local sort state: (KEY-SYMBOL . ASCENDING-P) or nil.
+When nil, the active view's entry in `knot-list--view-default-sort'
+applies.  KEY-SYMBOL is one of `knot-list--sort-keys'.  ASCENDING-P
+non-nil means ascending; nil means descending.")
+
+(defvar-local knot-list--last-table-sort-key nil
+  "Last value `knot-list--rerender' wrote to `tabulated-list-sort-key'.
+Used by `knot-list--hydrate-sort-from-table' to detect mutation by the
+built-in `S' binding since the previous render.")
+
+(defun knot-list--effective-sort ()
+  "Return the active sort: pinned `knot-list--sort' or the view default."
+  (or knot-list--sort
+      (cdr (assq knot-list--view knot-list--view-default-sort))))
+
+(defun knot-list--sort-natural-direction (key)
+  "Return the natural ASCENDING-P when KEY is first picked from the transient.
+Time-valued keys (`created', `updated') default to descending so recent
+tickets surface first; everything else defaults to ascending."
+  (if (memq key '(created updated)) nil t))
+
+(defun knot-list--cmp-values (a b)
+  "Return -1, 0, or 1 comparing A and B (strings, numbers, or nil).
+nil sorts before non-nil; numbers before strings when types differ."
+  (cond
+   ((equal a b) 0)
+   ((null a) -1)
+   ((null b) 1)
+   ((and (numberp a) (numberp b))
+    (if (< a b) -1 1))
+   ((and (stringp a) (stringp b))
+    (if (string< a b) -1 1))
+   ((numberp a) -1)
+   ((numberp b) 1)
+   (t 0)))
+
+(defun knot-list--compare-rows (key asc-p)
+  "Return a comparator that sorts row alists by KEY with id-asc tiebreak.
+Ties on KEY are broken by ascending id, matching the server-side order
+used by `knot ready' / `knot list'."
+  (lambda (a b)
+    (let* ((va (alist-get key a))
+           (vb (alist-get key b))
+           (c (knot-list--cmp-values va vb))
+           (final (if (zerop c)
+                      (knot-list--cmp-values (alist-get 'id a)
+                                             (alist-get 'id b))
+                    c)))
+      (if asc-p (< final 0) (> final 0)))))
+
+(defun knot-list--apply-sort (rows)
+  "Return ROWS sorted by `knot-list--effective-sort'."
+  (let* ((eff (knot-list--effective-sort))
+         (key (car eff))
+         (asc-p (cdr eff)))
+    (sort (copy-sequence rows) (knot-list--compare-rows key asc-p))))
+
+(defun knot-list--sort->table-key (sort)
+  "Return the `tabulated-list-sort-key' equivalent for SORT, or nil.
+Returns nil when SORT's key has no matching column (`created' /
+`updated'), so the column-header sort indicator stays blank for those."
+  (let* ((key (car sort))
+         (asc-p (cdr sort))
+         (col (car (rassq key knot-list--column->sort-key))))
+    (when col (cons col (not asc-p)))))
+
+(defun knot-list--hydrate-sort-from-table ()
+  "Adopt an externally-set `tabulated-list-sort-key' into `knot-list--sort'.
+External mutation = the built-in `S' binding from
+`tabulated-list-mode-map'.  We compare `tabulated-list-sort-key' to
+`knot-list--last-table-sort-key' (what rerender most recently wrote);
+a mismatch on a recognized column means S was used since the last
+render.  S on \"Assignee\" or \"AC\" hits this branch but produces no
+sort-key symbol, so `knot-list--sort' is left untouched."
+  (let ((actual tabulated-list-sort-key))
+    (when (and actual
+               (not (equal actual knot-list--last-table-sort-key)))
+      (let* ((col (car actual))
+             (flip (cdr actual))
+             (sym (cdr (assoc col knot-list--column->sort-key))))
+        (when sym
+          (setq knot-list--sort (cons sym (not flip))))))))
+
+(defun knot-list--header-line (view filters &optional sort)
+  "Render the header-line string for VIEW with active FILTERS.
+When SORT is non-nil, render its key + direction between the view tag
+and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\")."
   (let* ((view-tag (propertize (format "[%s]" view)
                                'face 'mode-line-emphasis))
+         (sort-tag (when sort
+                     (propertize
+                      (format "sort=%s%s"
+                              (car sort)
+                              (if (cdr sort) "↑" "↓"))
+                      'face 'shadow)))
          (effective (knot-list--effective-filters view filters))
          (flag-strs (mapcar (lambda (entry)
                               (format "%s=%s"
@@ -621,12 +746,14 @@ accept."
                                                   knot-list--filter-cli-flags))
                                        2)
                                       (cdr entry)))
-                            effective)))
-    (concat view-tag
-            " "
-            (if flag-strs
-                (string-join flag-strs " ")
-              (propertize "(no filters)" 'face 'shadow)))))
+                            effective))
+         (parts (delq nil
+                      (list view-tag
+                            sort-tag
+                            (if flag-strs
+                                (string-join flag-strs " ")
+                              (propertize "(no filters)" 'face 'shadow))))))
+    (string-join parts " ")))
 
 (defvar knot-list-mode-map
   (let ((map (make-sparse-keymap)))
@@ -638,6 +765,7 @@ accept."
     (define-key map (kbd "c") #'knot-list-view-closed)
     (define-key map (kbd "f") #'knot-list-filter)
     (define-key map (kbd "F") #'knot-list-clear-filters)
+    (define-key map (kbd "o") #'knot-list-sort)
     (define-key map (kbd "RET") #'knot-list-show-at-point)
     (define-key map (kbd "s") #'knot-start)
     (define-key map (kbd "x") #'knot-close)
@@ -665,7 +793,7 @@ and records the list buffer as the destination's back-buffer
 A single project-scoped buffer renders any of the list / ready /
 blocked / closed views (see `knot-list--view').  `l', `r', `b',
 `c' switch view in place; `f' opens the filter transient; `F'
-clears active filters; `g' re-fetches.
+clears active filters; `o' opens the sort transient; `g' re-fetches.
 
 \\{knot-list-mode-map}"
   (setq tabulated-list-format
@@ -678,7 +806,10 @@ clears active filters; `g' re-fetches.
          ("AC"        5 t)
          ("Title"     0 t)])
   (setq tabulated-list-padding 1)
-  (setq tabulated-list-sort-key (cons "ID" nil))
+  ;; `tabulated-list-sort-key' is set per-render from
+  ;; `knot-list--effective-sort'; leaving it nil here avoids a
+  ;; spurious S-hydrate match on the very first render.
+  (setq tabulated-list-sort-key nil)
   ;; Free the header-line for view / filter status; column headers
   ;; render as the first row of the buffer body instead.
   (setq-local tabulated-list-use-header-line nil)
@@ -702,17 +833,35 @@ clears active filters; `g' re-fetches.
 
 (defun knot-list--render ()
   "Refetch and redisplay the current buffer's view, preserving point.
-Uses buffer-local `knot-list--view' and `knot-list--filters'.
-Restores point to the row matching the previous row-id when
-possible."
+Uses buffer-local `knot-list--view' and `knot-list--filters'.  The raw
+CLI rows are cached in `knot-list--rows' so subsequent sort changes
+(via the sort transient) can re-render without another subprocess.
+Hydrates `knot-list--sort' from `tabulated-list-sort-key' first so a
+preceding `S' keypress is preserved across the refetch."
   (unless (derived-mode-p 'knot-list-mode)
     (user-error "knot-list--render: not in a knot-list-mode buffer"))
+  (knot-list--hydrate-sort-from-table)
+  (let ((args (knot-list--build-args knot-list--view knot-list--filters)))
+    (setq knot-list--rows (knot-cli-call args)))
+  (knot-list--rerender))
+
+(defun knot-list--rerender ()
+  "Redisplay from `knot-list--rows' with the active sort applied.
+Preserves point on the previous row id when possible.  Does not
+hydrate from `tabulated-list-sort-key'; sort transient suffixes set
+`knot-list--sort' directly and want their pick to win, and the
+refresh path (`knot-list--render') hydrates beforehand for the `S'
+case."
+  (unless (derived-mode-p 'knot-list-mode)
+    (user-error "knot-list--rerender: not in a knot-list-mode buffer"))
   (let* ((prev-id (tabulated-list-get-id))
-         (args (knot-list--build-args knot-list--view knot-list--filters))
-         (rows (knot-cli-call args)))
-    (setq tabulated-list-entries (mapcar #'knot-list--row rows))
+         (sorted (knot-list--apply-sort knot-list--rows))
+         (eff (knot-list--effective-sort)))
+    (setq tabulated-list-entries (mapcar #'knot-list--row sorted))
+    (setq tabulated-list-sort-key (knot-list--sort->table-key eff))
+    (setq knot-list--last-table-sort-key tabulated-list-sort-key)
     (setq header-line-format
-          (knot-list--header-line knot-list--view knot-list--filters))
+          (knot-list--header-line knot-list--view knot-list--filters eff))
     (tabulated-list-print t)
     (when prev-id
       (goto-char (point-min))
@@ -914,6 +1063,91 @@ filter at once."
    ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
   ["Other"
    ("C" "clear all"             knot-list-clear-filters)])
+
+
+;;;; Sort transient (knot-list module)
+
+(defun knot-list--set-sort-key (key)
+  "Pin the active sort to KEY using its natural direction and rerender.
+Sort is applied client-side over the cached `knot-list--rows', so this
+does not run a fresh CLI subprocess."
+  (setq knot-list--sort
+        (cons key (knot-list--sort-natural-direction key)))
+  (knot-list--rerender))
+
+(defun knot-list-sort-by-id ()
+  "Sort the active list view by id."
+  (interactive)
+  (knot-list--set-sort-key 'id))
+
+(defun knot-list-sort-by-title ()
+  "Sort the active list view by title."
+  (interactive)
+  (knot-list--set-sort-key 'title))
+
+(defun knot-list-sort-by-priority ()
+  "Sort the active list view by priority."
+  (interactive)
+  (knot-list--set-sort-key 'priority))
+
+(defun knot-list-sort-by-status ()
+  "Sort the active list view by status."
+  (interactive)
+  (knot-list--set-sort-key 'status))
+
+(defun knot-list-sort-by-type ()
+  "Sort the active list view by type."
+  (interactive)
+  (knot-list--set-sort-key 'type))
+
+(defun knot-list-sort-by-mode ()
+  "Sort the active list view by mode."
+  (interactive)
+  (knot-list--set-sort-key 'mode))
+
+(defun knot-list-sort-by-created ()
+  "Sort the active list view by created timestamp (descending by default)."
+  (interactive)
+  (knot-list--set-sort-key 'created))
+
+(defun knot-list-sort-by-updated ()
+  "Sort the active list view by updated timestamp (descending by default)."
+  (interactive)
+  (knot-list--set-sort-key 'updated))
+
+(defun knot-list-sort-toggle-direction ()
+  "Flip the current sort direction without re-picking the key."
+  (interactive)
+  (let ((eff (knot-list--effective-sort)))
+    (setq knot-list--sort (cons (car eff) (not (cdr eff))))
+    (knot-list--rerender)))
+
+(defun knot-list-sort-reset ()
+  "Reset the buffer's sort to the active view's default."
+  (interactive)
+  (setq knot-list--sort nil)
+  (knot-list--rerender))
+
+(transient-define-prefix knot-list-sort ()
+  "Sort the active list view.
+
+Each \"Sort by\" suffix pins the buffer's sort key (using a natural
+direction: descending for time-valued keys, ascending for the rest)
+and re-renders the cached rows without a fresh CLI call.  `d' flips
+direction without re-picking the key; `R' clears the buffer-local
+sort so the active view's default applies."
+  ["Sort by"
+   ("i" "id"        knot-list-sort-by-id)
+   ("t" "title"     knot-list-sort-by-title)
+   ("p" "priority"  knot-list-sort-by-priority)
+   ("s" "status"    knot-list-sort-by-status)
+   ("T" "type"      knot-list-sort-by-type)
+   ("m" "mode"      knot-list-sort-by-mode)
+   ("c" "created"   knot-list-sort-by-created)
+   ("u" "updated"   knot-list-sort-by-updated)]
+  ["Order"
+   ("d" "toggle direction"      knot-list-sort-toggle-direction)
+   ("R" "reset to view default" knot-list-sort-reset)])
 
 
 ;;;; Show buffer (knot-show module)
