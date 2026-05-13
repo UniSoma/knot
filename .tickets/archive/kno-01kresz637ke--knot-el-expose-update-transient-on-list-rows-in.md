@@ -1,12 +1,13 @@
 ---
 id: kno-01kresz637ke
 title: 'knot.el: expose update transient on list rows ('','' in list)'
-status: in_progress
+status: closed
 type: feature
 priority: 3
 mode: hitl
 created: '2026-05-12T19:17:39.039590208Z'
-updated: '2026-05-13T02:45:16.540215315Z'
+updated: '2026-05-13T02:51:35.586842690Z'
+closed: '2026-05-13T02:51:35.586842690Z'
 parent: kno-01krebyvdr1w
 tags:
 - emacs
@@ -49,3 +50,9 @@ Slice 4 (kno-01kreh4yap1c) put the atomic frontmatter update transient at `,` in
 **Refresh.** `knot-update--commit` already calls `knot--after-mutation`, which walks every visible knot.el buffer for the project and re-renders. The list buffer's existing render path (`knot-list--rerender`) preserves point on the originating row id, so no list-side changes are needed beyond the binding.
 
 **Out of scope.** Status transitions on list rows (already covered by slice 6's standalone `s` / `x`); long-form edits from list rows (drill into show first).
+
+## Notes
+
+**2026-05-13T02:51:35.586842690Z**
+
+Shipped at emacs/knot.el + emacs/README.md. knot-update--ticket-id and knot-update--current-field are now source-aware: knot-show-mode reads knot-show--id / knot-show--data, knot-list-mode reads tabulated-list-get-id and a one-shot knot show --json. knot-list-mode-map binds ',' to knot-update-from-show; knot-evil--stock-keys strips that ',' and knot-evil--bindings adds 'M' for evil normal state. The Long-form group gains :if-derived knot-show-mode so list-row invocations only see frontmatter (s p m t T a P). Commit semantics and refresh path unchanged — one knot update --flag value subprocess via knot-update--commit, then knot--after-mutation → knot-list--rerender preserves point on the originating row id. README binding table + prose updated to cover the list-mode entry point.
