@@ -6,10 +6,10 @@ type: bug
 priority: 3
 mode: hitl
 created: '2026-05-06T13:56:30.190644893Z'
-updated: '2026-05-06T23:42:47.365543405Z'
+updated: '2026-05-13T23:57:30.301364038Z'
 tags:
 - refine
-- v0.4
+- v0.5
 acceptance:
 - title: Root cause confirmed (does babashka.cli bind true for absent value, or does knot's spec allow it?).
   done: false

@@ -6,12 +6,12 @@ type: feature
 priority: 3
 mode: hitl
 created: '2026-05-06T20:54:09.174084540Z'
-updated: '2026-05-06T23:42:46.921708809Z'
+updated: '2026-05-13T23:57:30.133636722Z'
 tags:
-- v0.4
 - ci
 - release
 - bbin
+- v0.5
 acceptance:
 - title: release-smoke.yml workflow exists at .github/workflows/release-smoke.yml
   done: false

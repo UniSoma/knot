@@ -1,12 +1,13 @@
 ---
 id: kno-01kqzkhpc244
 title: v0.4 release plan and coordination
-status: open
+status: closed
 type: chore
 priority: 2
 mode: hitl
 created: '2026-05-06T21:36:48.975272046Z'
-updated: '2026-05-06T23:42:47.365543405Z'
+updated: '2026-05-13T23:57:49.937527823Z'
+closed: '2026-05-13T23:57:37.674533299Z'
 tags:
 - v0.4
 - release
@@ -19,6 +20,8 @@ deps:
 - kno-01kqn3swv94c
 - kno-01kqxd0amhnb
 - kno-01kqys6tvsdr
+links:
+- kno-01krhwcy0zdy
 ---
 
 ## Description
@@ -47,3 +50,9 @@ Coordination ticket for the v0.4 release cycle. Mirrors kno-01kqgqfwk4h1 (v0.3 r
 - `knot capture` TUI: kno-01kqn0hzgkqq
 - Larger features deferred for sizing: kno-01kqxgt2jkf2 (stats), kno-01kqe8kjmrpp (ai setup), kno-01kqe94cgmd2 (Pi packaging), kno-01kqdaxz86nv (richer colors)
 - Future-tagged: kno-01kqcpb0t5s7 (distribution refinement), kno-01kqgqaxzx98 (concurrency control)
+
+## Notes
+
+**2026-05-13T23:57:37.674533299Z**
+
+v0.4.0 shipped 2026-05-13 (commit 932e2b5, lightweight tag — cut manually around the still-unmodernized /release command). Shipped in v0.4: kno-01kqzh1tadw8 (knot check legacy AC warning), kno-01kqys929mdy (knot prime modernize), kno-01kqn3swv94c (tags column on listings), kno-01kqxd0amhnb (dash-leading string-flag values). Slid to v0.5 (retagged v0.4 → v0.5): kno-01kqzh2vhhrz (/release modernize), kno-01kqzh3jgwf0 (release-tag smoke CI), kno-01kqe9ytd40z (age column), kno-01kqys6tvsdr (numeric-flag coerce). Replaced by the v0.5 coordination ticket.

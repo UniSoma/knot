@@ -6,12 +6,12 @@ type: chore
 priority: 3
 mode: hitl
 created: '2026-05-06T20:53:45.642991424Z'
-updated: '2026-05-06T23:42:46.841094473Z'
+updated: '2026-05-13T23:55:59.202506785Z'
 tags:
-- v0.4
 - tooling
 - release
 - slash-command
+- v0.5
 acceptance:
 - title: Step 4 rewritten to handle the [Unreleased] rename pattern
   done: false
@@ -74,3 +74,9 @@ Edit `.claude/commands/release.md` to:
 
 **New Step 12 — 'Cleanup':**
 > Delete `release-notes-vX.Y.Z.txt`. Close the release-coordination ticket with a summary.
+
+## Notes
+
+**2026-05-13T23:55:59.202506785Z**
+
+Sliding forward to v0.5. v0.4.0 was tagged 2026-05-13 (commit 932e2b5) as a lightweight tag, cut manually around this still-unmodernized /release command — same one-off as v0.3. CHANGELOG still carries the [Unreleased] rename pattern post-cut, so every AC in this ticket still applies as written.
