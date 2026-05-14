@@ -6,7 +6,7 @@ type: chore
 priority: 2
 mode: hitl
 created: '2026-05-06T21:36:48.975272046Z'
-updated: '2026-05-13T23:57:49.937527823Z'
+updated: '2026-05-14T00:06:38.604240397Z'
 closed: '2026-05-13T23:57:37.674533299Z'
 tags:
 - v0.4
@@ -16,7 +16,6 @@ deps:
 - kno-01kqzh2vhhrz
 - kno-01kqzh3jgwf0
 - kno-01kqys929mdy
-- kno-01kqe9ytd40z
 - kno-01kqn3swv94c
 - kno-01kqxd0amhnb
 - kno-01kqys6tvsdr

@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-30T04:07:41.844334511Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-14T00:05:11.953026699Z'
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqgq9vhmvr
@@ -17,6 +17,10 @@ acceptance:
   done: false
 - title: The packaging/install flow is validated from a project outside this repo.
   done: false
+tags:
+- distribution
+- packaging
+- pi
 ---
 
 ## Description

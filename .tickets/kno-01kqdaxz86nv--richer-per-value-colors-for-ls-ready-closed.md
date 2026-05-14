@@ -6,10 +6,14 @@ type: feature
 priority: 3
 mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
-updated: '2026-05-01T03:11:26.695691072Z'
+updated: '2026-05-14T00:05:25.725717187Z'
 links:
 - kno-01kqgqapwqvh
 - kno-01kqg37mssy3
+tags:
+- output
+- colors
+- refine
 ---
 
 ## Description
@@ -45,3 +49,7 @@ The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize 
 **2026-05-01T03:11:26.695691072Z**
 
 Design recommendation superseded — apply role-derivation pattern from kno-01kqg37mssy3 (status colors derived from :statuses / :active-status / :terminal-statuses, not from literal status names). Do not hardcode color literals keyed by canonical config values; that pattern has now been recognized as the recurring 'hardcoded-canonical-config-literals' bug source three times. Open question #1 (':type-colors' map in .knot.edn) becomes the right shape, possibly with role-based defaults for the canonical types/modes/priorities. See kno-01kqgqapwqvh for the broader audit.
+
+**2026-05-14T00:05:25.725717187Z**
+
+Triage 2026-05-14: upstream pattern dependency kno-01kqg37mssy3 (status color role-derivation) has shipped/closed — the design recommendation from the prior note can now be applied. Re-read the canonical role-derivation pattern in src/knot/output.clj before designing :type/:priority/:mode color maps.

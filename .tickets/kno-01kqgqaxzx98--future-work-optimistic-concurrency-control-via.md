@@ -6,11 +6,10 @@ type: task
 priority: 4
 mode: hitl
 created: '2026-05-01T02:54:25.277798011Z'
-updated: '2026-05-05T01:38:54.088449090Z'
+updated: '2026-05-14T00:05:13.803401439Z'
 tags:
 - future
 - concurrency
-- needs-triage
 acceptance:
 - title: Decision recorded once a real conflict is observed (or once parallelism scales)
   done: false

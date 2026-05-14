@@ -6,9 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-05-07T01:33:04.505238004Z'
-updated: '2026-05-07T01:33:04.505238004Z'
-tags:
-- v0.4
+updated: '2026-05-14T00:05:17.747752415Z'
 acceptance:
 - title: Every value-bearing string flag in knot.help/registry survives a dash-leading value (covering --acceptance, --summary, --tags, --add-tag, --remove-tag, --add-ac, --remove-ac, --title, --type, --mode, --assignee, --parent, --external-ref, --status, --tag, --severity, --code, --prefix, --tickets-dir).
   done: false

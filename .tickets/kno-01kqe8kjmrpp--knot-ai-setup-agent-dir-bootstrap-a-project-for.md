@@ -2,13 +2,16 @@
 id: kno-01kqe8kjmrpp
 title: knot ai setup <agent> [dir] — bootstrap a project for agent-friendly knot use
 status: open
-type: task
+type: feature
 priority: 2
 mode: hitl
 created: '2026-04-30T03:58:31.064679884Z'
-updated: '2026-05-01T03:11:18.023021946Z'
+updated: '2026-05-14T00:05:11.526887101Z'
 deps:
 - kno-01kqgqfwk4h1
+tags:
+- ai
+- integration
 ---
 
 ## Description
