@@ -76,6 +76,7 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `U`          | `knot-list-unmark-all`             |
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
+|                        | `T`          | `knot-tags-transient`              |
 | `knot-show-mode`       | `RET`        | context action                     |
 |                        | `+`          | `knot-show-add-at-point`           |
 |                        | `-` / `K`    | `knot-show-remove-at-point`        |
@@ -85,6 +86,7 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `[` / `]`    | prev / next ticket                 |
 |                        | `D`          | `knot-deps-transient`              |
 |                        | `L`          | `knot-links-transient`             |
+|                        | `T`          | `knot-tags-transient`              |
 |                        | `E`          | `knot-show-edit-via-emacsclient`   |
 | `knot-deps-mode`       | `TAB` / `<backtab>` | navigation                  |
 |                        | `f`          | `knot-deps-toggle-full`            |
@@ -120,32 +122,50 @@ time. With marks empty the existing single-id behavior applies
 prefills). `s` (start) and `x` (close) remain single-id; bulk
 long-form mutation (`e d b n`) is intentionally excluded.
 
-`+` in `knot-show-mode` is section-aware. It reads the
+`+` in `knot-show-mode` is field- and section-aware. On the
+`tags:` frontmatter line (the `knot-field` value span) it
+dispatches to `knot-update-add-tags`. Otherwise it reads the
 `knot-section` text property at point and dispatches:
 `## Acceptance Criteria` → `knot-show-add-ac`, `## Blockers` →
 `knot-deps-add`, `## Linked` → `knot-links-add`, `## Blocking` →
 `knot-show-add-rdep` (adds a ticket that depends on the current
-one). When point is outside any of those four sections, `+` pops
-`knot-show-add-transient` (`a` acceptance, `d` dep, `l` link). The
-four `+`-aware sections are always rendered, with an italic
-placeholder when empty.
+one). When point is outside any of those four sections and not
+on the `tags:` line, `+` pops `knot-show-add-transient` (`a`
+acceptance, `d` dep, `l` link, `t` tag). The four `+`-aware
+sections are always rendered, with an italic placeholder when
+empty.
 
 `-` and `K` both call `knot-show-remove-at-point`, the symmetric
-remover — dispatching on the row's text property: a `## Blockers`
-row → `knot undep`, a `## Blocking` row → reverse `knot undep`, a
-`## Linked` row → `knot unlink`, an acceptance row → `--remove-ac`.
-`-` shadows evil's `evil-previous-line-first-non-blank` motion in
+remover — dispatching on the row's text property: the `tags:`
+line → `knot-update-remove-tags`, a `## Blockers` row → `knot
+undep`, a `## Blocking` row → reverse `knot undep`, a `## Linked`
+row → `knot unlink`, an acceptance row → `--remove-ac`. `-`
+shadows evil's `evil-previous-line-first-non-blank` motion in
 knot-show buffers; use `k` for up-line.
+
+RET on the `tags:` line still invokes the full `knot-update-set-tags`
+replace via `knot-show--field->command`; use `+` / `-` for deltas
+and `RET` for a full replace, or pop `T` for the full transient.
 
 The `M` transient owns every field mutation and opens from both
 `knot-show-mode` and `knot-list-mode` (operating on the row at point
 in the latter). Frontmatter suffixes (`s` status, `p` priority, `m`
-mode, `t` type, `T` tags, `a` assignee, `P` parent) are always
-offered; long-form suffixes (`e` description, `d` design, `b` body,
-`n` note) are shown only in `knot-show-mode` — drill into a row via
-`RET` first to edit long-form sections. The standalone show-mode
-bindings for `e d b n` are dropped when `knot-evil-mode` is on; they
-collide with evil operators and motions.
+mode, `t` type, `a` assignee, `P` parent) are always offered;
+long-form suffixes (`e` description, `d` design, `b` body, `n` note)
+are shown only in `knot-show-mode` — drill into a row via `RET` first
+to edit long-form sections. The standalone show-mode bindings for
+`e d b n` are dropped when `knot-evil-mode` is on; they collide with
+evil operators and motions.
+
+Tags live behind their own top-level `T` transient
+(`knot-tags-transient`), parallel to `D` deps / `L` links: `a`
+`knot-update-add-tags` and `r` `knot-update-remove-tags` apply
+deltas via `--add-tag` / `--remove-tag` (idempotent, repeatable,
+with `completing-read-multiple` over the project-wide tag union
+for add and over the current-or-marked tag union for remove);
+`T` invokes the existing `knot-update-set-tags` for a full
+`--tags` replace. All three honor `knot-list--marks` for fan-out;
+empty input is a silent no-op.
 
 The `f` transient (`knot-list-filter`) scopes the active view via the
 same flags the CLI accepts: `m` mode, `t` type, `s` status, `T` tag,
@@ -178,7 +198,8 @@ Paste-ready snippet for `~/.doom.d/packages.el` + `config.el`:
         :desc "Close"     "x" #'knot-close
         :desc "Modify"    "M" #'knot-update-from-show
         :desc "Deps"      "D" #'knot-deps-transient
-        :desc "Links"     "L" #'knot-links-transient)
+        :desc "Links"     "L" #'knot-links-transient
+        :desc "Tags"      "T" #'knot-tags-transient)
   (map! :map knot-list-mode-map
         :localleader
         :desc "Filter"    "f" #'knot-list-filter

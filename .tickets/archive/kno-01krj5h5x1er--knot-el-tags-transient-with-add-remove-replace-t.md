@@ -1,35 +1,36 @@
 ---
 id: kno-01krj5h5x1er
 title: 'knot.el: tags transient with add/remove/replace (T prefix)'
-status: open
+status: closed
 type: feature
-priority: 2
+priority: 0
 mode: afk
 created: '2026-05-14T02:37:26.305560051Z'
-updated: '2026-05-14T02:37:26.305560051Z'
+updated: '2026-05-14T13:58:53.226239512Z'
+closed: '2026-05-14T13:58:53.226239512Z'
 tags:
 - emacs
 - knot-el
 - v0.5
 acceptance:
 - title: knot-tags-transient defined with suffixes a (add), r (remove), T (replace); bound to T in knot-list-mode-map, knot-show-mode-map, and both knot-evil--bindings blocks
-  done: false
+  done: true
 - title: T tags suffix removed from knot-update-from-show; the other seven frontmatter suffixes unchanged
-  done: false
+  done: true
 - title: knot-update--commit-args ids args primitive introduced; knot-update--commit rewritten as a thin shim; existing scalar updates (status/priority/mode/type/assignee/parent/replace-tags) still work end-to-end
-  done: false
+  done: true
 - title: 'knot-update-add-tags: completing-read-multiple with project-wide candidates from knot list --json (live); empty input is a silent no-op; expands to repeated --add-tag X argv; honors knot-list--marks for fan-out'
-  done: false
+  done: true
 - title: 'knot-update-remove-tags: completing-read-multiple with current-ticket tags (single id) or union across marked ids (bulk) as candidates; empty input is a silent no-op; expands to repeated --remove-tag X argv; honors knot-list--marks for fan-out'
-  done: false
+  done: true
 - title: 'knot-show-add-at-point recognizes (get-text-property (point) ''knot-field) == ''tags and dispatches to knot-update-add-tags; + on the tags: line in a show buffer adds'
-  done: false
+  done: true
 - title: 'knot-show-remove-at-point recognizes ''tags field and dispatches to knot-update-remove-tags; - on the tags: line in a show buffer removes'
-  done: false
+  done: true
 - title: 'RET on the tags: line in a show buffer continues to invoke replace (knot-show--field->command unchanged)'
-  done: false
+  done: true
 - title: Lint clean (clj-kondo --lint src test) and emacs byte-compiles without warnings (cd emacs && emacs -Q -batch -L . -f batch-byte-compile knot.el)
-  done: false
+  done: true
 ---
 
 ## Description
@@ -66,3 +67,9 @@ Drives the underlying CLI's `--add-tag` / `--remove-tag` / `--tags` flags on `kn
 ## Fan-out
 
 - Both new operations use `knot-update--ticket-ids`, so `knot-list--marks` is honored: one subprocess per id with the full argv (`--add-tag X --add-tag Y …`), error per id captured, summary `message` at the end. Behavior matches the existing scalar bulk path.
+
+## Notes
+
+**2026-05-14T13:58:53.226239512Z**
+
+shipped in dfe60a2 — knot.el tags transient (T → add/remove/replace) with --add-tag / --remove-tag delta CLI flags wired through emacs

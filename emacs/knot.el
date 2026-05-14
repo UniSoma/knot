@@ -832,6 +832,7 @@ Appends a `[N marked]' chunk when `knot-list--marks' is non-empty."
     (define-key map (kbd "U") #'knot-list-unmark-all)
     (define-key map (kbd "D") #'knot-deps-transient)
     (define-key map (kbd "L") #'knot-links-transient)
+    (define-key map (kbd "T") #'knot-tags-transient)
     map)
   "Keymap for `knot-list-mode'.")
 
@@ -1428,6 +1429,7 @@ laterally without growing the chain.  Nil falls through to
     (define-key map (kbd "E") #'knot-show-edit-via-emacsclient)
     (define-key map (kbd "D") #'knot-deps-transient)
     (define-key map (kbd "L") #'knot-links-transient)
+    (define-key map (kbd "T") #'knot-tags-transient)
     (define-key map (kbd "p") #'backward-button)
     (define-key map (kbd "TAB") #'forward-button)
     (define-key map (kbd "<backtab>") #'backward-button)
@@ -1568,22 +1570,27 @@ to a `## Blockers' row."
   (get-text-property (point) 'knot-link-id))
 
 (defun knot-show-remove-at-point ()
-  "Remove the relationship or AC at point after confirmation.
+  "Remove the relationship, AC, or tag at point after confirmation.
 
 Dispatches on the text properties added during render: a dep row
 in `## Blockers' (`knot-dep-id') triggers `knot undep <this>
 <row>'; a reverse-dep row in `## Blocking' (`knot-rdep-id')
 triggers `knot undep <row> <this>'; a link row in `## Linked'
 \(`knot-link-id') triggers `knot unlink'; an acceptance-criterion
-line (`knot-ac-title') triggers `--remove-ac'.  Errors when none
-of those properties is at point."
+line (`knot-ac-title') triggers `--remove-ac'.  On the `tags:'
+frontmatter line (`knot-field' == `tags') dispatches to
+`knot-update-remove-tags' for delta removal.  Errors when none of
+those properties is at point."
   (interactive)
   (let ((dep-id   (knot-show--dep-id-at-point))
         (rdep-id  (knot-show--rdep-id-at-point))
         (link-id  (knot-show--link-id-at-point))
         (ac       (knot-show--ac-at-point))
+        (field    (get-text-property (point) 'knot-field))
         (id       (knot-update--ticket-id)))
     (cond
+     ((eq field 'tags)
+      (call-interactively #'knot-update-remove-tags))
      (dep-id
       (when (yes-or-no-p (format "Remove dep %s from %s? " dep-id id))
         (knot-cli-call (list "undep" id dep-id))
@@ -1610,24 +1617,31 @@ of those properties is at point."
   (get-text-property (point) 'knot-section))
 
 (defun knot-show-add-at-point ()
-  "Add a thing based on the section at point.
+  "Add a thing based on the field or section at point.
 
-Reads the `knot-section' text property at point and dispatches:
+When the `knot-field' text property at point is `tags' (the
+`tags:' frontmatter value span), dispatches to
+`knot-update-add-tags' for delta addition.
+
+Otherwise reads the `knot-section' text property at point and
+dispatches:
 
   `acceptance' → `knot-show-add-ac' (prompts for new AC title)
   `blockers'   → `knot-deps-add' (`knot dep <this> <to>')
   `linked'     → `knot-links-add' (`knot link <this> <to>')
   `blocking'   → `knot-show-add-rdep' (`knot dep <to> <this>')
 
-When point is not in any of those sections, pops
+When point is not in any of those fields or sections, pops
 `knot-show-add-transient' so the action can still be chosen."
   (interactive)
-  (pcase (knot-show--section-at-point)
-    ('acceptance (call-interactively #'knot-show-add-ac))
-    ('blockers   (call-interactively #'knot-deps-add))
-    ('linked     (call-interactively #'knot-links-add))
-    ('blocking   (call-interactively #'knot-show-add-rdep))
-    (_           (call-interactively #'knot-show-add-transient))))
+  (if (eq (get-text-property (point) 'knot-field) 'tags)
+      (call-interactively #'knot-update-add-tags)
+    (pcase (knot-show--section-at-point)
+      ('acceptance (call-interactively #'knot-show-add-ac))
+      ('blockers   (call-interactively #'knot-deps-add))
+      ('linked     (call-interactively #'knot-links-add))
+      ('blocking   (call-interactively #'knot-show-add-rdep))
+      (_           (call-interactively #'knot-show-add-transient)))))
 
 (defun knot-show--step (direction)
   "Move to the row DIRECTION away in the originating list buffer.
@@ -2200,24 +2214,26 @@ frontmatter field (tags / parent / assignee may be absent)."
            (data (and id (knot-cli-call (list "show" id)))))
       (alist-get field data)))))
 
-(defun knot-update--commit (ids flag value)
-  "Run `knot update <id> FLAG VALUE' for each id in IDS, then refresh.
-IDS may be a single id string (single-id path, current behavior:
-CLI errors propagate as `user-error', short-circuiting the
-refresh) or a list of id strings (bulk path: one subprocess per
-id, `user-error' from the CLI envelope is caught, recorded as
-`(id . reason)' in a failure accumulator, and the loop continues;
-`knot--after-mutation' runs exactly once after the loop, and a
-summary `message' of the form `M: K ok' or `M: K ok, F failed:
-<id> (reason), ...' fires).  Refresh propagates to every visible
-knot.el buffer for this project via `knot--after-mutation'."
+(defun knot-update--commit-args (ids args)
+  "Run `knot update <id> ARGS...' for each id in IDS, then refresh.
+ARGS is a flat list of argv tokens appended after the id (e.g.
+`(\"--status\" \"closed\")' or `(\"--add-tag\" \"a\" \"--add-tag\"
+\"b\")').  IDS may be a single id string (single-id path: CLI
+errors propagate as `user-error', short-circuiting the refresh) or
+a list of id strings (bulk path: one subprocess per id with the
+full ARGS, `user-error' from the CLI envelope is caught, recorded
+as `(id . reason)' in a failure accumulator, and the loop
+continues; `knot--after-mutation' runs exactly once after the
+loop, and a summary `message' of the form `M: K ok' or `M: K ok,
+F failed: <id> (reason), ...' fires).  Refresh propagates to every
+visible knot.el buffer for this project via `knot--after-mutation'."
   (let* ((id-list (if (listp ids) ids (list ids)))
          (total (length id-list)))
     (cond
      ((= total 0)
       (user-error "knot-update: no ticket ids to update"))
      ((= total 1)
-      (knot-cli-call (list "update" (car id-list) flag value))
+      (knot-cli-call (append (list "update" (car id-list)) args))
       (knot--after-mutation))
      (t
       (let ((ok-count 0)
@@ -2225,7 +2241,7 @@ knot.el buffer for this project via `knot--after-mutation'."
         (dolist (id id-list)
           (condition-case err
               (progn
-                (knot-cli-call (list "update" id flag value))
+                (knot-cli-call (append (list "update" id) args))
                 (setq ok-count (1+ ok-count)))
             (user-error
              (push (cons id (error-message-string err)) failures))))
@@ -2241,6 +2257,13 @@ knot.el buffer for this project via `knot--after-mutation'."
                (format "%d: %d ok, %d failed: %s"
                        total ok-count (length failures) failure-str)
              (format "%d: %d ok" total ok-count)))))))))
+
+(defun knot-update--commit (ids flag value)
+  "Thin shim over `knot-update--commit-args' for scalar FLAG/VALUE pairs.
+Delegates to `knot-update--commit-args' with the argv vector
+`(list FLAG VALUE)'.  See that function for fan-out and error
+semantics."
+  (knot-update--commit-args ids (list flag value)))
 
 (defun knot-update--read-allowed (prompt field current)
   "Prompt for FIELD's allowed value, defaulting to CURRENT.
@@ -2405,6 +2428,95 @@ fan-out semantics."
          (value (knot-update--read-tags current (and bulk count))))
     (knot-update--commit ids "--tags" value)))
 
+(defun knot-update--all-project-tags ()
+  "Return the sorted unique list of tags across all live tickets.
+One `knot list --json' call; each row's `tags' list is folded
+into a hash-backed set."
+  (let ((seen (make-hash-table :test 'equal))
+        (out nil))
+    (dolist (row (knot-cli-call '("list")))
+      (dolist (tag (alist-get 'tags row))
+        (unless (gethash tag seen)
+          (puthash tag t seen)
+          (push tag out))))
+    (sort out #'string<)))
+
+(defun knot-update--tags-union-for-ids (ids)
+  "Return the sorted unique tag union across IDS from one `knot list --json'.
+Rows whose id is not in IDS are skipped; rows whose id is in IDS
+but not in the live list (e.g. closed tickets) contribute no
+candidates — free input still works at the prompt."
+  (let ((id-set (let ((h (make-hash-table :test 'equal)))
+                  (dolist (id ids) (puthash id t h))
+                  h))
+        (seen (make-hash-table :test 'equal))
+        (out nil))
+    (dolist (row (knot-cli-call '("list")))
+      (when (gethash (alist-get 'id row) id-set)
+        (dolist (tag (alist-get 'tags row))
+          (unless (gethash tag seen)
+            (puthash tag t seen)
+            (push tag out)))))
+    (sort out #'string<)))
+
+(defun knot-update--expand-tag-args (flag tags)
+  "Return a flat argv expanding TAGS into repeated FLAG occurrences.
+TAGS is a list of strings; FLAG is the CLI flag (e.g.
+`--add-tag').  Empty / whitespace-only tags are dropped."
+  (let (out)
+    (dolist (tag tags)
+      (let ((trimmed (and (stringp tag) (string-trim tag))))
+        (when (and trimmed (not (string-empty-p trimmed)))
+          (push flag out)
+          (push trimmed out))))
+    (nreverse out)))
+
+(defun knot-update-add-tags ()
+  "Add one or more tags via `knot update --add-tag' (repeatable, idempotent).
+Prompts with `completing-read-multiple' over the project-wide tag
+union from one `knot list --json' (live); free input is allowed,
+so new tag names work too.  Empty input is a silent no-op.  In
+`knot-list-mode' with marks, fans out across the marked set: one
+subprocess per id with the full `--add-tag X --add-tag Y' argv.
+See `knot-update--commit-args' for fan-out semantics."
+  (interactive)
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (choices (knot-update--all-project-tags))
+         (prompt (if bulk
+                     (format "add tags (%d marked, TAB completes, comma-separated): "
+                             count)
+                   "add tags (TAB completes, comma-separated): "))
+         (picks (completing-read-multiple prompt choices nil nil))
+         (args (knot-update--expand-tag-args "--add-tag" picks)))
+    (when args
+      (knot-update--commit-args ids args))))
+
+(defun knot-update-remove-tags ()
+  "Remove one or more tags via `knot update --remove-tag' (repeatable, idempotent).
+Prompts with `completing-read-multiple' over the current ticket's
+tags (single id) or the union across `knot-list--marks' (bulk),
+both sourced from one `knot list --json'; free input is allowed
+and the CLI is idempotent on missing matches.  Empty input is a
+silent no-op.  In `knot-list-mode' with marks, fans out across
+the marked set: one subprocess per id with the full `--remove-tag
+X --remove-tag Y' argv.  See `knot-update--commit-args' for
+fan-out semantics."
+  (interactive)
+  (let* ((ids (knot-update--ticket-ids))
+         (count (length ids))
+         (bulk (> count 1))
+         (choices (knot-update--tags-union-for-ids ids))
+         (prompt (if bulk
+                     (format "remove tags (%d marked, TAB completes, comma-separated): "
+                             count)
+                   "remove tags (TAB completes, comma-separated): "))
+         (picks (completing-read-multiple prompt choices nil nil))
+         (args (knot-update--expand-tag-args "--remove-tag" picks)))
+    (when args
+      (knot-update--commit-args ids args))))
+
 (defun knot-update-set-assignee ()
   "Set or clear assignee via `knot update --assignee'.
 Empty input clears the assignee.  In `knot-list-mode' with marks,
@@ -2469,7 +2581,6 @@ marked set is intentionally excluded."
    ("p" "priority" knot-update-set-priority)
    ("m" "mode"     knot-update-set-mode)
    ("t" "type"     knot-update-set-type)
-   ("T" "tags"     knot-update-set-tags)
    ("a" "assignee" knot-update-set-assignee)
    ("P" "parent"   knot-update-set-parent)]
   ["Long-form"
@@ -2923,6 +3034,17 @@ archived relationships display correctly."
    ("a" "add"    knot-links-add)
    ("r" "remove" knot-links-remove)])
 
+;;;###autoload
+(transient-define-prefix knot-tags-transient ()
+  "Manage tags for the contextual ticket(s).
+`a' and `r' are delta operations (`--add-tag' / `--remove-tag',
+both idempotent and repeatable); `T' replaces the full tag list
+via `--tags'.  All three honor `knot-list--marks' for fan-out."
+  ["Tags"
+   ("a" "add"     knot-update-add-tags)
+   ("r" "remove"  knot-update-remove-tags)
+   ("T" "replace" knot-update-set-tags)])
+
 (defun knot-show-add-rdep ()
   "Add a reverse dep — pick a ticket that should depend on the current one.
 
@@ -2943,12 +3065,14 @@ from anywhere a contextual id is available."
   "Off-section fallback for `+' in `knot-show-mode'.
 
 Invoked by `knot-show-add-at-point' when point is not in one of
-the recognized `knot-section' spans.  Reverse-dep is intentionally
-absent here — it is reachable only via `+' inside `## Blocking'."
+the recognized `knot-section' spans or on the `tags:' field.
+Reverse-dep is intentionally absent here — it is reachable only
+via `+' inside `## Blocking'."
   ["Add"
    ("a" "acceptance criterion" knot-show-add-ac)
    ("d" "dep"                  knot-deps-add)
-   ("l" "link"                 knot-links-add)])
+   ("l" "link"                 knot-links-add)
+   ("t" "tag"                  knot-update-add-tags)])
 
 
 ;;;; Deps tree buffer (knot-deps module — JSON tree view)
@@ -3249,7 +3373,8 @@ binding under the evil scheme.")
      ("u"       . knot-list-unmark)
      ("U"       . knot-list-unmark-all)
      ("D"       . knot-deps-transient)
-     ("L"       . knot-links-transient))
+     ("L"       . knot-links-transient)
+     ("T"       . knot-tags-transient))
     (knot-show-mode-map
      ("?"       . knot)
      ("gr"      . knot-refresh)
@@ -3265,6 +3390,7 @@ binding under the evil scheme.")
      ("K"       . knot-show-remove-at-point)
      ("D"       . knot-deps-transient)
      ("L"       . knot-links-transient)
+     ("T"       . knot-tags-transient)
      ("E"       . knot-show-edit-via-emacsclient))
     (knot-info-mode-map
      ("?"       . knot)
