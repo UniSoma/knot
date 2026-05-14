@@ -951,6 +951,53 @@
     (throw (ex-info (str "--limit must be a positive integer; got " n)
                     {:limit n}))))
 
+(def ^:private prime-default-limit 20)
+(def ^:private prime-recently-closed-limit 3)
+(def ^:private prime-stale-days 14)
+(def ^:private millis-per-day 86400000)
+
+(defn- parse-instant-ms
+  "Parse an ISO 8601 timestamp string to epoch millis. Returns nil for
+   nil/blank/unparseable input so the staleness check degrades silently
+   on malformed timestamps rather than crashing prime."
+  [iso]
+  (when (and (string? iso) (not (str/blank? iso)))
+    (try
+      (.toEpochMilli (Instant/parse iso))
+      (catch Exception _ nil))))
+
+(defn- stale-in-progress?
+  "True when an in-progress ticket's `:updated` is `prime-stale-days` or
+   more older than `now-iso`. Returns false on any nil/unparseable input
+   so unmigrated tickets degrade gracefully."
+  [ticket now-iso]
+  (let [updated (get-in ticket [:frontmatter :updated])
+        a (parse-instant-ms updated)
+        b (parse-instant-ms now-iso)]
+    (boolean
+     (when (and a b)
+       (>= (- b a) (* prime-stale-days millis-per-day))))))
+
+(defn- age-days-from-updated
+  "Compute integer-days delta between a ticket's `:updated` and `now-iso`.
+   Returns nil for nil/unparseable input so the renderer's `format-age-days`
+   falls back to `-`. Negative deltas (clock skew) clamp to 0 — a future
+   timestamp shouldn't render as a meaningful age."
+  [ticket now-iso]
+  (let [updated (get-in ticket [:frontmatter :updated])
+        a (parse-instant-ms updated)
+        b (parse-instant-ms now-iso)]
+    (when (and a b)
+      (max 0 (long (quot (- b a) millis-per-day))))))
+
+(defn- annotate-age-days
+  "Inject `:age-days` (computed against `now-iso`) onto every ticket in
+   `tickets`. The single shared age-days source for all listing pipelines
+   (list / ready / blocked / closed / prime). Tickets with nil/unparseable
+   `:updated` get nil, which `output/format-age-days` renders as `-`."
+  [tickets now-iso]
+  (mapv (fn [t] (assoc t :age-days (age-days-from-updated t now-iso))) tickets))
+
 (defn- ls-table-opts
   "Build the `output/ls-table` options map from CLI `opts` plus the
    resolved-ctx status fields (`:statuses`, `:terminal-statuses`,
@@ -974,7 +1021,7 @@
    filtering."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses]} resolved
+        {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         criteria (filter-criteria opts)
         base     (if (contains? criteria :status)
@@ -984,7 +1031,8 @@
         result   (apply-limit visible (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (ls-table-opts resolved opts)))))
+      (output/ls-table (annotate-age-days result now)
+                       (ls-table-opts resolved opts)))))
 
 (defn- tree-tickets
   "Walk a dep-tree node and return the unique full tickets it contains, in
@@ -1105,14 +1153,15 @@
    five afk-mode ready tickets, not five from the unfiltered set."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses]} resolved
+        {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         ready*   (query/ready all terminal-statuses)
         filtered (query/filter-tickets ready* (filter-criteria opts))
         result   (apply-limit filtered (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (ls-table-opts resolved opts)))))
+      (output/ls-table (annotate-age-days result now)
+                       (ls-table-opts resolved opts)))))
 
 (defn- closed?
   "True when the ticket's `:status` is in `terminal-statuses`."
@@ -1142,7 +1191,7 @@
    set of strings) compose via `query/filter-tickets`, applied before sort."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses]} resolved
+        {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         terminal (filter (partial closed? terminal-statuses) all)
         filtered (query/filter-tickets terminal (filter-criteria opts))
@@ -1150,7 +1199,8 @@
         result   (apply-limit sorted (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (ls-table-opts resolved opts)))))
+      (output/ls-table (annotate-age-days result now)
+                       (ls-table-opts resolved opts)))))
 
 (defn blocked-cmd
   "List non-terminal tickets that have at least one non-terminal `:deps`
@@ -1162,53 +1212,15 @@
    computing the blocked set. `:limit` truncates after filtering."
   [ctx opts]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses]} resolved
+        {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         blocked* (query/blocked all terminal-statuses)
         filtered (query/filter-tickets blocked* (filter-criteria opts))
         result   (apply-limit filtered (:limit opts))]
     (if (:json? opts)
       (output/ls-json result)
-      (output/ls-table result (ls-table-opts resolved opts)))))
-
-(def ^:private prime-default-limit 20)
-(def ^:private prime-recently-closed-limit 3)
-(def ^:private prime-stale-days 14)
-(def ^:private millis-per-day 86400000)
-
-(defn- parse-instant-ms
-  "Parse an ISO 8601 timestamp string to epoch millis. Returns nil for
-   nil/blank/unparseable input so the staleness check degrades silently
-   on malformed timestamps rather than crashing prime."
-  [iso]
-  (when (and (string? iso) (not (str/blank? iso)))
-    (try
-      (.toEpochMilli (Instant/parse iso))
-      (catch Exception _ nil))))
-
-(defn- stale-in-progress?
-  "True when an in-progress ticket's `:updated` is `prime-stale-days` or
-   more older than `now-iso`. Returns false on any nil/unparseable input
-   so unmigrated tickets degrade gracefully."
-  [ticket now-iso]
-  (let [updated (get-in ticket [:frontmatter :updated])
-        a (parse-instant-ms updated)
-        b (parse-instant-ms now-iso)]
-    (boolean
-     (when (and a b)
-       (>= (- b a) (* prime-stale-days millis-per-day))))))
-
-(defn- age-days-from-updated
-  "Compute integer-days delta between a ticket's `:updated` and `now-iso`.
-   Returns nil for nil/unparseable input so the renderer's `format-age-days`
-   falls back to `-`. Negative deltas (clock skew) clamp to 0 — a future
-   timestamp shouldn't render as a meaningful age."
-  [ticket now-iso]
-  (let [updated (get-in ticket [:frontmatter :updated])
-        a (parse-instant-ms updated)
-        b (parse-instant-ms now-iso)]
-    (when (and a b)
-      (max 0 (long (quot (- b a) millis-per-day))))))
+      (output/ls-table (annotate-age-days result now)
+                       (ls-table-opts resolved opts)))))
 
 (defn- recently-closed-tickets
   "Project the top-N most recently closed tickets into the compact shape
@@ -1233,12 +1245,13 @@
    most-recently-touched work surfaces first. Tickets without `:updated`
    sort last in stable input order. Each returned map carries
    `:prime-stale?` — true when `:updated` is `prime-stale-days` or more
-   older than `now-iso` — and `:prime-age-days` (or nil when `:updated`
-   is missing/unparseable). The renderer reads `:prime-age-days` for
-   the age column; `:prime-stale?` only drives the `\"stale\":true`
-   field in the JSON projection. The text/JSON asymmetry is
-   intentional: human readers get a relative-age signal, JSON
-   consumers keep the binary flag they already depend on.
+   older than `now-iso` — and `:age-days` (or nil when `:updated`
+   is missing/unparseable), shared with the four listing pipelines via
+   `annotate-age-days`. The renderer reads `:age-days` for the age
+   column; `:prime-stale?` only drives the `\"stale\":true` field in
+   the JSON projection. The text/JSON asymmetry is intentional: human
+   readers get a relative-age signal, JSON consumers keep the binary
+   flag they already depend on.
 
    Named `prime-`-prefixed because the result is decorated specifically
    for `prime`'s consumption — not a generic in-progress selector."
@@ -1247,10 +1260,8 @@
        (filter (fn [t] (= active-status (get-in t [:frontmatter :status]))))
        (sort-by (fn [t] (or (get-in t [:frontmatter :updated]) ""))
                 #(compare %2 %1))
-       (mapv (fn [t]
-               (assoc t
-                      :prime-stale? (stale-in-progress? t now-iso)
-                      :prime-age-days (age-days-from-updated t now-iso))))))
+       (mapv (fn [t] (assoc t :prime-stale? (stale-in-progress? t now-iso))))
+       (#(annotate-age-days % now-iso))))
 
 (defn- count-archive
   "Count tickets whose status is in `terminal-statuses`."

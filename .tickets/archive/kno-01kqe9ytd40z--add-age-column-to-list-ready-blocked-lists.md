@@ -1,12 +1,13 @@
 ---
 id: kno-01kqe9ytd40z
 title: Add age column to list/ready/blocked lists
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-04-30T04:22:08.036135912Z'
-updated: '2026-05-14T01:43:58.158312324Z'
+updated: '2026-05-14T02:28:38.788737542Z'
+closed: '2026-05-14T02:28:38.788737542Z'
 links:
 - kno-01kqgqa1jj1s
 - kno-01kqys929mdy
@@ -15,29 +16,29 @@ tags:
 parent: kno-01krhwcy0zdy
 acceptance:
 - title: list / ready / blocked / closed text output renders an AGE column immediately to the left of AC (or TITLE when no AC column is shown)
-  done: false
+  done: true
 - title: AGE renders Nd (<14d), Nw (14-42d), Nm (>42d), or '-' when :updated is missing/unparseable, using the existing format-age-days bucketing
-  done: false
+  done: true
 - title: AGE is computed from each ticket's :updated against now, matching prime's In Progress semantics
-  done: false
+  done: true
 - title: JSON payloads (--json) for list / ready / blocked / closed add no new fields and bump no schema_version; :updated remains the sole age-related field
-  done: false
+  done: true
 - title: The per-ticket day-count injection (:prime-age-days) is renamed to :age-days and fed by a single shared helper used by all five listing pipelines (prime included); existing prime tests updated accordingly
-  done: false
+  done: true
 - title: emacs/knot.el tabulated-list-format includes an 'Age' column between 'Assignee' and 'AC'
-  done: false
+  done: true
 - title: The Emacs Age cell is computed client-side from the JSON :updated field and renders identically to the CLI; missing/unparseable :updated renders '-'
-  done: false
+  done: true
 - title: The Emacs Age column sort key aliases to 'updated in knot-list--column->sort-key, so sorting by the column uses the underlying ISO timestamp rather than the rendered string
-  done: false
+  done: true
 - title: 'New tests cover: AGE column presence on each of the four listing commands; ''-'' fallback when :updated is missing; column position relative to AC and TITLE; the renamed :age-days key is read by every listing pipeline'
-  done: false
+  done: true
 - title: CHANGELOG.md [Unreleased]/Added entry describes the AGE column on list / ready / blocked / closed and the Emacs Age column
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md and emacs/README.md are synced if they document the column layout; otherwise left alone (per the AGENTS.md keep-skill-in-sync rule)
-  done: false
+  done: true
 - title: bb test passes; clj-kondo --lint src test preserves the existing baseline
-  done: false
+  done: true
 ---
 
 ## Description
@@ -91,3 +92,7 @@ Triaged to `ready-for-agent` (mode `afk`). Five design knobs were settled in a g
 5. **Stale text styling:** none in this slice — coloring deferred to kno-01kqdaxz86nv.
 
 Scope expanded mid-triage to include `emacs/knot.el` (Age column on the tabulated list buffer + sort-key alias to `'updated`). Full spec lives in the Description; 12 AC items in frontmatter.
+
+**2026-05-14T02:28:38.788737542Z**
+
+Shipped at src/knot/cli.clj, src/knot/output.clj, emacs/knot.el, .claude/skills/knot/SKILL.md, CHANGELOG.md (commit c1e6533). AGE column added to knot list / ready / blocked / closed and to emacs/knot.el's tabulated-list buffer, sourced from each ticket's :updated against ctx :now, bucketed via the existing format-age-days (Nd / Nw / Nm / -). The prime-only :prime-age-days injection was renamed to a neutral :age-days and is now fed by a single shared annotate-age-days helper called from all five listing pipelines (prime included); age helpers (parse-instant-ms / age-days-from-updated / stale-in-progress?) were hoisted above ls-cmd. JSON payloads unchanged — :age-days lives on the in-memory map and never crosses the output/jsonify-ticket projection boundary. Emacs port (knot-list--age-days / knot-list--format-age-days / knot-list--age-cell) renders identically to the CLI across edge cases (0d / 13d / 14d / 42d / 43d / nil / negative); column-header sort on Age aliases to 'updated in knot-list--column->sort-key to avoid the 1m < 1w < 2w lexical-ordering bug. 355 tests / 4450 assertions pass; clj-kondo baseline preserved (3 errors / 4 warnings, all pre-existing). All 12 ACs met; code-reviewer subagent verdict: ready to merge, no critical or important issues.

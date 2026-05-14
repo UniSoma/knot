@@ -62,6 +62,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'parse-time)
 (require 'tabulated-list)
 (require 'transient)
 (require 'button)
@@ -663,12 +664,15 @@ Each entry is (VIEW KEY . ASCENDING-P).  Used by
     ("Pri"    . priority)
     ("Mode"   . mode)
     ("Type"   . type)
+    ("Age"    . updated)
     ("Title"  . title))
   "Map from `tabulated-list-format' column name to a `knot-list--sort' key.
 Used to hydrate `knot-list--sort' after the built-in `S' binding mutates
 `tabulated-list-sort-key'.  \"Assignee\" and \"AC\" are sortable as
 columns but absent from the sort key set; `S' on those columns reorders
-the buffer without updating `knot-list--sort'.")
+the buffer without updating `knot-list--sort'.  \"Age\" aliases to
+`updated' so column-header sort uses the underlying ISO timestamp
+rather than the rendered string (which would order `1m < 1w < 2w`).")
 
 (defvar-local knot-list--rows nil
   "Cached raw rows from the most recent CLI fetch.
@@ -860,6 +864,7 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
          ("Mode"      5 t)
          ("Type"      9 t)
          ("Assignee" 10 t)
+         ("Age"       5 t)
          ("AC"        5 t)
          ("Title"     0 t)])
   (setq tabulated-list-padding 1)
@@ -1088,6 +1093,7 @@ is conceptually different across views."
          (mode      (alist-get 'mode row))
          (type      (alist-get 'type row))
          (assignee  (or (alist-get 'assignee row) ""))
+         (age-cell  (knot-list--age-cell row))
          (ac-cell   (knot-list--ac-cell row)))
     (list id
           (vector (knot-format-propertize id 'knot-id)
@@ -1096,6 +1102,7 @@ is conceptually different across views."
                   (knot-format-mode mode)
                   (knot-format-type type)
                   assignee
+                  age-cell
                   ac-cell
                   title))))
 
@@ -1108,6 +1115,33 @@ Empty acceptance lists render as \"-\"."
               (done  (cl-count-if (lambda (a) (alist-get 'done a)) ac)))
           (format "%d/%d" done total))
       "-")))
+
+(defun knot-list--age-days (updated-iso &optional now)
+  "Return integer days between UPDATED-ISO and NOW.
+NOW defaults to `current-time'.  Returns nil for nil/blank/unparseable
+UPDATED-ISO so the renderer's bucketing function falls back to \"-\".
+Negative deltas (clock skew) clamp to 0."
+  (when (and (stringp updated-iso) (not (string-empty-p updated-iso)))
+    (let* ((parsed (ignore-errors (parse-iso8601-time-string updated-iso))))
+      (when parsed
+        (max 0 (floor (/ (float-time (time-subtract (or now (current-time))
+                                                    parsed))
+                         86400)))))))
+
+(defun knot-list--format-age-days (days)
+  "Render DAYS as a bucketed age string matching the CLI's `format-age-days'.
+<14d → Nd, 14-42d → Nw (floor by 7), >42d → Nm (floor by 30).
+Nil DAYS renders as \"-\" so columns stay aligned."
+  (cond
+   ((null days) "-")
+   ((< days 14) (format "%dd" days))
+   ((<= days 42) (format "%dw" (/ days 7)))
+   (t (format "%dm" (/ days 30)))))
+
+(defun knot-list--age-cell (row)
+  "Return the Age column text for ROW, computed client-side from `updated'."
+  (knot-list--format-age-days
+   (knot-list--age-days (alist-get 'updated row))))
 
 
 ;;;; Filter transient (knot-list module)

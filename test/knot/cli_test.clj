@@ -4031,6 +4031,84 @@ Restart the daemon.
         (is (str/includes? out "kno-aaaa11111111"))
         (is (str/includes? out "kno-bbbb22222222"))))))
 
+(deftest ready-blocked-closed-cmd-age-column-test
+  (testing "ready-cmd renders an AGE column with bucketed values"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Solo ready"})
+      (let [advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
+            out      (cli/ready-cmd advanced {:tty? false :color? false})
+            row      (some (fn [l] (when (str/includes? l "Solo ready") l))
+                           (str/split-lines out))]
+        (is (some? row))
+        (is (re-find #"\b7d\b" row)
+            "AGE renders 7d for a ticket touched 7 days before :now"))))
+
+  (testing "blocked-cmd renders an AGE column with bucketed values"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Blocked task"})
+            b (cli/create-cmd (ctx tmp) {:title "Blocker"})
+            a-id (id-of-created a "blocked-task")
+            b-id (id-of-created b "blocker")
+            _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
+            advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
+            out  (cli/blocked-cmd advanced {:tty? false :color? false})
+            row  (some (fn [l] (when (str/includes? l "Blocked task") l))
+                       (str/split-lines out))]
+        (is (some? row))
+        (is (re-find #"\b7d\b" row)
+            "blocked-cmd AGE bucketing matches the listing contract"))))
+
+  (testing "closed-cmd renders an AGE column with bucketed values"
+    (with-tmp tmp
+      (let [a (cli/create-cmd (ctx tmp) {:title "Closed task"})
+            a-id (id-of-created a "closed-task")
+            _    (cli/close-cmd (ctx tmp) {:id a-id})
+            advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
+            out      (cli/closed-cmd advanced {:tty? false :color? false})
+            row      (some (fn [l] (when (str/includes? l "Closed task") l))
+                           (str/split-lines out))]
+        (is (some? row))
+        (is (re-find #"\b7d\b" row)
+            "closed-cmd AGE bucketing matches the listing contract")))))
+
+(deftest ls-cmd-age-column-test
+  (testing "ls-cmd renders an AGE column with bucketed values per ticket"
+    (with-tmp tmp
+      (cli/create-cmd (ctx tmp) {:title "Touched today"})
+      ;; ctx :now is 2026-04-28; advance ctx for ls to 2026-05-10 → 12 days
+      (let [advanced (assoc (ctx tmp) :now "2026-05-10T10:00:00Z")
+            out      (cli/ls-cmd advanced {:tty? false :color? false})
+            row      (some (fn [l] (when (str/includes? l "Touched today") l))
+                           (str/split-lines out))]
+        (is (some? row) "ticket row is present")
+        (is (re-find #"\b12d\b" row)
+            "AGE cell renders 12d for a ticket touched 12 days before :now"))))
+
+  (testing "ls-cmd AGE renders `-` when :updated is unparseable"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      ;; Hand-roll a ticket file with a corrupt :updated so the parser
+      ;; can't compute an age delta. Exercises the nil-fallback branch
+      ;; through the full CLI pipeline.
+      (let [content (str "---\n"
+                         "id: kno-noupdate0001\n"
+                         "title: No updated\n"
+                         "status: open\n"
+                         "type: task\n"
+                         "priority: 2\n"
+                         "mode: hitl\n"
+                         "created: '2026-04-28T10:00:00Z'\n"
+                         "updated: not-a-timestamp\n"
+                         "---\n\n")]
+        (spit (str (fs/path tmp ".tickets" "kno-noupdate0001--no-updated.md"))
+              content))
+      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})
+            row (some (fn [l] (when (str/includes? l "kno-noupdate0001") l))
+                      (str/split-lines out))]
+        (is (some? row))
+        (is (re-find #"\s-\s+No updated" row)
+            "unparseable :updated renders as `-` in the AGE cell")))))
+
 (deftest ls-cmd-limit-test
   (testing "ls-cmd with :limit caps the result count"
     (with-tmp tmp

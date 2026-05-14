@@ -468,6 +468,15 @@ tickets render their partial counts (`2/5`) — useful audit signal when
 scanning archive. `ls --json` is unchanged: raw `:acceptance` already
 passes through.
 
+Every listing table also carries an `AGE` column to the immediate
+left of `AC` (or `TITLE` when `AC` is absent), bucketed from each
+ticket's `:updated` against `now`: `Nd` (<14d), `Nw` (14–42d, floor
+by 7), `Nm` (>42d, floor by 30), or `-` when `:updated` is missing
+or unparseable. Same bucketing the `knot prime ## In Progress`
+column already uses. `--json` is unchanged — consumers compute age
+client-side from the existing `:updated` field; no new keys, no
+schema bump.
+
 ## Partial ID resolution
 
 Ids are 12-char ULID suffixes (`01` + 10 base32 chars) prefixed with the

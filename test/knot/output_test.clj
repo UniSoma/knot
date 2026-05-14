@@ -246,13 +246,13 @@
 (deftest ls-table-title-tty-truncated-test
   (testing "when tty? true with a constrained width, long titles are truncated"
     (let [out (output/ls-table sample-ls-tickets
-                               {:color? false :tty? true :width 60})
+                               {:color? false :tty? true :width 70})
           plain (strip-ansi out)
           long-title "Critical pager outage during peak hours please address"]
       (is (not (str/includes? plain long-title))
-          "with width=60 the long title should not appear in full")
+          "with width=70 the long title should not appear in full")
       (doseq [line (str/split-lines plain)]
-        (is (<= (count line) 60)
+        (is (<= (count line) 70)
             (str "row exceeds the requested width: " (pr-str line)))))))
 
 (deftest ls-table-pri-right-aligned-test
@@ -460,8 +460,8 @@
           line (some (fn [l] (when (str/includes? l "kno-01abcd0002") l))
                      (str/split-lines out))]
       (is (some? line))
-      (is (re-find #"bob\s+-\s+No acceptance" line)
-          "missing AC renders as `-` in the AC column"))))
+      (is (re-find #"bob\s+-\s+-\s+No acceptance" line)
+          "AGE cell renders `-`, then AC cell renders `-`, before TITLE"))))
 
 (deftest ls-table-ac-column-omitted-when-no-ticket-has-acceptance-test
   (testing "AC column header is absent when no input ticket has acceptance"
@@ -486,6 +486,58 @@
           out (output/ls-table tickets {:color? false :tty? false})]
       (is (re-find #"\b2/5\b" out)
           "force-closed ticket with 2 of 5 AC done renders 2/5"))))
+
+(deftest ls-table-age-column-header-test
+  (testing "AGE column header appears in ls-table output"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bAGE\b" first-line)
+          "AGE column header surfaces on every ls-table invocation"))))
+
+(deftest ls-table-age-column-position-no-ac-test
+  (testing "AGE sits between ASSIGNEE and TITLE when AC is absent"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          assignee-i (str/index-of first-line "ASSIGNEE")
+          age-i      (str/index-of first-line "AGE")
+          title-i    (str/index-of first-line "TITLE")]
+      (is (every? some? [assignee-i age-i title-i]))
+      (is (< assignee-i age-i title-i)
+          "AGE sits between ASSIGNEE and TITLE in the no-AC layout"))))
+
+(deftest ls-table-age-column-position-with-ac-test
+  (testing "AGE sits immediately to the left of AC when AC is present"
+    (let [out (output/ls-table sample-ls-tickets-with-ac {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          assignee-i (str/index-of first-line "ASSIGNEE")
+          age-i      (str/index-of first-line "AGE")
+          ac-i       (str/index-of first-line "AC")
+          title-i    (str/index-of first-line "TITLE")]
+      (is (every? some? [assignee-i age-i ac-i title-i]))
+      (is (< assignee-i age-i ac-i title-i)
+          "AGE precedes AC; AC precedes TITLE"))))
+
+(deftest ls-table-age-cell-renders-bucketed-string-test
+  (testing "AGE cell renders bucketed string from per-ticket :age-days"
+    (let [tickets [(assoc (first sample-ls-tickets) :age-days 3)
+                   (assoc (second sample-ls-tickets) :age-days 21)]
+          out   (output/ls-table tickets {:color? false :tty? false})
+          lines (str/split-lines out)
+          row1  (some #(when (str/includes? % "kno-01abcd0001") %) lines)
+          row2  (some #(when (str/includes? % "kno-01abcd0002") %) lines)]
+      (is (re-find #"\b3d\b" row1)
+          "3 days renders as 3d (Nd bucket)")
+      (is (re-find #"\b3w\b" row2)
+          "21 days renders as 3w (Nw bucket)"))))
+
+(deftest ls-table-age-cell-dash-when-missing-test
+  (testing "AGE cell renders `-` when :age-days is absent from the ticket map"
+    (let [out  (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          row  (some #(when (str/includes? % "kno-01abcd0001") %)
+                     (str/split-lines out))]
+      (is (some? row))
+      (is (re-find #"alice\s+-\s+Fix login bug" row)
+          "missing :age-days renders as `-` in the AGE slot before TITLE"))))
 
 (deftest show-json-test
   (testing "renders a v0.3 success envelope wrapping the ticket"
@@ -1180,7 +1232,7 @@
                                   :mode "afk" :priority 1 :type "feature"
                                   :title "Six-col row"
                                   :updated "2026-04-28T10:00:00Z"})
-                (assoc :prime-age-days 8))
+                (assoc :age-days 8))
           data (assoc sample-prime-data :in-progress [t])
           out  (output/prime-text data)
           ip-start (str/index-of out "## In Progress")
@@ -1192,7 +1244,7 @@
       (is (re-find #"^kno-ip-fmt\s+feature\s+afk\s+1\s+8d\s+Six-col row" line)
           "row matches the canonical 6-col order: id type mode pri age title")))
 
-  (testing "missing :prime-age-days renders `-` in the age column"
+  (testing "missing :age-days renders `-` in the age column"
     (let [t (mk-prime-ticket {:id "kno-no-age" :status "in_progress"
                               :mode "afk" :priority 0 :type "task"
                               :title "Has no updated"})
@@ -1213,7 +1265,7 @@
                                               :title "Stalled work"
                                               :updated "2026-04-01T10:00:00Z"})
                             (assoc :prime-stale? true)
-                            (assoc :prime-age-days 35))
+                            (assoc :age-days 35))
           data (assoc sample-prime-data :in-progress [stale-ticket])
           out  (output/prime-text data)]
       (is (not (str/includes? out "[stale]"))
@@ -1227,7 +1279,7 @@
                                   :mode "afk" :priority 1 :type "feature"
                                   :title "Has AC"
                                   :updated "2026-04-28T10:00:00Z"})
-                (assoc :prime-age-days 3)
+                (assoc :age-days 3)
                 (assoc-in [:frontmatter :acceptance]
                           [{:title "x" :done true}
                            {:title "y" :done false}]))
@@ -1244,7 +1296,7 @@
                                   :mode "afk" :priority 1 :type "task"
                                   :title "No AC"
                                   :updated "2026-04-28T10:00:00Z"})
-                (assoc :prime-age-days 1))
+                (assoc :age-days 1))
           data (assoc sample-prime-data :in-progress [t])
           out  (output/prime-text data)
           line (some (fn [l] (when (str/includes? l "kno-no-ac") l))
@@ -1260,14 +1312,14 @@
                                         :mode "afk" :priority 0 :type "task"
                                         :title "With AC"
                                         :updated "2026-04-28T10:00:00Z"})
-                      (assoc :prime-age-days 0)
+                      (assoc :age-days 0)
                       (assoc-in [:frontmatter :acceptance]
                                 [{:title "x" :done true}]))
           t-noac  (-> (mk-prime-ticket {:id "kno-bare" :status "in_progress"
                                         :mode "afk" :priority 1 :type "task"
                                         :title "Bare"
                                         :updated "2026-04-28T09:00:00Z"})
-                      (assoc :prime-age-days 0))
+                      (assoc :age-days 0))
           data (assoc sample-prime-data :in-progress [t-ac t-noac])
           out  (output/prime-text data)
           bare-line (some (fn [l] (when (str/includes? l "kno-bare") l))
@@ -1281,7 +1333,7 @@
                                  :mode "afk" :priority 1 :type "task"
                                  :title "Done with all AC"
                                  :updated "2026-04-30T10:00:00Z"})
-               (assoc :prime-age-days 1)
+               (assoc :age-days 1)
                (assoc-in [:frontmatter :acceptance]
                          [{:title "x" :done true}
                           {:title "y" :done true}]))
@@ -1289,7 +1341,7 @@
                                  :mode "hitl" :priority 2 :type "feature"
                                  :title "Also done"
                                  :updated "2026-04-29T10:00:00Z"})
-               (assoc :prime-age-days 2)
+               (assoc :age-days 2)
                (assoc-in [:frontmatter :acceptance]
                          [{:title "a" :done true}]))]
     (testing "## Ready to close heading appears between ## In Progress and ## Ready"

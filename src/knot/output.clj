@@ -281,13 +281,15 @@
    {:key :mode      :header "MODE"     :align :left}
    {:key :type      :header "TYPE"     :align :left}
    {:key :assignee  :header "ASSIGNEE" :align :left}
+   {:key :age       :header "AGE"      :align :left}
    {:key :title     :header "TITLE"    :align :left}])
 
 (def ^:private ls-ac-column
   {:key :acceptance :header "AC" :align :left})
 
 (defn- ls-columns-for
-  "Return the column list for `tickets`. Splices the AC column in
+  "Return the column list for `tickets`. AGE is always present (immediately
+   before TITLE, or before AC when AC is shown). Splices the AC column in
    immediately before TITLE when at least one ticket carries
    `(seq :acceptance)`; otherwise omits the column entirely so the
    header and slot disappear from quiet projects."
@@ -301,6 +303,8 @@
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
 
+(declare format-age-days)
+
 (defn- value-of
   "Plain string for a single ls cell — no padding, no color."
   [ticket k]
@@ -311,6 +315,7 @@
                     (let [[d t] (acceptance/progress ac)]
                       (str d "/" t))
                     "-"))
+    :age (format-age-days (:age-days ticket))
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))
 
@@ -654,20 +659,21 @@ before issuing other Knot commands.")
    cols), or with an AC slot before the title (`id  type  mode  pri  age
    ac  title`, 7 cols) when `ac-column?` is true. Missing fields render
    as `-` so columns stay aligned. The age column comes from
-   `:prime-age-days` (set by the cli pipeline from `:updated` and
-   `now-iso`); see `format-age-days` for the bucketing rules. The
-   `:prime-stale?` flag remains on the ticket map for the JSON projection
-   but no longer affects the text output — the age column carries the
-   staleness signal in human-readable form. The renderer is
-   whitespace-only — no ANSI codes — because prime output is consumed by
-   AI agents and downstream tools."
+   `:age-days` (set by the cli pipeline from `:updated` and `now-iso`,
+   via the helper shared with list / ready / blocked / closed); see
+   `format-age-days` for the bucketing rules. The `:prime-stale?` flag
+   remains on the ticket map for the JSON projection but no longer
+   affects the text output — the age column carries the staleness
+   signal in human-readable form. The renderer is whitespace-only — no
+   ANSI codes — because prime output is consumed by AI agents and
+   downstream tools."
   [ticket ac-column?]
   (let [fm    (:frontmatter ticket)
         id    (or (:id fm) "")
         type- (or (:type fm) "-")
         mode  (or (:mode fm) "-")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
-        age   (format-age-days (:prime-age-days ticket))
+        age   (format-age-days (:age-days ticket))
         title (ticket-title ticket)
         ac    (when ac-column? (str (ac-cell ticket) "  "))]
     (str id "  " type- "  " mode "  " pri "  " age "  " (or ac "") title)))

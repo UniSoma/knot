@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`AGE` column on `knot list / ready / blocked / closed`.** Every
+  listing table now carries an `AGE` cell immediately to the left of
+  `AC` (or `TITLE` when no `AC` column is shown), computed from each
+  ticket's `:updated` against `now` with the same bucketing prime's
+  In Progress section already uses (`Nd` < 14d, `Nw` 14–42d, `Nm`
+  > 42d, `-` when missing/unparseable). The per-ticket day-count
+  injection (formerly `:prime-age-days`) is now `:age-days`, fed by
+  a single shared helper across all five listing pipelines. JSON
+  payloads are unchanged — `:updated` remains the sole age-related
+  field; no new keys, no `schema_version` bump.
+- **`Age` column in `emacs/knot.el` list buffer.** Splices between
+  `Assignee` and `AC`; the bucketed string is computed client-side
+  from the JSON `:updated` field so the rendering matches the CLI
+  exactly. Column-header sort (`S`) on `Age` aliases to the
+  `updated` sort key so the buffer sorts by the underlying ISO
+  timestamp rather than the rendered string.
 - **`--priority N` filter on listing commands.** `knot list`, `ready`,
   `blocked`, `closed`, and `prime` now accept `--priority` (repeatable,
   integer 0..4) so callers can scope results by priority — e.g.
