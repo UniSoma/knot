@@ -37,7 +37,7 @@ earlier session. With no id at point the command signals
 Suggested global bind:
 
 ```elisp
-(global-set-key (kbd "C-c k v") #'knot-find-id-at-point)
+(keymap-global-set "C-c k v" #'knot-find-id-at-point)
 ```
 
 ## Evil / Doom users
