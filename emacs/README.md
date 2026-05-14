@@ -40,6 +40,19 @@ Suggested global bind:
 (keymap-global-set "C-c k v" #'knot-find-id-at-point)
 ```
 
+## Smooth scrolling
+
+`knot-list-mode` and `knot-deps-mode` enable `pixel-scroll-precision-mode`
+on entry so trackpad scrolling feels native. The mode is a global minor
+mode and is CPU-intensive on some setups; opt out by setting
+`knot-pixel-scroll` to `nil` before either buffer is created. Setting
+the variable to `nil` after the mode is already active does not disable
+it — knot only declines to turn it on.
+
+```elisp
+(setq knot-pixel-scroll nil)
+```
+
 ## Evil / Doom users
 
 `knot-evil-mode` is an opt-in global minor mode that rewires knot.el's

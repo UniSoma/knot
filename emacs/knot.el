@@ -108,6 +108,19 @@ Slice 8 will warn when the running CLI is older than this value."
   :type 'string
   :group 'knot)
 
+(defcustom knot-pixel-scroll t
+  "When non-nil, enable `pixel-scroll-precision-mode' in knot buffers.
+On entering `knot-list-mode' or `knot-deps-mode' the mode is turned
+on so trackpad scrolling feels native.  Set to nil to leave the
+standard line-by-line scrolling in place.
+
+`pixel-scroll-precision-mode' is a global minor mode and is
+CPU-intensive on some setups; this defcustom is the documented
+opt-out.  When already enabled elsewhere in the session, setting
+this to nil does not disable it — knot simply does not turn it on."
+  :type 'boolean
+  :group 'knot)
+
 
 ;;;; Faces (knot-format module)
 
@@ -934,7 +947,9 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
   ;; Free the header-line for view / filter status; column headers
   ;; render as the first row of the buffer body instead.
   (setq-local tabulated-list-use-header-line nil)
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (when knot-pixel-scroll
+    (pixel-scroll-precision-mode 1)))
 
 (defun knot-list--buffer-name (project)
   "Return the canonical list buffer name for PROJECT."
@@ -3199,7 +3214,9 @@ subtrees).
 
 \\{knot-deps-mode-map}"
   (setq truncate-lines nil)
-  (setq buffer-read-only t))
+  (setq buffer-read-only t)
+  (when knot-pixel-scroll
+    (pixel-scroll-precision-mode 1)))
 
 (defun knot-deps--buffer-name (project id)
   "Return the canonical deps buffer name for PROJECT and ID."
