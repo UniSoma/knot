@@ -984,30 +984,21 @@ preceding `S' keypress is preserved across the refetch."
 
 (defun knot-list--rerender ()
   "Redisplay from `knot-list--rows' with the active sort applied.
-Preserves point on the previous row id when possible.  Does not
-hydrate from `tabulated-list-sort-key'; sort transient suffixes set
-`knot-list--sort' directly and want their pick to win, and the
-refresh path (`knot-list--render') hydrates beforehand for the `S'
-case."
+Point restoration is delegated to `tabulated-list-print' with
+REMEMBER-POS=t, which anchors on the row id and preserves column.
+Does not hydrate from `tabulated-list-sort-key'; sort transient
+suffixes set `knot-list--sort' directly and want their pick to win,
+and the refresh path (`knot-list--render') hydrates beforehand for
+the `S' case."
   (unless (derived-mode-p 'knot-list-mode)
     (user-error "knot-list--rerender: not in a knot-list-mode buffer"))
-  (let* ((prev-id (tabulated-list-get-id))
-         (sorted (knot-list--apply-sort knot-list--rows))
+  (let* ((sorted (knot-list--apply-sort knot-list--rows))
          (eff (knot-list--effective-sort)))
     (setq tabulated-list-entries (mapcar #'knot-list--row sorted))
     (setq tabulated-list-sort-key (knot-list--sort->table-key eff))
     (setq knot-list--last-table-sort-key tabulated-list-sort-key)
     (tabulated-list-print t)
-    (knot-list--repaint-marks)
-    (when prev-id
-      (goto-char (point-min))
-      (let ((found nil))
-        (while (and (not found) (not (eobp)))
-          (if (equal (tabulated-list-get-id) prev-id)
-              (setq found t)
-            (forward-line 1)))
-        (unless found
-          (goto-char (point-min)))))))
+    (knot-list--repaint-marks)))
 
 (defun knot-list--clear-mark-overlays ()
   "Delete every overlay in `knot-list--mark-overlays' and reset the list."
@@ -1729,6 +1720,9 @@ buffer so lateral stepping does not grow the back chain."
         (back       knot-show--back-buffer)
         (next-id nil))
     (with-current-buffer origin-buf
+      ;; Linear scan: we anchor on origin-id and then step forward-line
+      ;; DIRECTION to reach the neighbour row.  Not a pure goto-id; we
+      ;; need the anchor's position to step from.
       (save-excursion
         (goto-char (point-min))
         (let ((found nil))
@@ -2236,6 +2230,8 @@ Errors when called from any other mode."
 Walks the rendered buffer top-down and collects every id that
 appears in `knot-list--marks', dropping stranded ids not present
 in the rendered set."
+  ;; Full-buffer walk: this collects *every* matching id in display
+  ;; order, not a single target.  Not a goto-id pattern.
   (let (ordered)
     (save-excursion
       (goto-char (point-min))
