@@ -53,6 +53,14 @@ it — knot only declines to turn it on.
 (setq knot-pixel-scroll nil)
 ```
 
+## Transient discoverability
+
+On Emacs 30.1, enable `(which-key-mode 1)` for free transient
+discoverability — partial keypresses pop a key-completion buffer that
+renders the existing transient group labels, so the dispatch / update
+/ deps / links / tags transients are self-explanatory without
+memorising bindings.
+
 ## Evil / Doom users
 
 `knot-evil-mode` is an opt-in global minor mode that rewires knot.el's

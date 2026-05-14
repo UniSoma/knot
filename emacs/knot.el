@@ -948,6 +948,7 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
   ;; render as the first row of the buffer body instead.
   (setq-local tabulated-list-use-header-line nil)
   (tabulated-list-init-header)
+  (add-hook 'tabulated-list-revert-hook #'knot-list--render nil t)
   (when knot-pixel-scroll
     (pixel-scroll-precision-mode 1)))
 
@@ -1549,7 +1550,7 @@ propagate the existing back-buffer without growing the chain."
   (let ((back knot-show--back-buffer)
         (this (current-buffer)))
     (if (and back (buffer-live-p back))
-        (progn (switch-to-buffer back)
+        (progn (pop-to-buffer-same-window back)
                (kill-buffer this))
       (quit-window t))))
 
@@ -1665,20 +1666,20 @@ those properties is at point."
      ((eq field 'tags)
       (call-interactively #'knot-update-remove-tags))
      (dep-id
-      (when (yes-or-no-p (format "Remove dep %s from %s? " dep-id id))
+      (when (y-or-n-p (format "Remove dep %s from %s? " dep-id id))
         (knot-cli-call (list "undep" id dep-id))
         (knot--after-mutation)))
      (rdep-id
-      (when (yes-or-no-p
+      (when (y-or-n-p
              (format "Remove dep %s from %s? " id rdep-id))
         (knot-cli-call (list "undep" rdep-id id))
         (knot--after-mutation)))
      (link-id
-      (when (yes-or-no-p (format "Remove link %s ↔ %s? " id link-id))
+      (when (y-or-n-p (format "Remove link %s ↔ %s? " id link-id))
         (knot-cli-call (list "unlink" id link-id))
         (knot--after-mutation)))
      (ac
-      (when (yes-or-no-p (format "Remove acceptance criterion %S? " ac))
+      (when (y-or-n-p (format "Remove acceptance criterion %S? " ac))
         (knot-cli-call (list "update" id "--remove-ac" ac))
         (knot--after-mutation)))
      (t
@@ -3350,7 +3351,7 @@ back to `quit-window' otherwise."
   (interactive)
   (let ((back knot-deps--back-buffer))
     (if (and back (buffer-live-p back))
-        (switch-to-buffer back)
+        (pop-to-buffer-same-window back)
       (quit-window))))
 
 
