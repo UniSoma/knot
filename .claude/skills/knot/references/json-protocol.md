@@ -439,7 +439,7 @@ $ knot close kno-01abc --json    # in_progress, two unchecked AC; exits 1
   "ok": false,
   "error": {
     "code": "acceptance_incomplete",
-    "message": "0 of 2 acceptance criteria are unchecked; use --check to mark them done, or --force --summary \"<reason>\" to override.",
+    "message": "2 of 2 acceptance criteria are unchecked",
     "open_acceptance": [
       { "title": "first AC" },
       { "title": "second AC" }

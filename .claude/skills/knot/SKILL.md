@@ -220,10 +220,10 @@ frontmatter `:acceptance` entry has `done: false`, the transition is
 blocked. Plain text:
 
 ```
-knot close: 0 of 2 acceptance criteria are unchecked:
+knot close: 2 of 2 acceptance criteria are unchecked
   - first AC
   - second AC
-use --check to mark them done, or --force --summary "<reason>" to override.
+use 'knot update <id> --ac "<title>" --done' for each one, or --force --summary "<reason>" to override.
 ```
 
 JSON: `error.code = "acceptance_incomplete"`, `error.open_acceptance =

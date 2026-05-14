@@ -306,9 +306,7 @@
       (let [open  (acceptance/open-titles acceptance)
             [d t] (acceptance/progress acceptance)]
         (throw (ex-info
-                (str d " of " t " acceptance criteria are unchecked; "
-                     "use --check to mark them done, or "
-                     "--force --summary \"<reason>\" to override.")
+                (str (count open) " of " t " acceptance criteria are unchecked")
                 {:acceptance-incomplete true
                  :open-titles           open
                  :progress              [d t]})))
@@ -856,7 +854,7 @@
    of one frontmatter `acceptance` entry; the title must match exactly.
    `(:status opts)` transitions the ticket's status in the same call;
    the v0.3 acceptance gate fires *after* AC mutations so
-   `--check \"last\" --status closed` works in one shot.
+   `--ac \"last\" --done --status closed` works in one shot.
    Optional frontmatter fields (`:assignee`, `:parent`, `:tags`,
    `:external_refs`) are cleared when the supplied value is blank or
    empty. Returns the saved path, or nil when no ticket matches; throws

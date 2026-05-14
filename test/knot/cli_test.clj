@@ -1360,7 +1360,7 @@
         (is (= "in_progress"
                (get-in (store/load-one tmp ".tickets" id) [:frontmatter :status]))))))
 
-  (testing "update --check + --status closed in one call: AC mutation applies before gate"
+  (testing "update --ac --done + --status closed in one call: AC mutation applies before gate"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp)
                                     {:title "T"

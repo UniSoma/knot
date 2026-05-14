@@ -372,7 +372,8 @@
       (println (str "knot " cmd-name ": " msg))
       (doseq [t open-titles]
         (println (str "  - " t)))
-      (println "use --check to mark them done, or --force --summary \"<reason>\" to override.")
+      (println (str "use 'knot update <id> --ac \"<title>\" --done' for each one, "
+                    "or --force --summary \"<reason>\" to override."))
       (System/exit 1))))
 
 (defn- transition-handler
