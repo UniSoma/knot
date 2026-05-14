@@ -829,7 +829,12 @@ sort-key symbol, so `knot-list--sort' is left untouched."
   "Render the header-line string for VIEW with active FILTERS.
 When SORT is non-nil, render its key + direction between the view tag
 and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\").
-Appends a `[N marked]' chunk when `knot-list--marks' is non-empty."
+When `knot-list--marks' is non-empty, appends a right-aligned
+`[N marked]' chunk via an inline `:align-to' display spec, so the
+operational mark state sits visually apart from the filter context.
+Note: `mode-line-format-right-align' cannot be used here — its
+underlying helper hardcodes a lookup in `mode-line-format' and so
+miscomputes the right edge when invoked from `header-line-format'."
   (let* ((view-tag (propertize (format "[%s]" view)
                                'face 'mode-line-emphasis))
          (sort-tag (when sort
@@ -847,18 +852,22 @@ Appends a `[N marked]' chunk when `knot-list--marks' is non-empty."
                                        2)
                                       (cdr entry)))
                             effective))
+         (filter-part (if flag-strs
+                          (string-join flag-strs " ")
+                        (propertize "(no filters)" 'face 'shadow)))
+         (left (string-join (delq nil (list view-tag sort-tag filter-part))
+                            " "))
          (marks-tag (when knot-list--marks
                       (propertize (format "[%d marked]"
                                           (length knot-list--marks))
-                                  'face 'mode-line-emphasis)))
-         (parts (delq nil
-                      (list view-tag
-                            sort-tag
-                            (if flag-strs
-                                (string-join flag-strs " ")
-                              (propertize "(no filters)" 'face 'shadow))
-                            marks-tag))))
-    (string-join parts " ")))
+                                  'face 'mode-line-emphasis))))
+    (if marks-tag
+        (concat left
+                (propertize " " 'display
+                            `(space :align-to
+                                    (- right ,(string-width marks-tag))))
+                marks-tag)
+      left)))
 
 (defvar knot-list-mode-map
   (let ((map (make-sparse-keymap)))
