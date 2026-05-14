@@ -3,10 +3,10 @@ id: kno-01kqzh3jgwf0
 title: 'Release-tag smoke CI workflow: bbin install + golden-path check on tag push'
 status: open
 type: feature
-priority: 3
+priority: 4
 mode: hitl
 created: '2026-05-06T20:54:09.174084540Z'
-updated: '2026-05-14T01:07:28.670276584Z'
+updated: '2026-05-14T02:40:41.638929973Z'
 tags:
 - ci
 - release

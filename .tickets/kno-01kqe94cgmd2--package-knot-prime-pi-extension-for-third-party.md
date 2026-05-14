@@ -3,10 +3,10 @@ id: kno-01kqe94cgmd2
 title: Package knot-prime Pi extension for third-party installation
 status: open
 type: task
-priority: 3
+priority: 4
 mode: hitl
 created: '2026-04-30T04:07:41.844334511Z'
-updated: '2026-05-14T00:05:11.953026699Z'
+updated: '2026-05-14T02:40:41.522667176Z'
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqgq9vhmvr

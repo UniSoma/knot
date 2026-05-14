@@ -3,10 +3,10 @@ id: kno-01krj03bhrxf
 title: Open-children gate at close transitions
 status: open
 type: task
-priority: 2
+priority: 1
 mode: afk
 created: '2026-05-14T01:02:30.455916209Z'
-updated: '2026-05-14T01:07:28.324024403Z'
+updated: '2026-05-14T02:41:13.411794664Z'
 parent: kno-01krhwcy0zdy
 tags:
 - v0.5

@@ -3,10 +3,10 @@ id: kno-01kqdaxz86nv
 title: Richer per-value colors for ls/ready/closed/blocked tables (type, priority, mode)
 status: open
 type: feature
-priority: 3
+priority: 4
 mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
-updated: '2026-05-14T00:05:25.725717187Z'
+updated: '2026-05-14T02:40:41.415079243Z'
 links:
 - kno-01kqgqapwqvh
 - kno-01kqg37mssy3
