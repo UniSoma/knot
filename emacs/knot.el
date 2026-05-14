@@ -301,6 +301,55 @@ subprocess emits no parseable output, or when JSON parsing fails."
         (user-error "knot: %s" message)))))
 
 
+;;;; Completing-read annotations (shared ticket-picker affixation)
+
+(defun knot--ticket-annotation-table (rows)
+  "Build a hash table mapping each row's `id' to the row alist.
+ROWS is the list returned by `knot-cli-call' for a `list' / `show'
+invocation.  Callers build this once per picker invocation so the
+affixation lookup is O(1) per candidate."
+  (let ((m (make-hash-table :test 'equal)))
+    (dolist (r rows)
+      (let ((id (alist-get 'id r)))
+        (when id (puthash id r m))))
+    m))
+
+(defun knot--annotate-ticket-candidate (candidate table)
+  "Return a (CANDIDATE PREFIX SUFFIX) triple for CANDIDATE.
+TABLE is a hash table from id strings to row alists, as built by
+`knot--ticket-annotation-table'.  PREFIX is the status glyph from
+`knot-deps--status-glyph' followed by a space; SUFFIX is a right-
+margin `p<priority> <type>' chunk in `completions-annotations'
+face.  Candidates whose id is not in TABLE get a blank
+(width-matching) prefix and an empty suffix so column alignment
+survives missing rows."
+  (let* ((id (and (string-match "\\`\\(\\S-+\\)" candidate)
+                  (match-string 1 candidate)))
+         (row (and id (gethash id table))))
+    (if row
+        (let* ((status (alist-get 'status row))
+               (priority (alist-get 'priority row))
+               (type (alist-get 'type row))
+               (glyph (knot-deps--status-glyph status))
+               (suffix (propertize
+                        (format "  p%s %s"
+                                (if (numberp priority)
+                                    (number-to-string priority)
+                                  (or priority "-"))
+                                (or type "-"))
+                        'face 'completions-annotations)))
+          (list candidate (concat glyph " ") suffix))
+      (list candidate "  " ""))))
+
+(defun knot--ticket-affixation-function (table)
+  "Return an `:affixation-function' closing over TABLE.
+The returned function maps each candidate through
+`knot--annotate-ticket-candidate' against TABLE."
+  (lambda (cands)
+    (mapcar (lambda (c) (knot--annotate-ticket-candidate c table))
+            cands)))
+
+
 ;;;; Project oracle (knot-info module)
 
 (defvar knot-info--cache (make-hash-table :test 'equal)
@@ -2347,6 +2396,10 @@ the pre-fill is suppressed."
                    "parent (live + closed, empty to clear): ")
                   (t
                    "parent (live, C-u to include closed, empty to clear): ")))
+         (completion-extra-properties
+          (list :affixation-function
+                (knot--ticket-affixation-function
+                 (knot--ticket-annotation-table rows))))
          (pick (completing-read prompt choices nil nil initial)))
     (cond
      ((or (null pick) (string-empty-p pick)) "")
@@ -2661,13 +2714,18 @@ Initial-input is ignored — re-press the infix to redo the picks
 (transient stores only the comma-list of ids, which is not a valid
 prefill for a `id  title'-candidate completion)."
   (lambda (prompt _initial-input _history)
-    (let ((choices (knot-deps--live-choices)))
+    (let* ((rows (knot-deps--live-rows))
+           (choices (knot-deps--rows->choices rows)))
       (when (null choices)
         (user-error "knot-create: no live tickets to choose from"))
-      (let ((picks (completing-read-multiple
-                    (or prompt
-                        (format "%s (TAB completes, comma-separated): " label))
-                    choices nil t)))
+      (let* ((completion-extra-properties
+              (list :affixation-function
+                    (knot--ticket-affixation-function
+                     (knot--ticket-annotation-table rows))))
+             (picks (completing-read-multiple
+                     (or prompt
+                         (format "%s (TAB completes, comma-separated): " label))
+                     choices nil t)))
         (mapconcat #'knot-deps--extract-id picks ",")))))
 
 (defun knot-create--read-acceptance (prompt _initial-input _history)
@@ -2915,44 +2973,56 @@ clarity at the deps / links transient suffixes."
    ((string-match "\\`\\(\\S-+\\)" pick) (match-string 1 pick))
    (t pick)))
 
-(defun knot-deps--live-choices (&optional exclude-id)
-  "Return a list of `id  title' completion candidates for live tickets.
+(defun knot-deps--live-rows (&optional exclude-id)
+  "Return the live-ticket rows from `knot list --json'.
 EXCLUDE-ID, when non-nil, is filtered out so a ticket cannot
-self-reference."
-  (let* ((rows (knot-cli-call '("list")))
-         (rows (if exclude-id
-                   (cl-remove-if (lambda (r)
-                                   (equal exclude-id (alist-get 'id r)))
-                                 rows)
-                 rows)))
-    (mapcar (lambda (r)
-              (knot-deps--format-row
-               (alist-get 'id r)
-               (alist-get 'title r)))
-            rows)))
+self-reference.  Rows carry status / priority / type so callers
+that wrap `completing-read' with `:affixation-function' can build
+the annotation hash table directly from the same fetch."
+  (let ((rows (knot-cli-call '("list"))))
+    (if exclude-id
+        (cl-remove-if (lambda (r) (equal exclude-id (alist-get 'id r)))
+                      rows)
+      rows)))
+
+(defun knot-deps--rows->choices (rows)
+  "Format ROWS as `id  title' `completing-read' candidates."
+  (mapcar (lambda (r)
+            (knot-deps--format-row
+             (alist-get 'id r)
+             (alist-get 'title r)))
+          rows))
 
 (defun knot-deps--read-live (prompt exclude-id)
   "Prompt for a live ticket via `completing-read', defaulting to nil.
 
 Candidates are formatted `id  title' from `knot list --json' (live
 tickets only).  EXCLUDE-ID, when non-nil, is filtered out so a
-ticket cannot depend on / link itself."
-  (let ((choices (knot-deps--live-choices exclude-id)))
+ticket cannot depend on / link itself.  The minibuffer annotates
+each candidate with the status glyph (prefix) and priority/type
+(right-margin suffix) via `:affixation-function'."
+  (let* ((rows (knot-deps--live-rows exclude-id))
+         (choices (knot-deps--rows->choices rows)))
     (unless choices
       (user-error "knot-deps: no live tickets to choose from"))
-    (knot-deps--extract-id
-     (completing-read prompt choices nil t))))
+    (let ((completion-extra-properties
+           (list :affixation-function
+                 (knot--ticket-affixation-function
+                  (knot--ticket-annotation-table rows)))))
+      (knot-deps--extract-id
+       (completing-read prompt choices nil t)))))
 
-(defun knot-deps--id->title-map ()
-  "Return a hash mapping every live and closed ticket id to its title.
+(defun knot-deps--id->row-map ()
+  "Return a hash mapping every live and closed ticket id to its row alist.
 
-Used so undep / unlink candidate lists can show titles even for
-relationships that point to archived tickets."
+Used so undep / unlink candidate lists can show titles — and
+annotate with status / priority / type — even for relationships
+that point to archived tickets."
   (let ((m (make-hash-table :test 'equal)))
     (dolist (r (knot-cli-call '("list")))
-      (puthash (alist-get 'id r) (alist-get 'title r) m))
+      (puthash (alist-get 'id r) r m))
     (dolist (r (knot-cli-call '("list" "--status" "closed")))
-      (puthash (alist-get 'id r) (alist-get 'title r) m))
+      (puthash (alist-get 'id r) r m))
     m))
 
 (defun knot-deps--read-current (prompt ids)
@@ -2961,14 +3031,19 @@ relationships that point to archived tickets."
 IDS is a list of ticket id strings — typically the contextual
 ticket's `deps' or `links'.  Each candidate is rendered as `id
 title' with the title looked up across live + closed tickets so
-archived relationships display correctly."
+archived relationships display correctly.  `:affixation-function'
+adds the status glyph (prefix) and priority/type (suffix) using
+the same row map."
   (unless (and ids (listp ids) (not (null ids)))
     (user-error "knot-deps: no relationships to remove"))
-  (let* ((titles (knot-deps--id->title-map))
+  (let* ((rows-by-id (knot-deps--id->row-map))
          (choices (mapcar (lambda (id)
                             (knot-deps--format-row
-                             id (gethash id titles)))
-                          ids)))
+                             id (alist-get 'title (gethash id rows-by-id))))
+                          ids))
+         (completion-extra-properties
+          (list :affixation-function
+                (knot--ticket-affixation-function rows-by-id))))
     (knot-deps--extract-id
      (completing-read prompt choices nil t))))
 
