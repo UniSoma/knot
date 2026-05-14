@@ -1511,6 +1511,7 @@ ticket ids, and a per-line keymap on acceptance criterion rows.
 
 \\{knot-show-mode-map}"
   (setq-local truncate-lines nil)
+  (visual-wrap-prefix-mode 1)
   ;; `markdown-mode' installs an after-change hook that buttonises
   ;; every GFM `- [ ]' / `- [x]' as its own task-list button.  Those
   ;; would shadow `knot-show-RET' on AC rows.  AC interaction is
@@ -2058,6 +2059,7 @@ CALLBACK is a thunk called after a successful commit."
                    (or project-root default-directory)))
       (unless (derived-mode-p 'markdown-mode)
         (markdown-mode))
+      (visual-wrap-prefix-mode 1)
       (knot-capture-mode 1)
       (setq knot-capture--id id
             knot-capture--field field
@@ -3211,6 +3213,7 @@ subtrees).
 
 \\{knot-deps-mode-map}"
   (setq truncate-lines nil)
+  (visual-wrap-prefix-mode 1)
   (setq buffer-read-only t)
   (when knot-pixel-scroll
     (pixel-scroll-precision-mode 1)))
