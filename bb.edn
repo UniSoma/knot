@@ -79,6 +79,8 @@
      (let [home      (System/getenv "HOME")
            elpa-dirs (->> ["/usr/share/emacs/site-lisp/elpa"
                            "/usr/share/emacs/site-lisp/elpa-src"
+                           "/usr/local/share/emacs/site-lisp/elpa"
+                           "/usr/local/share/emacs/site-lisp/elpa-src"
                            (when home (str home "/.emacs.d/elpa"))]
                           (remove nil?)
                           (filter fs/exists?)

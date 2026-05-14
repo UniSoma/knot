@@ -57,7 +57,15 @@ Prints every diagnostic; exits non-zero on any error or non-stale warning."
   (require 'package-lint)
   (let ((package-lint-batch-fail-on-warnings nil)
         (text-quoting-style 'grave)
-        (had-fatal nil))
+        (had-fatal nil)
+        (sys-elpa "/usr/local/share/emacs/site-lisp/elpa"))
+    ;; `emacs -Q' bypasses site-start.el and leaves `package-user-dir' at
+    ;; its default (~/.emacs.d/elpa), so `package-archive-contents' is
+    ;; empty and package-lint's installability check fails for deps that
+    ;; were installed system-wide by the Dockerfile.  Point at the system
+    ;; elpa dir when present so the archive cache is picked up.
+    (when (file-directory-p sys-elpa)
+      (setq package-user-dir sys-elpa))
     (package-initialize)
     (dolist (file command-line-args-left)
       (let* ((file (expand-file-name file))
