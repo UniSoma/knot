@@ -318,6 +318,58 @@
 
       :else :bypass)))
 
+(defn- open-child-ids
+  "Return ids of `ticket`'s children whose status is not in
+   `terminal-statuses`. Order matches `query/children` (input order)."
+  [ticket all-tickets terminal-statuses]
+  (let [id        (get-in ticket [:frontmatter :id])
+        terminal? (set terminal-statuses)]
+    (->> (query/children all-tickets id)
+         (remove (fn [c] (terminal? (get-in c [:frontmatter :status]))))
+         (mapv #(get-in % [:frontmatter :id])))))
+
+(defn- warn-open-children-bypass!
+  "Emit the stderr warning for an `--force`-ed open-children bypass."
+  [open-ids]
+  (warn! (str "knot: forcing close past "
+              (count open-ids)
+              " open child"
+              (when (> (count open-ids) 1) "ren")
+              "; recorded in summary. "
+              (str/join " " open-ids))))
+
+(defn- gate-open-children!
+  "Evaluate the open-children gate for a status transition. Fires when
+   `source` equals `active-status`, `target` is in `terminal-statuses`,
+   and `ticket` has at least one child whose status is non-terminal.
+   Throws ex-info `:open-children` unless `force?` is true and `summary`
+   is non-blank — `--force` requires `--summary` on terminal transitions
+   so the override leaves a record. Returns `:bypass` when the gate would
+   fire but is forced through (caller emits a stderr warning); returns
+   nil otherwise."
+  [{:keys [source target ticket all-tickets active-status terminal-statuses
+           force? summary]}]
+  (let [open    (when (and (= source active-status)
+                           (contains? (or terminal-statuses #{}) target))
+                  (open-child-ids ticket all-tickets terminal-statuses))
+        fires? (seq open)]
+    (cond
+      (not fires?) nil
+
+      (not force?)
+      (throw (ex-info
+              (str (count open) " open child"
+                   (when (> (count open) 1) "ren")
+                   " block this close")
+              {:open-children    true
+               :open-child-ids   (vec open)}))
+
+      (str/blank? (or summary ""))
+      (throw (ex-info "--force requires a non-blank --summary"
+                      {:invalid-argument :force-summary}))
+
+      :else :bypass)))
+
 (defn status-cmd
   "Transition the ticket whose id is `(:id opts)` (full or partial) to
    `(:status opts)`. The resolver canonicalizes the id before save so
@@ -333,8 +385,12 @@
 
    The acceptance gate fires on `:active-status → :terminal-statuses`
    transitions when at least one frontmatter `:acceptance` entry has
-   `:done false`. `(:force? opts)` bypasses the gate but requires a
-   non-blank `:summary` (the summary becomes the override record).
+   `:done false`. The open-children gate fires on the same transition
+   when at least one child (a ticket whose `:parent` is this id) has
+   a non-terminal status. `(:force? opts)` bypasses both gates but
+   requires a non-blank `:summary` (the summary becomes the override
+   record). When both gates would fire, a single `--force` bypasses
+   both and stderr emits one warning per gate.
 
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the post-mutation ticket under `:data` instead of the saved
@@ -354,6 +410,7 @@
       (let [full-id  (get-in loaded [:frontmatter :id])
             source   (get-in loaded [:frontmatter :status])
             ac       (get-in loaded [:frontmatter :acceptance])
+            all      (delay (store/load-all project-root tickets-dir))
             bypass?  (= :bypass
                         (gate-acceptance! {:source            source
                                            :target            status
@@ -367,6 +424,19 @@
                                    (count (acceptance/open-titles ac))
                                    " unchecked acceptance criteria; "
                                    "recorded in summary.")))
+            oc-bypass?
+            (= :bypass
+               (gate-open-children! {:source            source
+                                     :target            status
+                                     :ticket            loaded
+                                     :all-tickets       @all
+                                     :active-status     active-status
+                                     :terminal-statuses terminal-statuses
+                                     :force?            force?
+                                     :summary           summary}))
+            _        (when oc-bypass?
+                       (warn-open-children-bypass!
+                        (open-child-ids loaded @all terminal-statuses)))
             new-fm   (assoc (:frontmatter loaded) :status status)
             body*    (if (and (some? summary) (not (str/blank? summary)))
                        (ticket/append-note (:body loaded)
@@ -895,6 +965,7 @@
                          (apply-ac-removes opts))
             target   (if (contains? opts :status) (:status opts) source)
             ac*      (:acceptance fm*)
+            all      (delay (store/load-all project-root tickets-dir))
             bypass?  (when (contains? opts :status)
                        (= :bypass
                           (gate-acceptance!
@@ -910,6 +981,21 @@
                                    (count (acceptance/open-titles ac*))
                                    " unchecked acceptance criteria; "
                                    "recorded in summary.")))
+            oc-bypass?
+            (when (contains? opts :status)
+              (= :bypass
+                 (gate-open-children!
+                  {:source            source
+                   :target            target
+                   :ticket            loaded
+                   :all-tickets       @all
+                   :active-status     active-status
+                   :terminal-statuses terminal-statuses
+                   :force?            (:force? opts)
+                   :summary           (:summary opts)})))
+            _        (when oc-bypass?
+                       (warn-open-children-bypass!
+                        (open-child-ids loaded @all terminal-statuses)))
             fm**     (cond-> fm*
                        (contains? opts :status) (assoc :status target))
             body0    (update-body (:body loaded) opts)

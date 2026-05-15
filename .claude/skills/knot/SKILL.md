@@ -245,6 +245,36 @@ Two ways to clear it:
    non-blank `--summary` exits `invalid_argument`. The summary is
    appended as a Notes entry and serves as the override record.
 
+#### Open-children gate on terminal transitions
+
+The same three commands (`knot close`, `knot status <id> <terminal>`,
+`knot update <id> --status <terminal>`) also enforce the open-children
+gate: when the ticket is in `:active-status` and at least one child
+(any ticket whose `:parent` is this id) has a non-terminal status, the
+transition is blocked. Plain text:
+
+```
+knot close: 1 open child blocks this close
+  - kno-01krpb3nkfjq
+close each child first, or pass --force --summary "<reason>" to ship the umbrella as-is.
+```
+
+JSON: `error.code = "open_children"`, `error.open_children = [<id>, ...]`,
+exit 1.
+
+The gate skips on:
+
+- Tickets with no children.
+- Parents whose children are all in a terminal status.
+- Intake → terminal transitions (no work was started).
+- Terminal → terminal reclassifications.
+
+Override: `--force --summary "<reason>"` — same flag and same
+`--summary`-required-on-terminal contract as the AC gate. When both
+gates would fire on the same transition, a single `--force` bypasses
+both, and stderr emits one warning per gate so you see what was
+skipped.
+
 ### Notes and editing
 
 ```sh
@@ -522,7 +552,8 @@ create                                 new ticket (-t -p -a --tags --mode
                                        missing, --link is strict
 start / status / close / reopen        lifecycle (--summary on close;
                                        --force --summary to bypass the
-                                       acceptance gate on terminal moves)
+                                       acceptance and open-children
+                                       gates on terminal moves)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode

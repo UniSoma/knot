@@ -376,6 +376,26 @@
                     "or --force --summary \"<reason>\" to override."))
       (System/exit 1))))
 
+(defn- emit-open-children!
+  "Emit the open-children gate failure: JSON envelope with code
+   `open_children` and `open_children: [<id>, ...]`, or a plain-text
+   stderr message with the count and indented open child ids. Exits 1
+   in both modes."
+  [cmd-name json? msg open-ids]
+  (if json?
+    (do (println-out (output/error-envelope-str
+                      {:code           "open_children"
+                       :message        msg
+                       :open_children  (vec open-ids)}))
+        (System/exit 1))
+    (binding [*out* *err*]
+      (println (str "knot " cmd-name ": " msg))
+      (doseq [cid open-ids]
+        (println (str "  - " cid)))
+      (println (str "close each child first, or pass --force --summary "
+                    "\"<reason>\" to ship the umbrella as-is."))
+      (System/exit 1))))
+
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
@@ -417,6 +437,10 @@
               (:acceptance-incomplete data)
               (emit-acceptance-incomplete!
                cmd-name json? (.getMessage e) (:open-titles data))
+
+              (:open-children data)
+              (emit-open-children!
+               cmd-name json? (.getMessage e) (:open-child-ids data))
 
               json?
               (emit-error-envelope! {:code    "invalid_argument"
@@ -751,6 +775,10 @@
             (:acceptance-incomplete data)
             (emit-acceptance-incomplete!
              "update" json? (.getMessage e) (:open-titles data))
+
+            (:open-children data)
+            (emit-open-children!
+             "update" json? (.getMessage e) (:open-child-ids data))
 
             json?
             (emit-error-envelope! {:code    "invalid_argument"

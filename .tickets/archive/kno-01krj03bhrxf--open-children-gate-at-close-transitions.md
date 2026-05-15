@@ -1,37 +1,38 @@
 ---
 id: kno-01krj03bhrxf
 title: Open-children gate at close transitions
-status: open
+status: closed
 type: task
 priority: 1
 mode: afk
 created: '2026-05-14T01:02:30.455916209Z'
-updated: '2026-05-14T02:41:13.411794664Z'
+updated: '2026-05-15T18:03:05.817705160Z'
+closed: '2026-05-15T18:03:05.817705160Z'
 parent: kno-01krhwcy0zdy
 tags:
 - v0.5
 - parent-children-gate
 acceptance:
 - title: '`gate-open-children!` fires on active→terminal transitions when at least one child is non-terminal, listing open child ids in the thrown ex-info'
-  done: false
+  done: true
 - title: '`knot close <parent-with-open-children>` exits non-zero with stderr enumerating the open child ids'
-  done: false
+  done: true
 - title: '`knot close <parent-with-open-children> --force --summary "<reason>"` succeeds; the summary is appended as a note'
-  done: false
+  done: true
 - title: '`knot update <parent-with-open-children> --status closed` fires the same gate (parity with `close`)'
-  done: false
+  done: true
 - title: '`knot close --json` without `--force` returns `{ok: false, error: "open-children", open-children: [...]}`'
-  done: false
+  done: true
 - title: When both AC and open-children gates would fire, a single `--force` bypasses both; stderr lists both classes of bypass
-  done: false
+  done: true
 - title: Closing a parent whose only children are already terminal succeeds without the gate firing
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md updated with the new error shape and `--force` override
-  done: false
+  done: true
 - title: docs/agents/issue-tracker.md updated with the AFK-agent protocol for `ok:false error:\"open-children\"` (read the list, recurse into a child, or pass --force if the umbrella's own work is the close-target)
-  done: false
+  done: true
 - title: bb test passes; clj-kondo --lint src test passes
-  done: false
+  done: true
 ---
 
 ## What to build
@@ -49,3 +50,9 @@ Same envelope shape as the existing AC failure path. When both AC and open-child
 Update `.claude/skills/knot/SKILL.md` and `docs/agents/issue-tracker.md` in the same commit, per the AGENTS.md hard rule that the skill must stay in sync with the CLI. Note the new `ok:false error:\"open-children\"` envelope and that the override is the existing `--force` flag.
 
 Background: see `docs/adr/0003-parent-children-gate-status-transitions-not-readiness.md` for the design rationale and rejected alternatives. The core principle: `:parent` is composition (umbrella), `:deps` is sequencing; open children gate status transitions but never block readiness.
+
+## Notes
+
+**2026-05-15T18:03:05.817705160Z**
+
+Added gate-open-children! in src/knot/cli.clj parallel to gate-acceptance!. Fires on active→terminal transitions when any child has a non-terminal status; throws ex-info {:open-children true :open-child-ids [...]}. Wired into both status-cmd and update-cmd so close/status/start (via sugar)/update --status all share the check, mirroring gate-acceptance!. --force --summary bypasses both AC and open-children gates under a single flag; stderr emits one warning per gate. JSON envelope emit-open-children! in main.clj routes :open-children ex-info to {ok:false, error:{code:"open_children", message, open_children:[<id>]}} on stdout from both transition-handler and the update catch block. Skill (.claude/skills/knot/SKILL.md) gained a new "Open-children gate on terminal transitions" subsection mirroring the AC gate, and docs/agents/issue-tracker.md gained an AFK protocol section. 366 tests / 4531 assertions all green; clj-kondo identical to baseline.
