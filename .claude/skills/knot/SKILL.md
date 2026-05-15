@@ -245,13 +245,18 @@ Two ways to clear it:
    non-blank `--summary` exits `invalid_argument`. The summary is
    appended as a Notes entry and serves as the override record.
 
-#### Open-children gate on terminal transitions
+#### Open-children gate on start and close transitions
 
-The same three commands (`knot close`, `knot status <id> <terminal>`,
-`knot update <id> --status <terminal>`) also enforce the open-children
-gate: when the ticket is in `:active-status` and at least one child
-(any ticket whose `:parent` is this id) has a non-terminal status, the
-transition is blocked. Plain text:
+The open-children gate fires on two transitions:
+
+- **Close** (`active → terminal`): `knot close`, `knot status <id>
+  <terminal>`, `knot update <id> --status <terminal>`.
+- **Start** (`* → active`): `knot start`, `knot status <id> <active>`,
+  `knot update <id> --status <active>`.
+
+The gate fires when the ticket has at least one child (any ticket
+whose `:parent` is this id) whose status is non-terminal. Plain text
+(close):
 
 ```
 knot close: 1 open child blocks this close
@@ -259,21 +264,38 @@ knot close: 1 open child blocks this close
 close each child first, or pass --force --summary "<reason>" to ship the umbrella as-is.
 ```
 
+Plain text (start):
+
+```
+knot start: 1 open child blocks this start
+  - kno-01krpb3nkfjq
+close each child first, or pass --force to start the umbrella anyway.
+```
+
 JSON: `error.code = "open_children"`, `error.open_children = [<id>, ...]`,
-exit 1.
+exit 1 — same envelope shape for both gates.
 
 The gate skips on:
 
 - Tickets with no children.
 - Parents whose children are all in a terminal status.
-- Intake → terminal transitions (no work was started).
+- `active → active` no-op transitions and intake → terminal
+  transitions (no meaningful start or close).
 - Terminal → terminal reclassifications.
 
-Override: `--force --summary "<reason>"` — same flag and same
-`--summary`-required-on-terminal contract as the AC gate. When both
-gates would fire on the same transition, a single `--force` bypasses
-both, and stderr emits one warning per gate so you see what was
-skipped.
+Override is `--force`, with asymmetric `--summary` semantics:
+
+- **Close**: `--force --summary "<reason>"` is the required pair —
+  `--force` without a non-blank `--summary` exits `invalid_argument`.
+  The summary is appended as a Notes entry and serves as the override
+  record. When both AC and open-children gates would fire on the
+  same close, a single `--force` bypasses both and stderr emits one
+  warning per gate.
+- **Start**: `--force` alone is enough (no `--summary` required, and
+  passing `--summary` to a non-terminal target is rejected up front).
+  Start is provisional — you can `update --status` back to intake at
+  zero cost — so the bypass leaves only the stderr enumeration as a
+  trace, not a Notes entry.
 
 ### Notes and editing
 
@@ -551,9 +573,11 @@ create                                 new ticket (-t -p -a --tags --mode
                                        repeatable; --dep is lenient on
                                        missing, --link is strict
 start / status / close / reopen        lifecycle (--summary on close;
+                                       --force to bypass the
+                                       open-children gate at start;
                                        --force --summary to bypass the
                                        acceptance and open-children
-                                       gates on terminal moves)
+                                       gates at close)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode

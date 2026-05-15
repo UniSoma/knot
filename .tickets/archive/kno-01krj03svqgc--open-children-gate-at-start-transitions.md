@@ -1,35 +1,36 @@
 ---
 id: kno-01krj03svqgc
 title: Open-children gate at start transitions
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-05-14T01:02:45.102158535Z'
-updated: '2026-05-14T01:02:45.102158535Z'
+updated: '2026-05-15T18:39:49.951221907Z'
+closed: '2026-05-15T18:39:49.951221907Z'
 parent: kno-01krhwcy0zdy
 tags:
 - v0.5
 - parent-children-gate
 acceptance:
 - title: Open-children gate fires on *→active transitions when at least one child is non-terminal
-  done: false
+  done: true
 - title: '`knot start <parent-with-open-children>` exits non-zero with stderr enumerating the open child ids'
-  done: false
+  done: true
 - title: '`knot start <parent-with-open-children> --force` succeeds (no `--summary` required)'
-  done: false
+  done: true
 - title: '`knot update <parent-with-open-children> --status in_progress` fires the same gate (parity with `start`)'
-  done: false
+  done: true
 - title: '`knot start --json` without `--force` returns `{ok: false, error: "open-children", open-children: [...]}`'
-  done: false
+  done: true
 - title: Starting a parent whose only children are already terminal succeeds without the gate firing
-  done: false
+  done: true
 - title: Starting a parent with zero children (no `:parent` pointing at it) succeeds without the gate firing
-  done: false
+  done: true
 - title: .claude/skills/knot/SKILL.md updated if the start-side error shape or `--force` semantics differ from the close-side path in any user-visible way
-  done: false
+  done: true
 - title: bb test passes; clj-kondo --lint src test passes
-  done: false
+  done: true
 deps:
 - kno-01krj03bhrxf
 ---
@@ -55,3 +56,9 @@ Update `.claude/skills/knot/SKILL.md` and `docs/agents/issue-tracker.md` only if
 Background: see `docs/adr/0003-parent-children-gate-status-transitions-not-readiness.md`.
 
 ## Acceptance criteria
+
+## Notes
+
+**2026-05-15T18:39:49.951221907Z**
+
+Extended gate-open-children! in src/knot/cli.clj to fire on *→active transitions (source≠active, target=active) parallel to the existing active→terminal close-side firing. Ex-info now carries :gate :start|:close so warn-open-children-bypass! and emit-open-children! dispatch the correct stderr footer/warning. --force is asymmetric per ADR-0003: close still requires --summary, start does not (start is provisional). Added --force flag to :start in help.clj and updated --force descriptions on :status / :close / :update. JSON envelope shape unchanged across both gates (open_children + open_children: [<id>...]). Existing close-side tests adjusted to add :force? true on setup start-cmd steps. New tests: 5 cli_test sub-tests (cli_test.clj open-children-gate-at-start-test), one json_contract envelope test, one integration_test for the start stderr footer. 368/368 tests green; clj-kondo baseline unchanged (3 pre-existing macro-noise errors). SKILL.md and docs/agents/issue-tracker.md updated for the two-direction gate + asymmetric --force semantics. knot.el docstrings on knot-start / knot-close updated to mention the open-children gate (no behavior change — knot-cli--parse handles the new envelope generically).

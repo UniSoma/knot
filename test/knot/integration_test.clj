@@ -1300,6 +1300,23 @@
         (let [{:keys [out]} (run-knot tmp "show" a-id)]
           (is (str/includes? out "completed")))))))
 
+(deftest open-children-gate-start-stderr-end-to-end-test
+  (testing "start on a parent with an open child exits 1 and enumerates the child on stderr"
+    (with-tmp tmp
+      (let [p-id (id-from-create-out (:out (run-knot tmp "create" "Parent"))
+                                     "parent")
+            c-id (id-from-create-out
+                  (:out (run-knot tmp "create" "Child" "--parent" p-id))
+                  "child")
+            {:keys [exit err]} (run-knot tmp "start" p-id)]
+        (is (= 1 exit) (str "start should exit 1, err=" err))
+        (is (str/includes? err "start") "stderr names the command")
+        (is (str/includes? err c-id) "stderr enumerates the open child id")
+        (is (str/includes? err "--force")
+            "stderr suggests --force as the override")
+        (is (not (str/includes? err "--summary"))
+            "start footer must not advise --summary (only close requires it)")))))
+
 (deftest summary-rejected-on-non-terminal-end-to-end-test
   (testing "status <id> <non-terminal> --summary exits non-zero with stderr message"
     (with-tmp tmp

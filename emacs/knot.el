@@ -2951,16 +2951,21 @@ Drops into the new ticket's show buffer with point on `## Description'."
 ;; `s' (start) and `x' (close) in list or show buffers.  Context id is
 ;; resolved via `knot-deps--context-id' (same rule: show buffer uses its
 ;; ticket id; list buffer uses the row at point).  `knot close' prompts
-;; for a summary; the acceptance gate's `acceptance_incomplete' envelope
-;; surfaces via `knot-cli--parse' as a `user-error' carrying the
-;; envelope's message field.
+;; for a summary.  CLI gate envelopes (`acceptance_incomplete' on close,
+;; `open_children' on start or close) surface via `knot-cli--parse' as
+;; a `user-error' carrying the envelope's message field; bypassing a
+;; gate requires `--force' from the shell.
 
 ;;;###autoload
 (defun knot-start ()
   "Transition the contextual ticket via `knot start <id>'.
 Context id comes from the show buffer's `knot-show--id' or the
-tabulated-list row at point.  Refresh propagates to every visible
-knot.el buffer for this project via `knot--after-mutation'."
+tabulated-list row at point.  When the open-children gate fires
+(the umbrella has a non-terminal child), the CLI envelope's
+message surfaces as a `user-error' in the minibuffer (via
+`knot-cli-call'); buffer state is unchanged.  Refresh propagates
+to every visible knot.el buffer for this project via
+`knot--after-mutation'."
   (interactive)
   (let ((id (knot-deps--context-id)))
     (knot-cli-call (list "start" id))
@@ -2970,10 +2975,11 @@ knot.el buffer for this project via `knot--after-mutation'."
 (defun knot-close ()
   "Prompt for a closing summary and close the contextual ticket.
 Calls `knot close <id> --summary \"...\"' and refreshes.  When the
-acceptance gate fires, the CLI envelope's message surfaces as a
-`user-error' in the minibuffer (via `knot-cli-call'); buffer state is
-unchanged.  Refresh propagates to every visible knot.el buffer
-for this project via `knot--after-mutation'."
+acceptance or open-children gate fires, the CLI envelope's
+message surfaces as a `user-error' in the minibuffer (via
+`knot-cli-call'); buffer state is unchanged.  Refresh propagates
+to every visible knot.el buffer for this project via
+`knot--after-mutation'."
   (interactive)
   (let* ((id (knot-deps--context-id))
          (summary (read-string "closing summary: ")))

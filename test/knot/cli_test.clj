@@ -1463,7 +1463,7 @@
             pid    (id-of-created parent "parent")
             child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
             cid    (id-of-created child "child")
-            _      (cli/start-cmd (ctx tmp) {:id pid})
+            _      (cli/start-cmd (ctx tmp) {:id pid :force? true})
             data   (try
                      (cli/close-cmd (ctx tmp) {:id pid})
                      nil
@@ -1482,7 +1482,7 @@
             pid    (id-of-created parent "parent")
             child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
             cid    (id-of-created child "child")
-            _      (cli/start-cmd (ctx tmp) {:id pid})
+            _      (cli/start-cmd (ctx tmp) {:id pid :force? true})
             _      (cli/close-cmd (ctx tmp) {:id cid})
             saved  (cli/close-cmd (ctx tmp) {:id pid})]
         (is (some #{"archive"} (map str (fs/components saved)))
@@ -1504,7 +1504,7 @@
             pid    (id-of-created parent "parent")
             child  (cli/create-cmd later {:title "Child" :parent pid})
             cid    (id-of-created child "child")
-            _      (cli/start-cmd later {:id pid})
+            _      (cli/start-cmd later {:id pid :force? true})
             saved  (atom nil)
             err    (with-err-str
                      (reset! saved
@@ -1532,7 +1532,7 @@
             pid    (id-of-created parent "parent")
             child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
             cid    (id-of-created child "child")
-            _      (cli/start-cmd (ctx tmp) {:id pid})
+            _      (cli/start-cmd (ctx tmp) {:id pid :force? true})
             data   (try
                      (cli/update-cmd (ctx tmp) {:id pid :status "closed"})
                      nil
@@ -1550,7 +1550,7 @@
             pid    (id-of-created parent "parent")
             child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
             cid    (id-of-created child "child")
-            _      (cli/start-cmd (ctx tmp) {:id pid})
+            _      (cli/start-cmd (ctx tmp) {:id pid :force? true})
             saved  (atom nil)
             err    (with-err-str
                      (reset! saved
@@ -1567,6 +1567,94 @@
             "stderr lists the open-children bypass")
         (is (str/includes? err cid)
             "stderr enumerates the open child id")))))
+
+(deftest open-children-gate-at-start-test
+  (testing "start on a parent with a non-terminal child fires the gate"
+    (with-tmp tmp
+      (let [parent (cli/create-cmd (ctx tmp) {:title "Parent"})
+            pid    (id-of-created parent "parent")
+            child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
+            cid    (id-of-created child "child")
+            data   (try
+                     (cli/start-cmd (ctx tmp) {:id pid})
+                     nil
+                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (true? (:open-children data))
+            "ex-data carries :open-children true")
+        (is (= [cid] (:open-child-ids data))
+            "ex-data lists the open child id")
+        (is (= :start (:gate data))
+            "ex-data tags the firing transition")
+        (is (= "open"
+               (get-in (store/load-one tmp ".tickets" pid) [:frontmatter :status]))
+            "no status change on gate firing"))))
+
+  (testing "start --force bypasses open-children without --summary; warns on stderr"
+    (with-tmp tmp
+      (let [parent (cli/create-cmd (ctx tmp) {:title "Parent"})
+            pid    (id-of-created parent "parent")
+            child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
+            cid    (id-of-created child "child")
+            saved  (atom nil)
+            err    (with-err-str
+                     (reset! saved
+                             (cli/start-cmd (ctx tmp)
+                                            {:id pid :force? true})))
+            loaded (store/load-one tmp ".tickets" pid)]
+        (is (string? @saved)
+            "start succeeds (returns saved path) under --force")
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))
+            "parent transitions to active despite open child")
+        (is (str/includes? err "forcing start past")
+            "warns on stderr that start bypassed open children")
+        (is (str/includes? err "1 open child")
+            "warning includes the open child count")
+        (is (str/includes? err cid)
+            "warning enumerates the open child id")
+        (is (not (str/includes? err "recorded in summary"))
+            "start-side bypass does not claim a summary record"))))
+
+  (testing "update --status <active> fires the same gate (parity with start)"
+    (with-tmp tmp
+      (let [parent (cli/create-cmd (ctx tmp) {:title "Parent"})
+            pid    (id-of-created parent "parent")
+            child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
+            cid    (id-of-created child "child")
+            data   (try
+                     (cli/update-cmd (ctx tmp) {:id pid :status "in_progress"})
+                     nil
+                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (is (true? (:open-children data)))
+        (is (= [cid] (:open-child-ids data)))
+        (is (= :start (:gate data)))
+        (is (= "open"
+               (get-in (store/load-one tmp ".tickets" pid) [:frontmatter :status]))
+            "no status change on gate firing"))))
+
+  (testing "start on a parent whose only child is terminal succeeds"
+    (with-tmp tmp
+      (let [parent (cli/create-cmd (ctx tmp) {:title "Parent"})
+            pid    (id-of-created parent "parent")
+            child  (cli/create-cmd (ctx tmp) {:title "Child" :parent pid})
+            cid    (id-of-created child "child")
+            _      (cli/close-cmd (ctx tmp) {:id cid
+                                             :force? true
+                                             :summary "n/a"})
+            saved  (cli/start-cmd (ctx tmp) {:id pid})
+            loaded (store/load-one tmp ".tickets" pid)]
+        (is (string? saved))
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))
+            "all-terminal children → gate must not fire"))))
+
+  (testing "start on a parent with zero children succeeds"
+    (with-tmp tmp
+      (let [parent (cli/create-cmd (ctx tmp) {:title "Parent"})
+            pid    (id-of-created parent "parent")
+            saved  (cli/start-cmd (ctx tmp) {:id pid})
+            loaded (store/load-one tmp ".tickets" pid)]
+        (is (string? saved))
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))
+            "no children → gate must not fire")))))
 
 (deftest init-cmd-test
   (testing "writes .knot.edn with all default keys present, each commented"

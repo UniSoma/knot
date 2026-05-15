@@ -21,13 +21,21 @@ No `Read`, `cat`, `grep`, `Write`, `Edit`, `sed`, or `mv` against files under `.
 
 ## AFK protocol: `ok:false error:"open_children"`
 
-`knot close --json` (and terminal `status --json` / `update --status <terminal> --json`) on an umbrella with non-terminal children emits `{ok:false, error:{code:"open_children", open_children:[<id> ...]}}` and exits 1. The same gate fires the equivalent stderr message in non-JSON mode. The AFK response is:
+The open-children gate fires on two transitions:
+
+- **Close**: `knot close --json`, terminal `status --json`, `update --status <terminal> --json`.
+- **Start**: `knot start --json`, active `status --json`, `update --status <active> --json`.
+
+On either, an umbrella with non-terminal children emits `{ok:false, error:{code:"open_children", open_children:[<id> ...]}}` and exits 1. The same gate fires the equivalent stderr message in non-JSON mode. The AFK response is:
 
 1. Read the `open_children` list.
 2. Either recurse into a child (preferably one that's also `ready`), or
-3. Pass `--force --summary "<reason>"` if the umbrella's own work is what's actionable and the open children are deliberate follow-ups, not gates.
+3. Pass `--force` if the umbrella's own work is what's actionable and the open children are deliberate follow-ups, not gates.
 
-`--force` without a non-blank `--summary` exits `invalid_argument`; the summary is recorded as a Notes entry on the umbrella. When both the acceptance and open-children gates would fire on the same transition, a single `--force --summary` bypasses both.
+`--force` is asymmetric:
+
+- **Close**: `--force --summary "<reason>"` is required. `--force` without a non-blank `--summary` exits `invalid_argument`; the summary is recorded as a Notes entry on the umbrella. When both the acceptance and open-children gates would fire on the same transition, a single `--force --summary` bypasses both.
+- **Start**: `--force` alone is enough — no `--summary` required. Start is provisional (you can `update --status` back to intake at zero cost), so the bypass leaves only the stderr enumeration as a trace.
 
 ## When a skill says "publish to the issue tracker"
 

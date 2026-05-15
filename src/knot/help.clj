@@ -241,7 +241,7 @@
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance-criteria gate on active→terminal transitions; requires --summary."}
+                   :desc "Bypass the acceptance and open-children gates. On active→terminal transitions, --summary is required (the override leaves a record); on *→active transitions, --summary is not required."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
                    :note "Move a ticket into in_progress."}
@@ -253,9 +253,13 @@
     :description "Transition a ticket to the project's active status (default: in_progress)."
     :args        [{:name "id" :required true}]
     :restrict?   true
-    :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
+    :flags       [{:name :force :coerce :boolean :default false
+                   :desc "Bypass the open-children gate (no --summary required at start)."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot start kno-01abc"
-                   :note "Mark a ticket as active (in_progress by default)."}]}
+                   :note "Mark a ticket as active (in_progress by default)."}
+                  {:cmd "knot start kno-01abc --force"
+                   :note "Start the umbrella anyway despite open children."}]}
 
    :close
    {:group       :lifecycle
@@ -264,7 +268,7 @@
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance-criteria gate; requires --summary."}
+                   :desc "Bypass the acceptance and open-children gates; requires --summary."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
                    :note "Close with a summary."}
@@ -426,7 +430,7 @@
                   {:name :status       :desc "Transition the status. Acceptance gate fires on active→terminal."}
                   {:name :summary      :desc "Closing summary recorded on the ticket (terminal transitions only)."}
                   {:name :force        :coerce :boolean :default false
-                   :desc "Bypass the acceptance-criteria gate on a --status terminal transition; requires --summary."}
+                   :desc "Bypass the acceptance and open-children gates on a --status transition. On terminal targets, --summary is required; on active-status targets, --summary is not required."}
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
                   {:name :mode         :desc "Replace the mode (afk|hitl)."}
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}

@@ -736,13 +736,30 @@
             pid                    (id-of p-out "parent")
             {c-out :out}           (run-knot tmp "create" "Child" "--parent" pid)
             cid                    (id-of c-out "child")
-            _                      (run-knot tmp "start" pid)
+            _                      (run-knot tmp "start" pid "--force")
             {:keys [exit out err]} (run-knot tmp "close" pid "--json")
             envelope               (parse-envelope out)]
         (is (= 1 exit) (str "gate-firing close should exit 1, err=" err))
         (is (str/blank? err)
             "open_children envelope routes to stdout, not stderr")
         (assert-envelope-invariants! envelope "close --json (open_children)")
+        (is (= false (:ok envelope)))
+        (is (= "open_children" (get-in envelope [:error :code])))
+        (is (string? (get-in envelope [:error :message])))
+        (is (= [cid] (get-in envelope [:error :open_children]))))))
+
+  (testing "start --json on a parent with a non-terminal child emits the open_children envelope"
+    (with-tmp tmp
+      (let [{p-out :out}           (run-knot tmp "create" "Parent")
+            pid                    (id-of p-out "parent")
+            {c-out :out}           (run-knot tmp "create" "Child" "--parent" pid)
+            cid                    (id-of c-out "child")
+            {:keys [exit out err]} (run-knot tmp "start" pid "--json")
+            envelope               (parse-envelope out)]
+        (is (= 1 exit) (str "gate-firing start should exit 1, err=" err))
+        (is (str/blank? err)
+            "open_children envelope routes to stdout, not stderr")
+        (assert-envelope-invariants! envelope "start --json (open_children)")
         (is (= false (:ok envelope)))
         (is (= "open_children" (get-in envelope [:error :code])))
         (is (string? (get-in envelope [:error :message])))

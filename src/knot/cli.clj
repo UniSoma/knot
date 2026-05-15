@@ -329,30 +329,42 @@
          (mapv #(get-in % [:frontmatter :id])))))
 
 (defn- warn-open-children-bypass!
-  "Emit the stderr warning for an `--force`-ed open-children bypass."
-  [open-ids]
-  (warn! (str "knot: forcing close past "
+  "Emit the stderr warning for an `--force`-ed open-children bypass.
+   `gate` is `:close` or `:start`; the close-side warning includes
+   the `recorded in summary` tail (start has no summary requirement)."
+  [gate open-ids]
+  (warn! (str "knot: forcing " (name gate) " past "
               (count open-ids)
               " open child"
               (when (> (count open-ids) 1) "ren")
-              "; recorded in summary. "
+              (when (= gate :close) "; recorded in summary")
+              ". "
               (str/join " " open-ids))))
 
 (defn- gate-open-children!
-  "Evaluate the open-children gate for a status transition. Fires when
-   `source` equals `active-status`, `target` is in `terminal-statuses`,
-   and `ticket` has at least one child whose status is non-terminal.
-   Throws ex-info `:open-children` unless `force?` is true and `summary`
-   is non-blank — `--force` requires `--summary` on terminal transitions
-   so the override leaves a record. Returns `:bypass` when the gate would
-   fire but is forced through (caller emits a stderr warning); returns
-   nil otherwise."
+  "Evaluate the open-children gate for a status transition. Fires on
+   `active-status → terminal-statuses` (close transitions) and on
+   `* → active-status` (start transitions, where `source` is anything
+   other than `active-status`) when `ticket` has at least one child
+   whose status is non-terminal. Throws ex-info `:open-children`
+   unless `force?` is true.
+
+   `--force` is asymmetric: on close transitions a non-blank `summary`
+   is also required (the override leaves a recorded reason); on start
+   transitions no summary is required (per ADR-0003, start is
+   provisional). Returns `:bypass` when the gate would fire but is
+   forced through (caller emits a stderr warning); returns nil
+   otherwise."
   [{:keys [source target ticket all-tickets active-status terminal-statuses
            force? summary]}]
-  (let [open    (when (and (= source active-status)
-                           (contains? (or terminal-statuses #{}) target))
+  (let [close-transition? (and (= source active-status)
+                               (contains? (or terminal-statuses #{}) target))
+        start-transition? (and (= target active-status)
+                               (not= source active-status))
+        open    (when (or close-transition? start-transition?)
                   (open-child-ids ticket all-tickets terminal-statuses))
-        fires? (seq open)]
+        fires?  (seq open)
+        gate    (if close-transition? :close :start)]
     (cond
       (not fires?) nil
 
@@ -360,11 +372,12 @@
       (throw (ex-info
               (str (count open) " open child"
                    (when (> (count open) 1) "ren")
-                   " block this close")
-              {:open-children    true
-               :open-child-ids   (vec open)}))
+                   " block this " (name gate))
+              {:open-children  true
+               :open-child-ids (vec open)
+               :gate           gate}))
 
-      (str/blank? (or summary ""))
+      (and close-transition? (str/blank? (or summary "")))
       (throw (ex-info "--force requires a non-blank --summary"
                       {:invalid-argument :force-summary}))
 
@@ -436,6 +449,7 @@
                                      :summary           summary}))
             _        (when oc-bypass?
                        (warn-open-children-bypass!
+                        (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
             new-fm   (assoc (:frontmatter loaded) :status status)
             body*    (if (and (some? summary) (not (str/blank? summary)))
@@ -995,6 +1009,7 @@
                    :summary           (:summary opts)})))
             _        (when oc-bypass?
                        (warn-open-children-bypass!
+                        (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
             fm**     (cond-> fm*
                        (contains? opts :status) (assoc :status target))

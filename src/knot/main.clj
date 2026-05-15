@@ -380,8 +380,10 @@
   "Emit the open-children gate failure: JSON envelope with code
    `open_children` and `open_children: [<id>, ...]`, or a plain-text
    stderr message with the count and indented open child ids. Exits 1
-   in both modes."
-  [cmd-name json? msg open-ids]
+   in both modes. `gate` (`:start` or `:close`) selects the stderr
+   instruction footer — close advises `--force --summary`, start
+   advises just `--force`."
+  [cmd-name json? gate msg open-ids]
   (if json?
     (do (println-out (output/error-envelope-str
                       {:code           "open_children"
@@ -392,8 +394,12 @@
       (println (str "knot " cmd-name ": " msg))
       (doseq [cid open-ids]
         (println (str "  - " cid)))
-      (println (str "close each child first, or pass --force --summary "
-                    "\"<reason>\" to ship the umbrella as-is."))
+      (println
+       (case gate
+         :close (str "close each child first, or pass --force --summary "
+                     "\"<reason>\" to ship the umbrella as-is.")
+         :start (str "close each child first, or pass --force "
+                     "to start the umbrella anyway.")))
       (System/exit 1))))
 
 (defn- transition-handler
@@ -440,7 +446,7 @@
 
               (:open-children data)
               (emit-open-children!
-               cmd-name json? (.getMessage e) (:open-child-ids data))
+               cmd-name json? (:gate data) (.getMessage e) (:open-child-ids data))
 
               json?
               (emit-error-envelope! {:code    "invalid_argument"
@@ -778,7 +784,7 @@
 
             (:open-children data)
             (emit-open-children!
-             "update" json? (.getMessage e) (:open-child-ids data))
+             "update" json? (:gate data) (.getMessage e) (:open-child-ids data))
 
             json?
             (emit-error-envelope! {:code    "invalid_argument"
