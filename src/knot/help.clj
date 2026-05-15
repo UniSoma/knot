@@ -517,7 +517,20 @@
                    :note "Show only dep_cycle issues."}]
     :exit-codes  [{:code 0 :when "no errors in the filtered view"}
                   {:code 1 :when "one or more errors in the filtered view"}
-                  {:code 2 :when "unable to scan (config invalid, no project root)"}]}})
+                  {:code 2 :when "unable to scan (config invalid, no project root)"}]}
+
+   :schema
+   {:group       :project
+    :description "Emit a JSON Schema document for ticket frontmatter, derived from the project's allowed values."
+    :args        []
+    :restrict?   true
+    :flags       []
+    :examples    [{:cmd "knot schema"
+                   :note "Print the schema to stdout."}
+                  {:cmd "knot schema > knot.schema.json"
+                   :note "Write the checked-in schema file (or use `bb gen:schema`)."}]
+    :exit-codes  [{:code 0 :when "schema emitted successfully"}
+                  {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}})
 
 (def ^:private group-order
   "Canonical group order and display headers. The renderer walks this
@@ -532,7 +545,7 @@
   "Top-level command order for `top-level-help-text`. Subcommand keys
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
-  [:init :prime :info :check
+  [:init :prime :info :check :schema
    :create :start :status :close :reopen
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed

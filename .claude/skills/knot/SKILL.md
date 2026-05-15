@@ -109,6 +109,7 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "give me a summary of project state"                    | `knot prime`                                                 |
 | "what project is this?" / "what statuses are valid?"    | `knot info`                                                  |
 | "what does `knot create` default to?"                   | `knot info --json`                                           |
+| "give me the frontmatter JSON Schema"                   | `knot schema` (writes to stdout; `bb gen:schema` updates the checked-in file) |
 
 ### Filter, don't eyeball
 

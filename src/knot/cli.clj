@@ -11,6 +11,7 @@
             [knot.git :as git]
             [knot.output :as output]
             [knot.query :as query]
+            [knot.schema :as schema]
             [knot.store :as store]
             [knot.ticket :as ticket]
             [knot.version :as version])
@@ -1442,6 +1443,14 @@
     (if json?
       (output/info-json data)
       (output/info-text data))))
+
+(defn schema-cmd
+  "Emit the ticket frontmatter JSON Schema derived from `info-data`.
+   Returns a JSON string with a trailing newline. The caller (handler)
+   is responsible for project discovery — `schema-cmd` does no I/O and
+   produces deterministic output."
+  [ctx]
+  (schema/schema-json (info-data ctx)))
 
 (defn migrate-ac-cmd
   "One-shot v0.3 migration: walk every ticket file (live + archive),

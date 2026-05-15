@@ -1,0 +1,48 @@
+{
+  "$schema" : "http://json-schema.org/draft-07/schema#",
+  "title" : "Knot ticket frontmatter",
+  "description" : "JSON Schema for the YAML frontmatter of Knot ticket files (`.tickets/*.md`). Regenerated from `knot info --json` — run `bb gen:schema` to refresh the checked-in `knot.schema.json` after changing allowed values. See knot.schema/generate-schema.",
+  "type" : "object",
+  "properties" : {
+    "id" : {
+      "type" : "string",
+      "pattern" : "^kno-[0-9a-hjkmnpqrstvwxyz]{12}$"
+    },
+    "title" : {
+      "type" : "string"
+    },
+    "type" : {
+      "type" : "string",
+      "enum" : [ "bug", "feature", "task", "epic", "chore" ]
+    },
+    "mode" : {
+      "type" : "string",
+      "enum" : [ "afk", "hitl" ]
+    },
+    "status" : {
+      "type" : "string",
+      "enum" : [ "open", "in_progress", "closed" ]
+    },
+    "priority" : {
+      "type" : "integer",
+      "minimum" : 0,
+      "maximum" : 4
+    },
+    "acceptance" : {
+      "type" : "array",
+      "items" : {
+        "type" : "object",
+        "properties" : {
+          "title" : {
+            "type" : "string"
+          },
+          "done" : {
+            "type" : "boolean"
+          }
+        },
+        "required" : [ "title", "done" ]
+      }
+    }
+  },
+  "required" : [ "id", "title" ]
+}

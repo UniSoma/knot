@@ -46,6 +46,33 @@
            (require '[knot.main])
            (apply (resolve 'knot.main/-main) *command-line-args*))}
 
+  gen:schema
+  {:doc "Regenerate knot.schema.json from the current `knot info` allowed values"
+   :task
+   (do
+     (require '[knot.cli] '[knot.config] '[knot.ticket])
+     (let [cwd        (str (fs/cwd))
+           discovered ((resolve 'knot.config/discover) cwd)]
+       (when-not discovered
+         (binding [*out* *err*]
+           (println (str "gen:schema: no project found at or above " cwd)))
+         (System/exit 1))
+       (let [root  (:project-root discovered)
+             cfg   (:config discovered)
+             ctx   (merge cfg
+                          {:project-root    root
+                           :cwd             cwd
+                           :prefix          (or (:prefix cfg)
+                                                ((resolve 'knot.ticket/derive-prefix)
+                                                 (str (fs/file-name root))))
+                           :config-present? (fs/exists?
+                                             (fs/path root ".knot.edn"))
+                           :project-found?  true})
+             out   ((resolve 'knot.cli/schema-cmd) ctx)
+             path  (str (fs/path root "knot.schema.json"))]
+         (spit path out)
+         (println (str "Wrote " path)))))}
+
   lint:elisp
   {:doc "Byte-compile emacs/knot.el and run package-lint when available"
    :task

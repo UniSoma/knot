@@ -916,6 +916,49 @@
                                      :project-found?   true})]
             (println-out (cli/info-cmd ctx {:json? json?}))))))))
 
+(defn- schema-handler
+  "Run `knot schema`. Same discovery contract as `info-handler`: a
+   missing project or invalid `.knot.edn` exits 1 with a stderr error;
+   on success, emits the JSON Schema string to stdout. Output is
+   deterministic for a given project + knot version."
+  [argv]
+  (let [parsed (try (bcli/parse-args argv (spec :schema))
+                    (catch Exception e e))]
+    (if (instance? Exception parsed)
+      (do (binding [*out* *err*]
+            (println (str "knot schema: "
+                          (.getMessage ^Exception parsed))))
+          (System/exit 1))
+      (let [cwd        (str (fs/cwd))
+            discovered (try (config/discover cwd)
+                            (catch Exception e e))]
+        (cond
+          (instance? Exception discovered)
+          (do (binding [*out* *err*]
+                (println (str "knot schema: "
+                              (.getMessage ^Exception discovered))))
+              (System/exit 1))
+
+          (nil? discovered)
+          (do (binding [*out* *err*]
+                (println (str "knot schema: no project found at or above " cwd)))
+              (System/exit 1))
+
+          :else
+          (let [project-root (:project-root discovered)
+                cfg          (:config discovered)
+                cfg-present? (fs/exists? (fs/path project-root ".knot.edn"))
+                ctx          (merge cfg
+                                    {:project-root     project-root
+                                     :cwd              cwd
+                                     :prefix           (or (:prefix cfg)
+                                                           (ticket/derive-prefix
+                                                            (str (fs/file-name project-root))))
+                                     :config-present?  cfg-present?
+                                     :project-found?   true})]
+            (print (cli/schema-cmd ctx))
+            (flush)))))))
+
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
@@ -1018,6 +1061,7 @@
         "init"   (init-handler rest-argv)
         "prime"  (prime-handler rest-argv)
         "info"   (info-handler rest-argv)
+        "schema" (schema-handler rest-argv)
         "check"  (check-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
