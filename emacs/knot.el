@@ -1233,6 +1233,15 @@ A nil or empty-string VALUE removes the entry."
   "Prompt for a free-form filter value, defaulting to CURRENT."
   (read-string prompt nil nil (or current "")))
 
+(defun knot-list--read-tag (prompt current)
+  "Prompt for a single tag with completion over the project tag union.
+Candidates come from `knot--all-project-tags' (live tickets); free
+input is allowed, so a tag that does not exist yet still works.
+CURRENT pre-fills the minibuffer so RET keeps the active filter;
+deleting the text and RET clears it."
+  (let ((choices (cons "" (knot--all-project-tags))))
+    (completing-read prompt choices nil nil (or current ""))))
+
 (defun knot-list--read-limit (current)
   "Prompt for an integer limit, defaulting to CURRENT.
 Empty input clears the limit."
@@ -1294,10 +1303,12 @@ Choices come from `allowed_values.priority_range' on `knot info'
   (knot-list--render))
 
 (defun knot-list-filter-set-tag ()
-  "Prompt for `--tag' and update the active filter."
+  "Prompt for `--tag' and update the active filter.
+Completes over the project tag union from `knot--all-project-tags';
+free input is allowed."
   (interactive)
   (knot-list--set-filter
-   'tag (knot-list--read-free-string
+   'tag (knot-list--read-tag
          "tag: " (knot-list--current-filter-value 'tag)))
   (knot-list--render))
 
@@ -2369,18 +2380,23 @@ a value."
     raw))
 
 (defun knot-update--read-tags (current &optional count)
-  "Prompt for a comma-list of tags, defaulting to CURRENT (a list of strings).
-Empty input clears the tag list.  When COUNT is a number > 1, the
-prompt gains a `(N marked)' chunk and the default is suppressed
-so plain RET does not silently pick a value."
+  "Prompt for a comma-list of tags with completion over the project union.
+CURRENT is a list of strings; in single-id mode it pre-fills the
+minibuffer so RET keeps the existing tags and delete-then-RET
+clears them.  Empty input clears the tag list.  When COUNT is a
+number > 1, the prompt gains a `(N marked)' chunk and the pre-fill
+is suppressed so plain RET does not silently pick a value.
+Free input is allowed, so brand-new tag names still work."
   (let* ((bulk (and (numberp count) (> count 1)))
-         (default (and (not bulk) (listp current) current
+         (initial (and (not bulk) (listp current) current
                        (string-join current ",")))
          (prompt (if bulk
-                     (format "tags (%d marked, comma-list, empty to clear): "
+                     (format "tags (%d marked, TAB completes, empty to clear): "
                              count)
-                   "tags (comma-list, empty to clear): ")))
-    (read-string prompt default)))
+                   "tags (TAB completes, empty to clear): "))
+         (picks (completing-read-multiple
+                 prompt (knot--all-project-tags) nil nil initial)))
+    (string-join picks ",")))
 
 (defun knot-update--read-free-string (prompt current)
   "Prompt for a free-form value with CURRENT as the default text."
@@ -2504,7 +2520,7 @@ fan-out semantics."
          (value (knot-update--read-tags current (and bulk count))))
     (knot-update--commit ids "--tags" value)))
 
-(defun knot-update--all-project-tags ()
+(defun knot--all-project-tags ()
   "Return the sorted unique list of tags across all live tickets.
 One `knot list --json' call; each row's `tags' list is folded
 into a hash-backed set."
@@ -2559,7 +2575,7 @@ See `knot-update--commit-args' for fan-out semantics."
   (let* ((ids (knot-update--ticket-ids))
          (count (length ids))
          (bulk (> count 1))
-         (choices (knot-update--all-project-tags))
+         (choices (knot--all-project-tags))
          (prompt (if bulk
                      (format "add tags (%d marked, TAB completes, comma-separated): "
                              count)
@@ -2708,8 +2724,13 @@ Accepts only a non-negative integer inside `priority_range'."
     raw))
 
 (defun knot-create--read-tags (prompt _initial-input _history)
-  "`:reader' for the tags infix: a comma-list of tag names, empty allowed."
-  (read-string (or prompt "tags (comma-list): ")))
+  "`:reader' for the tags infix: a comma-list of tag names, empty allowed.
+Completes over the project tag union from `knot--all-project-tags';
+free input is allowed so brand-new tag names still work."
+  (let ((picks (completing-read-multiple
+                (or prompt "tags (TAB completes, empty to skip): ")
+                (knot--all-project-tags) nil nil)))
+    (string-join picks ",")))
 
 (defun knot-create--read-assignee (prompt _initial-input _history)
   "`:reader' for the assignee infix."
