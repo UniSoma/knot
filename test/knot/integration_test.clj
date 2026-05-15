@@ -226,6 +226,48 @@
         (is (not (str/includes? err "value starting with `-`"))
             "the dash-leading hint must not fire on genuine unknown flags")))))
 
+(deftest missing-numeric-value-error-hint-test
+  ;; A value-bearing numeric flag (e.g. `--priority`) given no value
+  ;; makes babashka.cli bind the flag to implicit boolean `true`; the
+  ;; subsequent `:coerce :long` then fails with the cryptic message
+  ;; `Coerce failure: cannot transform (implicit) true to long` which
+  ;; never names the offending flag. -main's catch detects that ex-data
+  ;; signature (:cause :coerce + "(implicit) " in :msg) and replaces
+  ;; the message with one that names the flag. See kno-01kqys6tvsdr.
+  (testing "create x --priority --tags x names --priority and drops the bare bb-cli text"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--priority" "--tags" "x")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (str/includes? err "--priority")
+            "stderr must name the offending flag")
+        (is (not (str/includes? err "(implicit)"))
+            "the bb-cli `(implicit) true` text must not reach the user")
+        (is (not (str/includes? err "Coerce failure"))
+            "the bb-cli `Coerce failure` text must not reach the user"))))
+  (testing "update <id> --priority hits the same hint (numeric flag, different command)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]}      (run-knot tmp "create" "x")
+            id                 (-> out str/trim
+                                   (->> (re-matches #".+/([^/]+)--x\.md"))
+                                   second)
+            {:keys [exit err]} (run-knot tmp "update" id "--priority")]
+        (is (= 1 exit))
+        (is (str/includes? err "--priority"))
+        (is (not (str/includes? err "(implicit)")))
+        (is (not (str/includes? err "Coerce failure"))))))
+  (testing "a genuine bad value (--priority abc) still surfaces the bb-cli coerce-failure message"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit err]} (run-knot tmp "create" "x" "--priority" "abc")]
+        (is (= 1 exit))
+        (is (str/includes? err "Coerce failure")
+            "the hint must not fire on legit-but-unparseable values")
+        (is (not (str/includes? err "none was provided"))
+            "the missing-value hint must not fire when a value was provided")))))
+
 (deftest read-cmd-error-envelope-test
   (testing "show --json on a missing id emits the v0.3 error envelope on stdout (exit 1)"
     (with-tmp tmp

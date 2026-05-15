@@ -67,6 +67,22 @@
                          (or (true? v) (= [true] v)))))
                 opts)))))
 
+(defn- missing-value-coerce-mishap?
+  "Detect babashka.cli's signature for a value-bearing flag whose value
+   position is occupied by another flag-shaped token (or end-of-argv),
+   so the parser binds the flag to implicit boolean `true` and coerce
+   then fails. bb-cli reports this with `:cause :coerce` and embeds the
+   string `(implicit) ` in `:msg` — that marker distinguishes the
+   missing-value case from a legit-but-unparseable value (which bb-cli
+   formats as `input \"...\"`). Unlike the dash-leading case, bb-cli
+   already names the failing flag in `:option`, so the catch can name
+   it back to the user directly. See kno-01kqys6tvsdr."
+  [data]
+  (and (= :org.babashka/cli (:type data))
+       (= :coerce (:cause data))
+       (string? (:msg data))
+       (str/includes? (:msg data) "(implicit) ")))
+
 ;; Body-section flags (`--description / --design / --acceptance`, plus the
 ;; `-d` alias) are pre-extracted from argv by `extract-body-flags` before
 ;; delegating to `babashka.cli`. They live in `knot.help/registry` with
@@ -1121,12 +1137,25 @@
             (usage)
             (System/exit 1))))
     (catch Exception e
-      (binding [*out* *err*]
-        (if (dash-leading-value-mishap? (ex-data e))
-          (do (println "knot: a value starting with `-` was passed to a flag, but")
-              (println "      babashka.cli classifies argv tokens starting with `-` as flag")
-              (println "      names — and the `--<flag>=<value>` form does not escape it.")
-              (println "      Workaround: prefix the value with a space, e.g.")
-              (println "      `--acceptance \" - text\"`. Tracked: kno-01kqxd0amhnb."))
-          (println (str "knot: " (or (.getMessage e) (.toString e))))))
+      (let [d (ex-data e)]
+        (binding [*out* *err*]
+          (cond
+            (dash-leading-value-mishap? d)
+            (do (println "knot: a value starting with `-` was passed to a flag, but")
+                (println "      babashka.cli classifies argv tokens starting with `-` as flag")
+                (println "      names — and the `--<flag>=<value>` form does not escape it.")
+                (println "      Workaround: prefix the value with a space, e.g.")
+                (println "      `--acceptance \" - text\"`. Tracked: kno-01kqxd0amhnb."))
+
+            (missing-value-coerce-mishap? d)
+            (let [flag   (some-> (:option d) name)
+                  coerce (some-> (get-in d [:spec (:option d) :coerce]) name)]
+              (println (str "knot: --" flag " requires a " coerce
+                            " value but none was provided"))
+              (println "      (the next argv token looked like a flag, so babashka.cli")
+              (println (str "      bound --" flag " to implicit `true`)."))
+              (println (str "      Pass a value: `--" flag " <" coerce ">`.")))
+
+            :else
+            (println (str "knot: " (or (.getMessage e) (.toString e)))))))
       (System/exit 1))))
