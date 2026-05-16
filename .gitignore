@@ -6,3 +6,4 @@
 *.elc
 /slides/
 \?/
+release-notes-v*.txt

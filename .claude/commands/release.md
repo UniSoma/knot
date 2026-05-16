@@ -26,88 +26,230 @@ banner.
 </version-file>
 
 <changelog>
-`CHANGELOG.md` follows Keep a Changelog format. New entries go at the top,
-above the previous version (and below the `## Versioning` block).
+`CHANGELOG.md` follows Keep a Changelog format. The file carries a rolling
+`[Unreleased]` section at the top (below `## Versioning`) where in-flight
+changes are written during the cycle. Cutting a release renames that section
+to the new version and seeds a fresh empty `[Unreleased]` above it.
 </changelog>
 
 <git-tags>
-Tags use `vX.Y.Z` format (e.g. `v0.0.1`).
+Tags use `vX.Y.Z` format (e.g. `v0.5.0`). Per-slice tickets and the release
+coordination ticket carry the same `vX.Y.Z` tag for coverage-audit
+reconciliation.
 </git-tags>
+
+<release-notes>
+Each cut drafts release-notes prose to `release-notes-vX.Y.Z.txt` at repo
+root (gitignored via `release-notes-v*.txt`). The same prose feeds both the
+annotated git tag message (Step 8) and the GitHub Release body (Step 11) —
+single source.
+</release-notes>
 
 ## Procedure
 
 ### Step 1: Gather context
 
-Run these commands to understand current state:
-
 ```bash
-# Get current version
+# Current version
 grep 'def version' src/knot/version.clj
 
-# Get latest tag — if this command fails, this is the first release of the
-# repo. In that case, run `git log --oneline` instead and reason about the
-# full history.
+# Latest tag — if this command fails, this is the first release of the repo.
+# In that case, run `git log --oneline` instead and reason about full history.
 git describe --tags --abbrev=0
 
-# Get commits since last tag (only if a prior tag exists)
+# Commits since last tag (only if a prior tag exists)
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 ```
 
 ### Step 2: Determine new version
 
-Based on commits since last tag, determine version bump:
+Based on commits since last tag, determine the bump:
 
-- **patch** (X.Y.Z+1): Bug fixes, minor improvements
-- **minor** (X.Y+1.0): New features, non-breaking changes
-- **major** (X+1.0.0): Breaking changes
+- **patch** (X.Y.Z+1): bug fixes, minor improvements
+- **minor** (X.Y+1.0): new features, non-breaking changes
+- **major** (X+1.0.0): breaking changes
 
-Ask user to confirm version if unclear.
+Ask the user to confirm if unclear.
 
 ### Step 3: Update version
 
 Edit `src/knot/version.clj` to the new version.
 
-### Step 4: Update CHANGELOG.md
+### Step 4: Coverage audit (before CHANGELOG rename)
 
-Add a new section at the top (below the `## Versioning` block, above the
-previous version):
+Cross-check two sources against the current `[Unreleased]` bullet list:
 
-```markdown
-## [X.Y.Z] - YYYY-MM-DD
+```bash
+# Intent (ticket discipline)
+knot list --tag vX.Y.Z --status closed
 
-### Added/Changed/Fixed/Removed
-
-- Description of change
+# Ground truth (every commit that landed)
+git log --oneline $(git describe --tags --abbrev=0)..HEAD
 ```
 
-Categorize commits appropriately:
+For each closed ticket and each commit, verify a corresponding bullet exists
+under `[Unreleased]`. Backfill any missing entries **while the section is
+still `[Unreleased]`** — once it's renamed in Step 5, the section is dated
+and effectively sealed.
 
-- **Added**: New features
-- **Changed**: Changes to existing functionality
-- **Fixed**: Bug fixes
-- **Removed**: Removed features
+The `git log` cross-check is the safety net: it catches slices that landed
+without the `vX.Y.Z` ticket tag.
 
-### Step 5: Commit release preparation
+### Step 5: Rename `[Unreleased]` to the versioned section
+
+In `CHANGELOG.md`:
+
+1. Rename `## [Unreleased]` to `## [X.Y.Z] - YYYY-MM-DD`.
+2. Insert a fresh empty `## [Unreleased]` skeleton above it:
+
+   ```markdown
+   ## [Unreleased]
+
+   ### Added/Changed/Fixed/Removed
+   ```
+
+If `[Unreleased]` was empty or missing entirely, write the new versioned
+section directly below the `## Versioning` block instead.
+
+Categorize entries:
+
+- **Added**: new features
+- **Changed**: changes to existing functionality
+- **Fixed**: bug fixes
+- **Removed**: removed features
+
+### Step 6: Draft release-notes prose
+
+Write to `release-notes-vX.Y.Z.txt` at repo root (gitignored). This single
+file feeds both the annotated tag message (Step 8) and the GitHub Release
+body (Step 11).
+
+Canonical structure (modeled on v0.3.0's shipped tag message):
+
+~~~
+Release vX.Y.Z — <one-line theme>
+
+<1-3 sentence lead: breaking? headline change?>
+
+## Highlights
+
+- **<phrase>.** <description>
+
+## Breaking changes        # omit entire section for non-breaking releases
+
+1. **<title>.** <description>
+
+   Migration: <command or one-liner>
+
+## Upgrade path
+
+```sh
+<bbin reinstall + per-release verification>
+```
+
+## Known follow-ups        # optional — omit when empty
+
+- <ticket id> — <one-liner>
+~~~
+
+### Step 7: Commit release preparation
 
 ```bash
 git add -A
 git commit -m "Release vX.Y.Z"
 ```
 
-The commit message uses the verb-leading convention used throughout this
-repo — no Conventional Commits prefix.
+Verb-leading commit convention used throughout this repo — no Conventional
+Commits prefix. The prose file is excluded from staging by the
+`release-notes-v*.txt` gitignore pattern.
 
-### Step 6: Create tag
+### Step 8: Create annotated tag
 
 ```bash
-git tag vX.Y.Z
+git tag -a vX.Y.Z -F release-notes-vX.Y.Z.txt
 ```
 
-### Step 7: Report next steps
+Annotated (not lightweight) so `git show vX.Y.Z` carries the release prose,
+and the same prose feeds the GitHub Release body in Step 11.
 
-Tell user to push: `git push origin main --tags`.
+### Step 9: Pre-push smoke
+
+Install from the working copy and verify the binary starts and reports the
+new version. `info`/`check` are deliberately out of scope here — they'd
+either need a knot project or risk false-positive failures against this
+repo's own tickets. Full end-to-end coverage lives in the release-tag smoke
+CI workflow (separate from this slash command).
+
+```bash
+bbin install . --as knot-rc
+knot-rc --version | grep -q "X.Y.Z"   # grep-asserted version string
+knot-rc --help                        # exit 0
+bbin uninstall knot-rc                # unconditional, even on failure
+```
+
+If `--version` doesn't match or `--help` fails, abort the cut and uninstall
+before exiting.
+
+### Step 10: Push
+
+```bash
+git push origin main --tags
+```
+
+### Step 11: Create GitHub Release
+
+Prefer the `gh` CLI when available:
+
+```bash
+gh release create vX.Y.Z \
+  -F release-notes-vX.Y.Z.txt \
+  --title "vX.Y.Z" \
+  --verify-tag
+```
+
+`--verify-tag` refuses to create a release for a tag that doesn't exist
+remotely — catches "forgot to push tags" mistakes.
+
+Web-UI fallback when `gh` is not installed: open
+`github.com/<owner>/<repo>/releases/new`, paste `release-notes-vX.Y.Z.txt`
+verbatim into the body, set tag-target to `vX.Y.Z`, publish.
+
+Mark as "latest" (the default). No `--prerelease` flag.
+
+### Step 12: Cleanup
+
+1. Verify all slice tickets are closed:
+
+   ```bash
+   knot list --tag vX.Y.Z --status open --json \
+     | jq -e '.data | length == 0'
+   ```
+
+   On non-empty: abort with the list of open slices. (The open-children
+   gate catches this in step 2 below anyway, but failing here gives a
+   cleaner message.)
+
+2. Close the release coordination ticket:
+
+   ```bash
+   coord=$(knot list --tag vX.Y.Z --tag release --status open --json \
+             | jq -r '.data[0].id')
+   knot close "$coord" --summary \
+     "Cut vX.Y.Z. Release: <gh-release-url>."
+   ```
+
+   Terse summary — rich content already lives in CHANGELOG + tag message +
+   GH Release body.
+
+3. Delete the prose file:
+
+   ```bash
+   rm release-notes-vX.Y.Z.txt
+   ```
 
 ## Constraints
 
-- Do NOT push automatically.
+- Do NOT push automatically. Step 10 needs explicit confirmation.
 - Ask for confirmation before committing if changelog content is unclear.
+- The `release-notes-v*.txt` pattern must already exist in `.gitignore`. If
+  it doesn't, add it before proceeding.
