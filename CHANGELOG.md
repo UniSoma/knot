@@ -14,40 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **`release-smoke` Windows step exited with `bbin: command not
-  found`.** The "Install bbin" step downloads bbin into
-  `$HOME/.local/bin`, appends that directory to `$GITHUB_PATH`, then
-  runs `bbin --version` in the same step. `$GITHUB_PATH` only takes
-  effect in *subsequent* steps, so the in-step lookup relied on
-  `~/.local/bin` already being on `$PATH` — which it is on
-  Linux/macOS by convention, but isn't on the Windows runner.
-  Verification now invokes the full path
-  (`"$HOME/.local/bin/bbin" --version`); subsequent steps still
-  resolve `bbin` via `$GITHUB_PATH` as intended.
-
-- **Windows CI on the `bb test` runner.** Two failures surfaced after
-  v0.5.0's JSON Schema work landed:
-  - `every-real-ticket-validates` failed against every ticket with
-    "missing required property `id`/`title`". Root cause:
-    `knot.ticket/parse` matches the literal fence strings `"---\n"`
-    and `"\n---\n"`, so a Windows checkout under
-    `core.autocrlf=true` (CRLF in the working tree) made every
-    ticket look bodyless to the parser, yielding empty frontmatter.
-  - `checked-in-schema-is-in-sync` reported `knot.schema.json` out
-    of sync. Root cause: Jackson's pretty printer uses
-    `System.lineSeparator()`, so `schema-json` emitted `\r\n`
-    between content lines on the Windows JVM while the
-    checked-in file was LF (and the explicit trailing `"\n"`
-    didn't match either path consistently).
-  Fix: new `.gitattributes` with `* text=auto eol=lf` pins every
-  text file to LF in the working tree across Linux/macOS/Windows,
-  and `knot.schema/schema-json` post-processes the Jackson output
-  via `str/replace "\r\n" "\n"` so its return value is identical on
-  every platform. Both fixes are belt-and-braces — either alone
-  closes the immediate failure, but together they keep the
-  byte-compare contract robust to future tooling drift.
+### Added/Changed/Fixed/Removed
 
 ## [0.5.0] - 2026-05-17
 
@@ -159,6 +126,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on Emacs < 30.1 should pin `knot.el` to the v0.4.0 tag.
 
 ### Fixed
+
+- **`/release` slash command: Markdown headings stripped from tag
+  message.** Step 8 invoked `git tag -a vX.Y.Z -F release-notes-…txt`
+  with git's default cleanup mode, which strips lines beginning with
+  `#` as comments — silently deleting every `## Highlights` / `##
+  Upgrade path` heading from the annotated tag's message body. Now
+  passes `--cleanup=verbatim` and verifies the heading count survives
+  via `git cat-file -p`. Step 12 also switched the coord-ticket
+  lookup from `--status open` to a jq `select(.status != "closed")`
+  filter so an `in_progress` coord (the convention here — the coord
+  is `knot start`ed at release-cut time) is found rather than
+  skipped.
+
+- **`release-smoke` Windows step exited with `bbin: command not
+  found`.** The "Install bbin" step downloads bbin into
+  `$HOME/.local/bin`, appends that directory to `$GITHUB_PATH`, then
+  runs `bbin --version` in the same step. `$GITHUB_PATH` only takes
+  effect in *subsequent* steps, so the in-step lookup relied on
+  `~/.local/bin` already being on `$PATH` — which it is on
+  Linux/macOS by convention, but isn't on the Windows runner.
+  Verification now invokes the full path
+  (`"$HOME/.local/bin/bbin" --version`); subsequent steps still
+  resolve `bbin` via `$GITHUB_PATH` as intended.
+
+- **Windows CI on the `bb test` runner.** Two failures surfaced after
+  v0.5.0's JSON Schema work landed:
+  - `every-real-ticket-validates` failed against every ticket with
+    "missing required property `id`/`title`". Root cause:
+    `knot.ticket/parse` matches the literal fence strings `"---\n"`
+    and `"\n---\n"`, so a Windows checkout under
+    `core.autocrlf=true` (CRLF in the working tree) made every
+    ticket look bodyless to the parser, yielding empty frontmatter.
+  - `checked-in-schema-is-in-sync` reported `knot.schema.json` out
+    of sync. Root cause: Jackson's pretty printer uses
+    `System.lineSeparator()`, so `schema-json` emitted `\r\n`
+    between content lines on the Windows JVM while the
+    checked-in file was LF (and the explicit trailing `"\n"`
+    didn't match either path consistently).
+  Fix: new `.gitattributes` with `* text=auto eol=lf` pins every
+  text file to LF in the working tree across Linux/macOS/Windows,
+  and `knot.schema/schema-json` post-processes the Jackson output
+  via `str/replace "\r\n" "\n"` so its return value is identical on
+  every platform. Both fixes are belt-and-braces — either alone
+  closes the immediate failure, but together they keep the
+  byte-compare contract robust to future tooling drift.
 
 - **AC gate hint pointed at a non-existent `--check` flag, and
   the unchecked count was inverted.** Hint now points at the real
