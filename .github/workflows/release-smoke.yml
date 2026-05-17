@@ -40,7 +40,12 @@ jobs:
               "https://raw.githubusercontent.com/babashka/bbin/${BBIN_VERSION}/bbin.bat"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          bbin --version
+          # $GITHUB_PATH only takes effect in subsequent steps, so invoke
+          # via the full path here. On Linux/macOS `~/.local/bin` is
+          # already on $PATH by convention and `bbin --version` would
+          # work; on the Windows runner it isn't, and bash exits with
+          # `bbin: command not found` before reaching the next step.
+          "$HOME/.local/bin/bbin" --version
 
       - name: Install knot from checkout
         run: bbin install . --as knot-smoke

@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`release-smoke` Windows step exited with `bbin: command not
+  found`.** The "Install bbin" step downloads bbin into
+  `$HOME/.local/bin`, appends that directory to `$GITHUB_PATH`, then
+  runs `bbin --version` in the same step. `$GITHUB_PATH` only takes
+  effect in *subsequent* steps, so the in-step lookup relied on
+  `~/.local/bin` already being on `$PATH` — which it is on
+  Linux/macOS by convention, but isn't on the Windows runner.
+  Verification now invokes the full path
+  (`"$HOME/.local/bin/bbin" --version`); subsequent steps still
+  resolve `bbin` via `$GITHUB_PATH` as intended.
+
 - **Windows CI on the `bb test` runner.** Two failures surfaced after
   v0.5.0's JSON Schema work landed:
   - `every-real-ticket-validates` failed against every ticket with
