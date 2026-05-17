@@ -1,0 +1,9 @@
+# Force LF line endings for every text file on every platform.
+#
+# Windows checkouts with `core.autocrlf=true` would otherwise rewrite LF
+# to CRLF in the working tree, which breaks:
+#   - knot.ticket/parse (matches the literal "---\n" / "\n---\n" fences)
+#   - the checked-in-schema-is-in-sync test (knot.schema.json byte-compare)
+# Pinning eol=lf at the gitattributes layer guarantees the working tree
+# matches the index on every OS.
+* text=auto eol=lf

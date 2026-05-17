@@ -14,7 +14,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added/Changed/Fixed/Removed
+### Fixed
+
+- **Windows CI on the `bb test` runner.** Two failures surfaced after
+  v0.5.0's JSON Schema work landed:
+  - `every-real-ticket-validates` failed against every ticket with
+    "missing required property `id`/`title`". Root cause:
+    `knot.ticket/parse` matches the literal fence strings `"---\n"`
+    and `"\n---\n"`, so a Windows checkout under
+    `core.autocrlf=true` (CRLF in the working tree) made every
+    ticket look bodyless to the parser, yielding empty frontmatter.
+  - `checked-in-schema-is-in-sync` reported `knot.schema.json` out
+    of sync. Root cause: Jackson's pretty printer uses
+    `System.lineSeparator()`, so `schema-json` emitted `\r\n`
+    between content lines on the Windows JVM while the
+    checked-in file was LF (and the explicit trailing `"\n"`
+    didn't match either path consistently).
+  Fix: new `.gitattributes` with `* text=auto eol=lf` pins every
+  text file to LF in the working tree across Linux/macOS/Windows,
+  and `knot.schema/schema-json` post-processes the Jackson output
+  via `str/replace "\r\n" "\n"` so its return value is identical on
+  every platform. Both fixes are belt-and-braces — either alone
+  closes the immediate failure, but together they keep the
+  byte-compare contract robust to future tooling drift.
 
 ## [0.5.0] - 2026-05-17
 

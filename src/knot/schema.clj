@@ -3,6 +3,7 @@
    runtime allowed_values exposed by `knot info`. The schema is
    editor-facing (VSCode + any YAML/JSON-schema-aware tooling)."
   (:require [cheshire.core :as json]
+            [clojure.string :as str]
             [flatland.ordered.map :refer [ordered-map]]))
 
 (def ^:private schema-uri
@@ -68,7 +69,12 @@
   "Serialize `(generate-schema info-data)` to a pretty-printed JSON
    string with a trailing newline. Output is deterministic given the
    same input: `generate-schema` returns ordered-maps, so key order is
-   preserved through serialization."
+   preserved through serialization. Line endings are normalized to LF on
+   every platform — Jackson's pretty printer uses
+   `System.lineSeparator()`, so on the Windows JVM the raw output is
+   CRLF; the post-process keeps the on-disk file byte-identical across
+   Linux/macOS/Windows."
   [info-data]
-  (str (json/generate-string (generate-schema info-data) {:pretty true})
-       "\n"))
+  (-> (json/generate-string (generate-schema info-data) {:pretty true})
+      (str/replace "\r\n" "\n")
+      (str "\n")))
