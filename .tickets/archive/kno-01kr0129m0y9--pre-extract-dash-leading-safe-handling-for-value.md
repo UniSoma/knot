@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: afk
 created: '2026-05-07T01:33:04.505238004Z'
-updated: '2026-05-17T03:01:49.451537761Z'
+updated: '2026-05-17T03:14:15.000968825Z'
 closed: '2026-05-17T03:01:49.451537761Z'
 acceptance:
 - title: extract-value-flags map is derived from knot.help/registry, not hand-maintained per handler.
@@ -23,6 +23,8 @@ acceptance:
   done: true
 links:
 - kno-01kqxd0amhnb
+- kno-01krsyn5v7sq
+- kno-01krsytqv33a
 ---
 
 ## Description
