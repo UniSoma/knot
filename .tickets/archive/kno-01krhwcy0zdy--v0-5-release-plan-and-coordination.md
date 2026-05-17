@@ -1,12 +1,13 @@
 ---
 id: kno-01krhwcy0zdy
 title: v0.5 release plan and coordination
-status: in_progress
+status: closed
 type: chore
 priority: 2
 mode: hitl
 created: '2026-05-13T23:57:49.937527823Z'
-updated: '2026-05-17T01:17:02.008636465Z'
+updated: '2026-05-17T01:41:15.568061954Z'
+closed: '2026-05-17T01:41:15.568061954Z'
 tags:
 - v0.5
 - release
@@ -37,3 +38,9 @@ Four v0.4-plan blockers slid to v0.5 (retagged v0.4 → v0.5 at v0.4 cut time):
 v0.4.0 was cut manually 2026-05-13 (commit 932e2b5, lightweight tag) around the still-unmodernized `/release` command — same one-off as v0.3. Closing out the release tooling slices (especially kno-01kqzh2vhhrz) is the dominant motivation for this cycle so v0.5 can be the first cut to actually run `/release` cleanly.
 
 Additional v0.5 scope to be added as it firms up.
+
+## Notes
+
+**2026-05-17T01:41:15.568061954Z**
+
+Cut v0.5.0. Release: https://github.com/UniSoma/knot/releases/tag/v0.5.0.

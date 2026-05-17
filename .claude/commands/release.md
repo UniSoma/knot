@@ -166,11 +166,18 @@ Commits prefix. The prose file is excluded from staging by the
 ### Step 8: Create annotated tag
 
 ```bash
-git tag -a vX.Y.Z -F release-notes-vX.Y.Z.txt
+git tag -a vX.Y.Z -F release-notes-vX.Y.Z.txt --cleanup=verbatim
 ```
 
 Annotated (not lightweight) so `git show vX.Y.Z` carries the release prose,
 and the same prose feeds the GitHub Release body in Step 11.
+`--cleanup=verbatim` is load-bearing: git's default cleanup mode strips lines
+beginning with `#` as comments, which would silently delete Markdown headings
+(`## Highlights`, `## Upgrade path`, …) from the prose. Verify after tagging:
+
+```bash
+git cat-file -p vX.Y.Z | grep -c '^## '   # should match the prose's `##` count
+```
 
 ### Step 9: Pre-push smoke
 
@@ -218,22 +225,25 @@ Mark as "latest" (the default). No `--prerelease` flag.
 
 ### Step 12: Cleanup
 
-1. Verify all slice tickets are closed:
+1. Verify every slice ticket is closed (any non-`closed` status counts as a
+   leftover, including `in_progress`):
 
    ```bash
-   knot list --tag vX.Y.Z --status open --json \
-     | jq -e '.data | length == 0'
+   knot list --tag vX.Y.Z --json \
+     | jq -e '[.data[] | select(.status != "closed")] | length == 0'
    ```
 
-   On non-empty: abort with the list of open slices. (The open-children
+   On non-empty: abort with the list of non-closed slices. (The open-children
    gate catches this in step 2 below anyway, but failing here gives a
    cleaner message.)
 
-2. Close the release coordination ticket:
+2. Close the release coordination ticket. The coord is conventionally
+   `knot start`ed at release-cut time, so filter by "not closed" rather than
+   `--status open` — `--status open` would miss the `in_progress` coord:
 
    ```bash
-   coord=$(knot list --tag vX.Y.Z --tag release --status open --json \
-             | jq -r '.data[0].id')
+   coord=$(knot list --tag vX.Y.Z --tag release --json \
+             | jq -r '[.data[] | select(.status != "closed")][0].id')
    knot close "$coord" --summary \
      "Cut vX.Y.Z. Release: <gh-release-url>."
    ```
