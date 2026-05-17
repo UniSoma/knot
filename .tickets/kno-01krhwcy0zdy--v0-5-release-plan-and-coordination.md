@@ -1,12 +1,12 @@
 ---
 id: kno-01krhwcy0zdy
 title: v0.5 release plan and coordination
-status: open
+status: in_progress
 type: chore
 priority: 2
 mode: hitl
 created: '2026-05-13T23:57:49.937527823Z'
-updated: '2026-05-13T23:57:49.937527823Z'
+updated: '2026-05-17T01:17:02.008636465Z'
 tags:
 - v0.5
 - release

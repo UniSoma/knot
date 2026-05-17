@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added/Changed/Fixed/Removed
+
+## [0.5.0] - 2026-05-17
+
 ### Added
 
 - **`AGE` column on `knot list / ready / blocked / closed`.** Every
@@ -40,6 +44,114 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are rejected at parse time with a clear message; unlike the open
   enums (`--type`, `--status`), priority is a closed range across
   config/check.
+- **JSON Schema for knot tickets.** New top-level `knot.schema.json`
+  at the repo root and a `knot schema` command that emits it to
+  stdout. Editors and CI can validate ticket frontmatter with
+  standard JSON-Schema tooling. Bundled skill points at the schema
+  as the canonical frontmatter contract.
+- **Release-tag smoke CI workflow.** `.github/workflows/release-smoke.yml`
+  fires on every `v*` tag push (and `workflow_dispatch`) across
+  ubuntu-/macos-/windows-latest. Pins babashka + bbin at the top
+  level via `env:`, installs knot via `bbin install`, then exercises
+  the golden-path lifecycle (`init` → `create` → `ls` → `show` →
+  `start` → `close`) along with an `ls --json` envelope assertion
+  and a `--version` tag-equality check. Install regressions surface
+  inside the release pipeline rather than via user reports.
+- **Tags transient in `knot.el`** (`T` prefix in list and show
+  buffers). Three suffixes: `a` adds tags, `r` removes tags, `T`
+  replaces the whole list. Add and remove use
+  `completing-read-multiple` over the project tag union for
+  autocompletion; free input is still allowed for brand-new tags.
+  Honors `knot-list--marks` for bulk fan-out across selected rows,
+  and `+` / `-` on the `tags:` line in the show buffer route to
+  add / remove respectively.
+- **Dired-style marks on `knot.el` list buffers** (`m` mark, `u`
+  unmark, `U` unmark all). Most mutating actions now honor the mark
+  set — `,` (update) and the per-field suffixes (status / priority
+  / mode / type / tags / assignee / parent) fan out across every
+  marked id rather than just the row at point. The list header
+  displays `[N marked]` right-aligned via inline `:align-to`.
+- **`knot-find-id-at-point` + kill-on-quit in `knot.el` show
+  buffers.** `q` kills the show buffer (rather than burying) so
+  transient show buffers don't accumulate across navigation, and
+  `knot-find-id-at-point` makes RET on a buttonized id navigate to
+  that ticket's show buffer.
+- **Section-aware `+` and general `-` in `knot.el` show buffers.**
+  `+` on the deps / links / acceptance / tags sections adds an entry
+  of that kind; `-` on any removable line removes it. Field
+  detection rides on the `'knot-field` text property already in
+  place for `RET`-on-AC.
+- **Polish in `knot.el`.** `y-or-n-p` for destructive prompts,
+  `revert-buffer` rebound to `g`, `pop-to-buffer-same-window` so
+  dedicated buffers don't split frames, `which-key` integration on
+  the transients, `visual-wrap-prefix-mode` in show / capture /
+  deps buffers, `pixel-scroll-precision-mode` in list / deps
+  buffers, status-glyph + priority/type annotations on
+  `completing-read` pickers.
+- **Tag prompts complete over the project tag union in `knot.el`.**
+  All three tag-input sites (`--tag` filter, replace, create
+  transient) now use `completing-read` / `completing-read-multiple`
+  against the live project tag union via a shared
+  `knot--all-project-tags` helper. Free input is preserved so new
+  tag names still work.
+
+### Changed
+
+- **Open-children gate on parent status transitions.** `knot start`,
+  `knot close`, `knot status <id> <target>`, and `knot update
+  --status <target>` now block when the umbrella has any child whose
+  status is non-terminal. Fires on both directions: `*→active` (start
+  side) and `active→terminal` (close side). Structurally parallel to
+  the v0.4 AC gate. Stderr enumerates the open child ids; `--json`
+  returns `{ok:false, error:{code:"open_children", message,
+  open_children:[...]}}` on stdout with exit 1. `--force` overrides;
+  on the close side `--force` requires `--summary "<reason>"` (the
+  summary is appended as a Notes entry), while the start side accepts
+  bare `--force` because starting a parent is provisional. When both
+  AC and open-children gates would fire, a single `--force` bypasses
+  both and stderr emits one warning per gate. Closing or starting a
+  parent whose only children are already terminal — or a parent with
+  zero children — succeeds without the gate firing. See
+  [ADR-0003](docs/adr/0003-parent-children-gate-status-transitions-not-readiness.md)
+  for the design rationale (gate transitions, not readiness).
+- **`knot.el` baseline bumped to Emacs 30.1.** `Package-Requires`
+  raised from `(emacs "28.1")` to `(emacs "30.1")`. ~53 non-evil
+  keymap construction sites migrated from `(define-key map (kbd
+  "K") #'fn)` to `(keymap-set map "K" #'fn)` across `knot-info`,
+  `knot-list`, `knot-show`, `knot-capture`, and `knot-deps`
+  mode-maps. Evil compat switches to `keymap-unset` (parent-shadow
+  semantic preserved by omitting `REMOVE`); `evil-define-key*`
+  keeps `kbd` at its scoped call site. README's suggested
+  global-bind example modernized to `keymap-global-set`. Users
+  on Emacs < 30.1 should pin `knot.el` to the v0.4.0 tag.
+
+### Fixed
+
+- **AC gate hint pointed at a non-existent `--check` flag, and
+  the unchecked count was inverted.** Hint now points at the real
+  `knot update <id> --ac "<title>" --done` triple, and the count
+  uses `(count open)` directly so the "N of M unchecked" line
+  matches the open-AC list. The hint also moved out of the ex-info
+  message into the plain-text printer so `error.message` in the
+  JSON envelope stays a bare diagnosis and `open_acceptance` carries
+  the action data.
+- **`knot create`: missing value for a numeric flag now names the
+  offending flag.** A value-bearing numeric flag (e.g.
+  `--priority`) given no value previously made babashka.cli bind
+  the flag to implicit boolean `true`; the subsequent `:coerce
+  :long` then failed with `Coerce failure: cannot transform
+  (implicit) true to long`, never naming the flag. The top-level
+  catch now detects bb-cli's missing-value signature (`:cause
+  :coerce` + `(implicit) ` substring) and reads `:option` / `:spec`
+  from ex-data to emit a message naming the flag and its required
+  coerce type. Covers every `:coerce :long` flag in the registry
+  (`--priority` on `create`/`update`; `--limit` on `ls` / `list` /
+  `ready` / `blocked` / `closed`). Genuine unparseable-value cases
+  (`--priority abc`) surface the original error untouched.
+- **`bb lint:elisp` works under `-Q` with a system-wide elpa.** The
+  task no longer assumes a user `~/.emacs.d/elpa` and instead
+  resolves `package-lint` from the system load-path, so CI and
+  fresh machines lint clean without per-user package state.
 
 ## [0.4.0] - 2026-05-13
 
