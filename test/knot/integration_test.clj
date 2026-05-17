@@ -60,6 +60,16 @@
               {:dir cwd :in "" :out :string :err :string
                :extra-env extra-env}))
 
+(defn- id-from-create-out
+  "Extract the ticket id from a create-cmd's stdout path string of the
+   form `<root>/.tickets/<id>--<slug>.md`."
+  [out slug]
+  (->> (str/trim out)
+       fs/file-name
+       str
+       (re-matches (re-pattern (str "(.+)--" slug "\\.md")))
+       second))
+
 (deftest create-then-show-end-to-end-test
   (testing "create writes a slug-suffixed file in .tickets/, show reads it back"
     (with-tmp tmp
@@ -190,34 +200,12 @@
         (is (re-find #"(?i)bogus" err)
             "stderr must name the offending flag")))))
 
-(deftest dash-leading-value-error-hint-test
-  ;; babashka.cli classifies any argv token starting with `-` as a flag
-  ;; name (cli.cljc:344-367), even after `=`, so a value like `- text`
-  ;; lands as several short-opt entries and the legitimate flag gets an
-  ;; implicit `true`. -main's catch detects that signature in ex-data
-  ;; and replaces the cryptic `Unknown option: :e` message with a hint.
-  ;; See kno-01kqxd0amhnb.
-  (testing "create --acceptance \"- text\" emits the dash-leading hint, not the bare bb-cli message"
-    (with-tmp tmp
-      (run-knot tmp "init")
-      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--acceptance" "- text")]
-        (is (= 1 exit))
-        (is (str/blank? out))
-        (is (str/includes? err "value starting with `-`")
-            "stderr must explain the dash-leading-value pitfall")
-        (is (str/includes? err "kno-01kqxd0amhnb")
-            "stderr must reference the tracking ticket"))))
-  (testing "update --add-tag \"-foo\" hits the same hint"
-    (with-tmp tmp
-      (run-knot tmp "init")
-      (let [{:keys [out]}      (run-knot tmp "create" "x")
-            id                 (-> out str/trim
-                                   (->> (re-matches #".+/([^/]+)--x\.md"))
-                                   second)
-            {:keys [exit err]} (run-knot tmp "update" id "--add-tag" "-foo")]
-        (is (= 1 exit))
-        (is (str/includes? err "value starting with `-`")))))
-  (testing "a genuine unknown flag still surfaces the original Unknown-option message"
+(deftest unknown-flag-error-message-test
+  ;; The bb-cli `Unknown option` message must reach the user verbatim
+  ;; on a genuine unknown flag — no dash-leading hint, no swallow. This
+  ;; pins the residual surface after kno-01kr0129m0y9 made registered
+  ;; value-bearing string flags pre-extract their dash-leading values.
+  (testing "show <id> --bogus surfaces the bb-cli Unknown-option message"
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (let [{:keys [exit err]} (run-knot tmp "show" "no-such-id" "--bogus")]
@@ -225,6 +213,230 @@
         (is (str/includes? err "Unknown option"))
         (is (not (str/includes? err "value starting with `-`"))
             "the dash-leading hint must not fire on genuine unknown flags")))))
+
+(deftest dash-leading-value-flags-survive-create-test
+  ;; Pre-extract phase pulls value-bearing string flags out of argv before
+  ;; babashka.cli sees them, so dash-leading values land verbatim instead
+  ;; of being reparsed as flag tokens (babashka.cli cli.cljc:344-367 treats
+  ;; any dash-leading token as a flag name, including after `=`). See
+  ;; kno-01kr0129m0y9 (follow-up to kno-01kqxd0amhnb).
+  (testing "--acceptance survives all four dash-leading shapes"
+    (doseq [[label value rendered]
+            [["single-line"  "- text"                "- [ ] - text"]
+             ["double-dash"  "--text"                "- [ ] --text"]
+             ["alias-shaped" "-x"                    "- [ ] -x"]
+             ["multi-line"   "- one\n- two\n- three" "- [ ] - one\n- two\n- three"]]]
+      (testing label
+        (with-tmp tmp
+          (run-knot tmp "init")
+          (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--acceptance" value)]
+            (is (zero? exit) (str label " create err=" err))
+            (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+              (is (str/includes? shown rendered)
+                  (str label " value must round-trip through show"))))))))
+  (testing "--acceptance via `=` form survives dash-leading value"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--acceptance=- text")]
+        (is (zero? exit) (str "= form err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "- [ ] - text"))))))
+  (testing "aliases (-t, -a) accept dash-leading values"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "-t" "-bug" "-a" "-jonas")]
+        (is (zero? exit) (str "alias err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "type: -bug"))
+          (is (str/includes? shown "assignee: -jonas"))))))
+  (testing "body alias -d accepts dash-leading values (covered by extract-body-flags)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "-d" "- bullet body")]
+        (is (zero? exit) (str "alias -d err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "- bullet body"))))))
+  (testing "single-value string flags (--type, --assignee, --parent, --tags, --mode)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x"
+                                             "--type" "-bug"
+                                             "--assignee" "-me"
+                                             "--parent" "-pid"
+                                             "--tags" "-foo,-bar"
+                                             "--mode" "-afk")]
+        (is (zero? exit) (str "string-flag err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "type: -bug"))
+          (is (str/includes? shown "assignee: -me"))
+          (is (str/includes? shown "parent: -pid"))
+          (is (str/includes? shown "- -foo"))
+          (is (str/includes? shown "- -bar"))
+          (is (str/includes? shown "mode: -afk"))))))
+  (testing "repeatable flags (--external-ref) accumulate with dash-leading values"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x"
+                                             "--external-ref" "- one"
+                                             "--external-ref" "--two")]
+        (is (zero? exit) (str "external-ref err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "- '- one'"))
+          (is (str/includes? shown "- --two")))))))
+
+(deftest dash-leading-value-flags-survive-update-test
+  ;; update mirrors create's pre-extraction so dash-leading values land
+  ;; verbatim on --title / --add-tag / --add-ac / --external-ref / --ac
+  ;; etc. See kno-01kr0129m0y9.
+  (testing "--title survives dash-leading value"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id "--title" "- new title")]
+        (is (zero? exit) (str "update --title err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "title: '- new title'"))))))
+  (testing "--add-tag survives dash-leading value (repeatable)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--add-tag" "-foo"
+                                         "--add-tag" "--bar")]
+        (is (zero? exit) (str "update --add-tag err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- -foo"))
+          (is (str/includes? shown "- --bar"))))))
+  (testing "--add-ac survives dash-leading value (repeatable)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--add-ac" "- first"
+                                         "--add-ac" "--second")]
+        (is (zero? exit) (str "update --add-ac err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- [ ] - first"))
+          (is (str/includes? shown "- [ ] --second"))))))
+  (testing "--external-ref survives dash-leading value (repeatable)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--external-ref" "- one"
+                                         "--external-ref" "--two")]
+        (is (zero? exit) (str "update --external-ref err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- '- one'"))
+          (is (str/includes? shown "- --two"))))))
+  (testing "--ac dash-leading title matches the existing AC entry"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x" "--acceptance" "- task")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id "--ac" "- task" "--done")]
+        (is (zero? exit) (str "update --ac --done err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "- [x] - task")))))))
+
+(deftest dash-leading-value-flags-survive-transition-test
+  ;; close/status take --summary; pre-extract lets summaries that start
+  ;; with `-` survive (e.g. "--won't-fix" or "-cancelled"). Use --force
+  ;; so the summary is required and definitely persisted.
+  (testing "close --summary \"-cancelled\" round-trips through show"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "close" id
+                                         "--force"
+                                         "--summary" "-cancelled")]
+        (is (zero? exit) (str "close err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "-cancelled"))))))
+  (testing "status --summary survives via the `=` form too"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "status" id "closed"
+                                         "--force"
+                                         "--summary=--legacy reason")]
+        (is (zero? exit) (str "status err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "--legacy reason")))))))
+
+(deftest dash-leading-value-flags-survive-list-filters-test
+  ;; list/ls/ready/blocked/closed share the same filter set
+  ;; (--status / --assignee / --tag / --type / --mode, all :coerce []).
+  ;; Pre-extract lets dash-leading filter values reach the query
+  ;; instead of erroring under bb-cli's restrict.
+  (testing "ls --status \"-open\" reaches the filter (zero matches, no error)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (run-knot tmp "create" "x")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--status" "-open" "--json")]
+        (is (zero? exit) (str "ls err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= true (:ok parsed)))
+          (is (empty? (get-in parsed [:data :rows]))
+              "filter for nonexistent status \"-open\" must yield zero rows, not all rows")))))
+  (testing "ls --tag \"-stale\" survives parsing"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (run-knot tmp "create" "x")
+      (let [{:keys [exit out err]} (run-knot tmp "ls" "--tag" "-stale" "--json")]
+        (is (zero? exit) (str "ls err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= true (:ok parsed)))
+          (is (empty? (get-in parsed [:data :rows]))))))))
+
+(deftest dash-leading-value-flags-survive-prime-init-check-test
+  ;; prime / init / check round out the AC-listed surface. The prime
+  ;; case is the regression baseline from kno-01kqxd0amhnb's surface
+  ;; map: --status -open used to be silently dropped by bb-cli; after
+  ;; pre-extract it reaches the filter.
+  (testing "prime --status \"-open\" reaches the filter (zero matches, not silently dropped)"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (run-knot tmp "create" "x")
+      (let [{:keys [exit out err]} (run-knot tmp "prime" "--status" "-open" "--json")]
+        (is (zero? exit) (str "prime err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= true (:ok parsed)))
+          (is (empty? (get-in parsed [:data :ready]))
+              "filter for nonexistent status \"-open\" must clear the ready section")))))
+  (testing "init --prefix \"-foo\" reaches downstream prefix validation (not parser)"
+    ;; --prefix validates `[a-z0-9]+` downstream — the success signal is
+    ;; that the value reaches the config validator (which rejects it
+    ;; loudly) rather than getting eaten as a flag token by bb-cli.
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "init" "--prefix" "-foo")]
+        (is (= 1 exit))
+        (is (str/includes? err ":prefix must be")
+            "the value must reach prefix validation, not the parser")
+        (is (not (str/includes? err "value starting with `-`"))
+            "the dash-leading hint must not fire — the value was extracted cleanly"))))
+  (testing "init --tickets-dir \"-foo\" persists the dash-leading dir name"
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "init" "--tickets-dir" "-foo")]
+        (is (zero? exit) (str "init err=" err))
+        (is (str/includes? (slurp (str (fs/path tmp ".knot.edn"))) "-foo")
+            ".knot.edn must record the dash-leading tickets-dir"))))
+  (testing "check --code \"-cycle\" survives parsing"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "check" "--code" "-cycle" "--json")]
+        ;; exit 0 (no matching issues with the bogus code filter) — the
+        ;; important assertion is that it does not error under bb-cli's
+        ;; restrict on the dash-leading value.
+        (is (zero? exit) (str "check err=" err))
+        (let [parsed (json/parse-string (str/trim out) true)]
+          (is (= true (:ok parsed))))))))
 
 (deftest missing-numeric-value-error-hint-test
   ;; A value-bearing numeric flag (e.g. `--priority`) given no value
@@ -821,16 +1033,6 @@
       (let [{:keys [exit err]} (run-knot tmp "create" "X")]
         (is (= 1 exit))
         (is (str/includes? err "default-priority"))))))
-
-(defn- id-from-create-out
-  "Extract the ticket id from a create-cmd's stdout path string of the
-   form `<root>/.tickets/<id>--<slug>.md`."
-  [out slug]
-  (->> (str/trim out)
-       fs/file-name
-       str
-       (re-matches (re-pattern (str "(.+)--" slug "\\.md")))
-       second))
 
 (deftest dep-undep-end-to-end-test
   (testing "dep adds to :deps, undep removes; cycle add is rejected with stderr"

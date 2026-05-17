@@ -51,9 +51,13 @@
    with `-` as a flag name — including the post-`=` portion of
    `--flag=value` — so a value like `- text` makes the legitimate flag
    collapse to implicit `true` and the dash-leading token gets reparsed
-   as short-option chars. The smoking-gun ex-data signal: a flag listed
-   in `:spec` (so it is a real value-bearing flag, not `:coerce :boolean`)
-   appears in `:opts` with a `true` / `[true]` value. See kno-01kqxd0amhnb."
+   as short-option chars. Defensive fallback only: kno-01kr0129m0y9
+   pre-extracts every registered value-bearing string flag, so this
+   signature should not fire on the documented commands; left in place
+   for edge cases (e.g. a missing-value tail token at end-of-argv).
+   The smoking-gun ex-data signal: a flag listed in `:spec` (so it is
+   a real value-bearing flag, not `:coerce :boolean`) appears in `:opts`
+   with a `true` / `[true]` value. See kno-01kqxd0amhnb."
   [data]
   (and (= :org.babashka/cli (:type data))
        (= :restrict (:cause data))
@@ -148,6 +152,71 @@
 
           :else
           (recur tail (conj out head) opts))))))
+
+(def ^:private excluded-value-coerce
+  "Flag :coerce shapes that extract-value-flags must skip. Boolean and
+   long flags don't take dash-leading values; the long shapes are
+   already safe under babashka.cli."
+  #{:boolean :long [:long]})
+
+(defn- value-flag-map
+  "Derive the per-command value-flag extraction map from a registry entry.
+   Selects every flag where `:coerce` is not boolean/long and `:body?`
+   is not true. For each selected flag, emit `\"--<name>\" -> {:key
+   <name-kw> :repeat? <true if :coerce []>}` and (when `:alias` is set)
+   the short-form `\"-<alias>\" -> ...`. Aliases derive from `:alias`
+   so newly added aliased string flags get picked up automatically.
+   `:repeat?` tells `extract-value-flags` to accumulate into a vector
+   (matching babashka.cli's `:coerce []` semantics) vs. last-wins
+   replace."
+  [{:keys [flags]}]
+  (reduce
+   (fn [acc {:keys [name alias coerce body?]}]
+     (if (or body? (contains? excluded-value-coerce coerce))
+       acc
+       (let [entry      {:key name :repeat? (= coerce [])}
+             long-form  (str "--" (clojure.core/name name))
+             short-form (when alias (str "-" (clojure.core/name alias)))]
+         (cond-> (assoc acc long-form entry)
+           short-form (assoc short-form entry)))))
+   {}
+   flags))
+
+(defn- extract-value-flags
+  "Walk argv and pull value-bearing string flag tokens out before
+   babashka.cli sees them, so dash-leading values like `\"- text\"` or
+   `\"--foo\"` land verbatim instead of being reparsed as flag tokens
+   (babashka.cli cli.cljc:344-367 treats any dash-leading argv token
+   as a flag name, including after `=`). Same loop shape as
+   `extract-body-flags`: handles both `--flag value` and `--flag=value`.
+   For `:coerce []` flags (`:repeat? true` in `flag-map`), accumulates
+   into a vector; otherwise last-wins (matching babashka.cli semantics).
+   `flag-map` comes from `value-flag-map`. Returns
+   `{:value-opts {kw value-or-vec} :argv [...]}` where `:argv` is argv
+   with the consumed tokens removed. See kno-01kr0129m0y9."
+  [argv flag-map]
+  (let [add (fn [opts {:keys [key repeat?]} v]
+              (if repeat?
+                (update opts key (fnil conj []) v)
+                (assoc opts key v)))]
+    (loop [in argv, out [], opts {}]
+      (if (empty? in)
+        {:value-opts opts :argv out}
+        (let [[head & tail] in
+              eq-idx        (when (and (string? head) (str/starts-with? head "--"))
+                              (str/index-of head "="))
+              eq-flag       (when eq-idx (subs head 0 eq-idx))]
+          (cond
+            (and eq-flag (contains? flag-map eq-flag))
+            (recur tail out
+                   (add opts (flag-map eq-flag) (subs head (inc eq-idx))))
+
+            (and (contains? flag-map head) (seq tail))
+            (recur (rest tail) out
+                   (add opts (flag-map head) (first tail)))
+
+            :else
+            (recur tail (conj out head) opts)))))))
 
 (defn- split-tags
   "Split a `--tags` value on commas, trimming whitespace and dropping empties."
@@ -261,19 +330,24 @@
           (recur (rest a) acc))))))
 
 (defn- create-handler [argv]
-  (let [{:keys [body-opts argv]} (extract-body-flags argv create-body-flags)
-        rel-order                (extract-rel-order argv)
-        {:keys [opts args]}      (bcli/parse-args argv (spec :create))
+  (let [{:keys [body-opts argv]}   (extract-body-flags argv create-body-flags)
+        rel-order                  (extract-rel-order argv)
+        {:keys [value-opts argv]}  (extract-value-flags
+                                    argv
+                                    (value-flag-map (get help/registry :create)))
+        {:keys [opts args]}        (bcli/parse-args argv (spec :create))
         title (first args)
         json? (boolean (:json opts))]
     (when (or (nil? title) (str/blank? title))
       (die "knot create: a title is required"))
-    (let [opts (cond-> (-> opts
-                           (merge body-opts)
-                           (assoc :title title)
-                           (assoc :json? json?)
-                           (assoc :rel-order rel-order))
-                 (:tags opts) (assoc :tags (split-tags (:tags opts))))]
+    (let [opts (-> opts
+                   (merge body-opts)
+                   (merge value-opts)
+                   (assoc :title title)
+                   (assoc :json? json?)
+                   (assoc :rel-order rel-order))
+          opts (cond-> opts
+                 (:tags opts) (update :tags split-tags))]
       (try
         (let [out (cli/create-cmd (discover-ctx) opts)]
           (println-out (str out)))
@@ -348,7 +422,11 @@
             (throw e)))))))
 
 (defn- ls-handler [argv]
-  (let [{:keys [opts]} (bcli/parse-args argv (spec :list))
+  (let [{:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry :list)))
+        {:keys [opts]}            (bcli/parse-args argv (spec :list))
+        opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
         tty?     (output/tty?)
@@ -366,7 +444,11 @@
     (println-out out)))
 
 (defn- init-handler [argv]
-  (let [{:keys [opts]} (bcli/parse-args argv (spec :init))
+  (let [{:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry :init)))
+        {:keys [opts]}            (bcli/parse-args argv (spec :init))
+        opts                      (merge opts value-opts)
         ;; init runs in cwd by design — it's how you create a project root
         ctx  {:project-root (str (fs/cwd))}
         path (cli/init-cmd ctx opts)]
@@ -430,8 +512,12 @@
    `acceptance_incomplete` failures route to the v0.3 error envelope;
    arg-parsing errors stay on stderr."
   [cmd-name cmd-key arg-count transition-fn argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))
-        json? (boolean (:json opts))]
+  (let [{:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry cmd-key)))
+        {:keys [args opts]}       (bcli/parse-args argv (spec cmd-key))
+        merged                    (merge opts value-opts)
+        json?                     (boolean (:json opts))]
     (when (< (count args) arg-count)
       (die (str "knot " cmd-name ": "
                 (case arg-count
@@ -442,8 +528,8 @@
                   {:id id :status (second args)}
                   {:id id})
           opts* (cond-> (assoc base :json? json?)
-                  (contains? opts :summary) (assoc :summary (:summary opts))
-                  (:force opts)             (assoc :force? true))]
+                  (contains? merged :summary) (assoc :summary (:summary merged))
+                  (:force opts)               (assoc :force? true))]
       (try
         (let [out (transition-fn (discover-ctx) opts*)]
           (cond
@@ -537,7 +623,11 @@
    purely the upstream source of tickets each `list-fn` walks. Filters
    that survive parsing apply BEFORE `--limit` truncation."
   [cmd-key list-fn argv]
-  (let [{:keys [opts]} (bcli/parse-args argv (spec cmd-key))
+  (let [{:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry cmd-key)))
+        {:keys [opts]}            (bcli/parse-args argv (spec cmd-key))
+        opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
         tty?     (output/tty?)
@@ -733,22 +823,27 @@
    conflicting body flags emit `invalid_argument`. Tag splitting mirrors
    `create-handler` so the on-disk `:tags` field stays a YAML list."
   [argv]
-  (let [{:keys [body-opts argv]} (extract-body-flags argv update-body-flags)
-        {:keys [opts args]}      (bcli/parse-args argv (spec :update))
+  (let [{:keys [body-opts argv]}  (extract-body-flags argv update-body-flags)
+        {:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry :update)))
+        {:keys [opts args]}       (bcli/parse-args argv (spec :update))
         json? (boolean (:json opts))
         id    (first args)]
     (when (or (nil? id) (str/blank? id))
       (die "knot update: an id is required"))
     (try
-      (let [opts* (cond-> (-> opts
-                              (merge body-opts)
-                              (dissoc :json :force)
-                              (assoc :id id :json? json?))
+      (let [merged (-> opts
+                       (merge body-opts)
+                       (merge value-opts)
+                       (dissoc :json :force)
+                       (assoc :id id :json? json?))
+            opts* (cond-> merged
                     (:force opts)
                     (assoc :force? true)
 
-                    (contains? opts :tags)
-                    (assoc :tags (split-tags (:tags opts)))
+                    (contains? merged :tags)
+                    (assoc :tags (split-tags (:tags merged)))
 
                     ;; `--external-ref ""` from the CLI yields [""] from
                     ;; babashka.cli's `:coerce []`. (empty? [""]) is
@@ -756,33 +851,33 @@
                     ;; would never fire and the user would end up with a
                     ;; literal blank ref instead of a cleared field.
                     ;; Normalize blanks to drop them (mirrors split-tags).
-                    (contains? opts :external-ref)
+                    (contains? merged :external-ref)
                     (assoc :external-ref
-                           (vec (remove str/blank? (:external-ref opts))))
+                           (vec (remove str/blank? (:external-ref merged))))
 
                     ;; Tag-delta normalization throws on blank or
                     ;; comma-bearing values; the throw must reach the
                     ;; ex-info catch below so `--json` callers get the
                     ;; `invalid_argument` envelope, hence the let lives
                     ;; inside the `try`.
-                    (contains? opts :add-tag)
+                    (contains? merged :add-tag)
                     (assoc :add-tag (normalize-tag-delta-values
-                                     :add-tag (:add-tag opts)))
+                                     :add-tag (:add-tag merged)))
 
-                    (contains? opts :remove-tag)
+                    (contains? merged :remove-tag)
                     (assoc :remove-tag (normalize-tag-delta-values
-                                        :remove-tag (:remove-tag opts)))
+                                        :remove-tag (:remove-tag merged)))
 
                     ;; AC-delta normalization: blank-reject only (no
                     ;; comma-reject — AC titles can contain commas, and
                     ;; there is no comma-list replace flag to round-trip).
-                    (contains? opts :add-ac)
+                    (contains? merged :add-ac)
                     (assoc :add-ac (normalize-ac-delta-values
-                                    :add-ac (:add-ac opts)))
+                                    :add-ac (:add-ac merged)))
 
-                    (contains? opts :remove-ac)
+                    (contains? merged :remove-ac)
                     (assoc :remove-ac (normalize-ac-delta-values
-                                       :remove-ac (:remove-ac opts))))
+                                       :remove-ac (:remove-ac merged))))
             out   (cli/update-cmd (discover-ctx) opts*)]
         (cond
           out   (println-out (str out))
@@ -871,12 +966,16 @@
    Argument-parse errors land on stderr with exit 2 (per the
    arg-parsing-stays-on-stderr policy from the JSON-envelope ticket)."
   [argv]
-  (let [parsed (try
-                 (bcli/parse-args argv (spec :check))
-                 (catch Exception e e))]
+  (let [{:keys [value-opts argv]} (extract-value-flags
+                                   argv
+                                   (value-flag-map (get help/registry :check)))
+        parsed                    (try
+                                    (bcli/parse-args argv (spec :check))
+                                    (catch Exception e e))]
     (if (instance? Exception parsed)
       (check-cannot-scan! false "invalid_argument" (.getMessage ^Exception parsed))
       (let [{:keys [opts args]} parsed
+            opts       (merge opts value-opts)
             json?      (boolean (:json opts))
             cwd        (str (fs/cwd))
             discovered (try (config/discover cwd)
@@ -1016,7 +1115,11 @@
    so the command stays safe to wire into a global SessionStart hook."
   [argv]
   (let [out (try
-              (let [{:keys [opts]} (bcli/parse-args argv (spec :prime))
+              (let [{:keys [value-opts argv]} (extract-value-flags
+                                               argv
+                                               (value-flag-map (get help/registry :prime)))
+                    {:keys [opts]}            (bcli/parse-args argv (spec :prime))
+                    opts                      (merge opts value-opts)
                     _            (validate-priority-filter! opts)
                     filter-opts  (dissoc (filter-opts-from-cli opts) :mode)]
                 (cli/prime-cmd (discover-ctx)
@@ -1143,9 +1246,10 @@
             (dash-leading-value-mishap? d)
             (do (println "knot: a value starting with `-` was passed to a flag, but")
                 (println "      babashka.cli classifies argv tokens starting with `-` as flag")
-                (println "      names — and the `--<flag>=<value>` form does not escape it.")
-                (println "      Workaround: prefix the value with a space, e.g.")
-                (println "      `--acceptance \" - text\"`. Tracked: kno-01kqxd0amhnb."))
+                (println "      names. Registered value-bearing string flags are pre-extracted")
+                (println "      and accept dash-leading values directly; if you see this on a")
+                (println "      registered flag, please file a bug. Tracked: kno-01kqxd0amhnb,")
+                (println "      kno-01kr0129m0y9."))
 
             (missing-value-coerce-mishap? d)
             (let [flag   (some-> (:option d) name)
