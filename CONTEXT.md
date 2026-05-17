@@ -4,6 +4,19 @@
 
 ## Language
 
+### Release verification gates
+
+**CI test**:
+The `bb test` suite run by `.github/workflows/ci.yml` on push to `main` and on every PR. Covers unit and integration tests across ubuntu/macos/windows. Gates merge, not release.
+_Avoid_: "the test suite" without qualifier — ambiguous with release-tag smoke.
+
+**Pre-push smoke**:
+The local single-platform check in `/release` Step 9 that the freshly-built `bbin install . --as knot-rc` binary starts and reports the expected version. Runs on the maintainer's machine before `git push --tags`. Prevention layer.
+
+**Release-tag smoke**:
+The `.github/workflows/release-smoke.yml` workflow triggered on tags matching `v*`. Installs bbin + knot from the just-pushed tag and runs a golden-path lifecycle smoke across ubuntu/macos/windows. Detection layer — a broken tag stays pushed; the signal is the Actions run status.
+_Avoid_: "the CI workflow" without qualifier.
+
 ### Ticket relationships
 
 **Parent / Children**:
@@ -25,6 +38,7 @@ A live ticket with at least one non-terminal `:deps` entry.
 
 ## Relationships
 
+- **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; **release-tag smoke** runs post-push on tag. All three are independent gates with distinct triggers and consumers — none implies the other.
 - **Parent** and **Deps** are orthogonal axes. A child may or may not also be a dep of its parent; a dep may or may not also be a child. If a child must finish before the parent's own work proceeds, it goes in the parent's `:deps` *explicitly* — composition does not imply sequencing.
 - An umbrella ticket can legitimately appear in `ready` while it has open **Children**: the umbrella's own work (integration, docs, summary) is what's ready, not the children.
 - **Links** never participate in readiness.

@@ -1,0 +1,71 @@
+name: release-smoke
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+env:
+  BB_VERSION: 1.12.218
+  BBIN_VERSION: v0.2.5
+
+jobs:
+  smoke:
+    name: release-smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Babashka
+        uses: DeLaGuardo/setup-clojure@13.6.0
+        with:
+          bb: ${{ env.BB_VERSION }}
+
+      - name: Install bbin
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/bbin" \
+            "https://raw.githubusercontent.com/babashka/bbin/${BBIN_VERSION}/bbin"
+          chmod +x "$HOME/.local/bin/bbin"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -fsSL -o "$HOME/.local/bin/bbin.bat" \
+              "https://raw.githubusercontent.com/babashka/bbin/${BBIN_VERSION}/bbin.bat"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          bbin --version
+
+      - name: Install knot from checkout
+        run: bbin install . --as knot-smoke
+
+      - name: Smoke — bootstrap
+        run: |
+          set -euo pipefail
+          expected="${GITHUB_REF_NAME#v}"
+          actual="$(knot-smoke --version)"
+          [ "$actual" = "$expected" ] || {
+            echo "Version mismatch: tag=$GITHUB_REF_NAME, --version=$actual" >&2
+            exit 1
+          }
+          knot-smoke --help > /dev/null
+
+      - name: Smoke — lifecycle
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          knot-smoke init
+          id="$(knot-smoke create 'CI smoke' --type chore --json | jq -r .data.id)"
+          knot-smoke ls
+          knot-smoke ls --json | jq -e '.ok == true and (.schema_version|type) == "number"'
+          knot-smoke show "$id"
+          knot-smoke start "$id"
+          knot-smoke close "$id" --summary "smoke complete"
+          knot-smoke check
