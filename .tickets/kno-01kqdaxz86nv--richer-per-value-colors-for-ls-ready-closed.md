@@ -6,7 +6,7 @@ type: feature
 priority: 1
 mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
-updated: '2026-05-18T17:04:05.522297627Z'
+updated: '2026-05-18T17:42:26.468362197Z'
 links:
 - kno-01kqgqapwqvh
 - kno-01kqg37mssy3
@@ -18,31 +18,100 @@ tags:
 
 ## Description
 
-The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize the `:status` column per value, but `:type`, `:mode`, and `:priority` are mostly uniform — `:type` and `:mode` collapse to `[:faint]` regardless of value, and `:priority` only highlights `0`. Scanning a long list for, say, all bugs is harder than it should be.
+The list-view tables (`knot ls`, `ready`, `closed`, `blocked`) already colorize the `:status` column per-value (role-derived from `:terminal-statuses` / `:active-status` per kno-01kqg37mssy3), but `:type`, `:mode`, and `:priority` are mostly uniform — `:type` and `:mode` collapse to `[:faint]` regardless of value, and `:priority` only highlights `0`. Extend the same per-value coloring to those three columns.
 
-**Current state:** `src/knot/output.clj:230-241` — `color-codes-for`:
+**Current state:** `src/knot/output.clj` `color-codes-for` (line ~365) returns uniform `[:faint]` for `:type` and `:mode`, and `[:red :bold]` only for `:priority "0"`.
 
-    :status   open=cyan, in_progress=yellow, closed=dim, else=[]
-    :priority "0"=red+bold, else=[]
-    :mode     [:faint]   ; uniform
-    :type     [:faint]   ; uniform
+## Resolved design (grilled 2026-05-18)
 
-**Proposed enrichment (starting point — refine in design):**
+### Approach: opinionated defaults, no new config surface
 
-- **type:** bug=red, feature=green, task=cyan, epic=magenta, chore=faint. Unknown/custom types fall back to faint so the palette degrades gracefully on projects that override `:types`.
-- **priority:** 0=red+bold, 1=yellow, 2=plain, 3=faint, 4=dim. Graded scale instead of single-value highlight.
-- **mode:** afk=blue, hitl=yellow (or keep one faint and color the other — pick whichever reads better against the existing status/priority palette).
+Hardcoded color maps for canonical values; custom-config values degrade gracefully to faint. No `:type-colors` / `:mode-colors` config in v1 — additive later if a real downstream need surfaces. The audit-precedent (kno-01kqgqapwqvh) hunted *correctness* bugs (custom statuses must still render), not aesthetic configurability.
 
-**Open design questions:**
-1. Types and modes are configurable per project. Hardcode colors for the canonical defaults (`bug feature task epic chore`, `afk hitl`) and fall back to faint for custom values? Or expose a `:type-colors` map in `.knot.edn`? Recommend hardcoded defaults + faint fallback for v1 — config surface can come later if asked for.
-2. Accessibility: red+green together can be hard for some users. The existing palette already mixes red, yellow, cyan; adding green for `feature` is consistent with that. `NO_COLOR`/`--no-color` already disables all of this so the plain-text path stays accessible.
-3. Does the `prime` output stay monochrome? It's consumed by AI agents (per the `prime-ticket-line` docstring at `output.clj:393-404` — "whitespace-only — no ANSI codes"). Yes, keep prime monochrome; this change is for the human-facing tables only.
+### Asymmetric shape: role-indirection only where config can derive it
 
-**Scope of fix:**
-1. Extend `color-codes-for` (`output.clj:230-241`) with per-value entries for `:type`, `:priority` (graded), and `:mode`.
-2. Confirm the existing `color?`/`tty?`/`NO_COLOR` gating (around lines 118-128 and 313-336) covers the new entries — should be automatic since they flow through the same `color-codes-for` indirection.
-3. Update `output_test.clj` table-color tests if present; add coverage for the new mappings.
-4. Eyeball against a real terminal — ANSI palettes vary by theme; pick colors that read on both light and dark backgrounds.
+| Column | Role layer? | Why |
+|---|---|---|
+| `:type` | No — direct map | `:types` is a flat list with no semantic config; a role function would just relocate the hardcode |
+| `:mode` | Yes — `mode-role` | `:afk-mode` config marks the agent-runnable mode |
+| `:priority` | No — direct ordinal | The value 0..4 *is* the role |
+
+### `mode-role` (new, public, parallels `status-role`)
+
+Signature: `(mode-role mode modes default-mode afk-mode)` → one of `:afk` / `:default` / `:other`.
+
+- `:afk` — mode equals `:afk-mode`
+- `:default` — mode equals `:default-mode` and is not `:afk-mode`
+- `:other` — configured in `:modes` but neither (and unknown modes)
+
+Edge: when `:afk-mode` is `nil` (per `config.clj:127-132`, disables the AFK preamble entirely), no mode resolves to `:afk`.
+
+### Palette
+
+Extend `ansi-codes` with `:green` (32), `:blue` (34), `:magenta` (35).
+
+**type** (direct map by canonical name + `[:faint]` fallback):
+- `bug` → `[:red]`
+- `feature` → `[:green]`
+- `task` → `[]` (plain — *not* cyan; would clash with `:open` status, the most common row)
+- `epic` → `[:magenta]`
+- `chore` → `[:faint]`
+- unknown → `[:faint]`
+
+**priority** (direct ordinal):
+- `0` → `[:red :bold]` (keep)
+- `1` → `[:yellow]`
+- `2` → `[]` (plain — most common)
+- `3` → `[:faint]`
+- `4` → `[:faint]` (collapsed with 3; `:faint` and `:dim` share ANSI code "2")
+
+**mode** (by role):
+- `:afk` → `[:blue]`
+- `:default` → `[]` (plain)
+- `:other` → `[:faint]`
+
+Accepted clashes (intentional or harmless):
+- bug-red ↔ priority-0 red+bold: reinforcing ("high-priority bug" panic).
+- priority-1 yellow ↔ `:active` status yellow: different columns; both signal attention.
+- chore-faint ↔ `:terminal` status faint: reinforcing for closed chores.
+
+### Plumbing
+
+Rename `status-context` → `render-ctx` in `color-codes-for` and `ls-table`. `render-ctx` holds `:statuses :terminal-statuses :active-status :modes :default-mode :afk-mode`. Single thread through ls-table; fallback via `config/defaults` preserves v0 schema.
+
+Extend `cli/ls-table-opts` to include the three mode keys; symmetric wiring across `ls-cmd` / `ready-cmd` / `closed-cmd` / `blocked-cmd`.
+
+### Out of scope
+
+ID, ASSIGNEE, AGE, ACCEPTANCE, TITLE columns. Prime output stays monochrome.
+
+## Test plan
+
+**New pure-function tests:**
+- `mode-role-test` — cases: `:afk`, `:default`, `:other`, unknown mode, `:afk-mode nil` edge.
+
+**New table-output tests:**
+- `ls-table-default-modes-color-roles-test` — default `["afk" "hitl"]`; afk row blue, hitl plain.
+- `ls-table-custom-modes-color-roles-test` — `["agent" "human" "review"]`, `:afk-mode "agent"`, `:default-mode "human"`; roles come from config not literal names.
+- `ls-table-type-color-test` — each canonical type wraps in expected SGR; unknown type faint.
+- `ls-table-priority-color-test` — 0/1/2/3/4 wrap correctly; 3 and 4 collapse to faint by design.
+- `ls-table-no-mode-options-back-compat-test` — defaults fallback.
+
+**Wiring tests** (parallel to `list-cmds-thread-status-context-test`):
+- Pin that `ready`/`closed`/`blocked` thread `:modes :default-mode :afk-mode`, using a custom-config end-to-end so the v0 fallback wouldn't satisfy the assertion.
+
+**Existing tests to update:**
+- Any `output_test.clj` assertions on `color-codes-for` returning `[:faint]` for `:type`/`:mode` or `[]` for non-zero `:priority`.
+
+## Implementation steps
+
+1. Add `:green` / `:blue` / `:magenta` to `ansi-codes` (`output.clj:66-74`).
+2. Add public `mode-role` defn next to `status-role` (`output.clj:334-357`).
+3. Add `type->codes`, `priority->codes`, `mode-role->codes` constant maps.
+4. Update `color-codes-for` (`output.clj:365-373`) to consume `render-ctx`; rename binding in `ls-table` (`output.clj:461-466`).
+5. Extend `cli/ls-table-opts` to include the three mode keys; verify all four list commands pick them up.
+6. Update / add tests per plan above.
+7. Eyeball against a real terminal — both light and dark backgrounds.
 
 ## Notes
 
