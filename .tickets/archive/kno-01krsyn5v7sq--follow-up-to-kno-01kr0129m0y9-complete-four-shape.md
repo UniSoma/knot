@@ -1,23 +1,24 @@
 ---
 id: kno-01krsyn5v7sq
 title: 'Follow-up to kno-01kr0129m0y9: complete four-shape test coverage + value-flag-map name shadow'
-status: open
+status: closed
 type: task
-priority: 3
+priority: 1
 mode: afk
 created: '2026-05-17T03:11:12.733351900Z'
-updated: '2026-05-17T03:11:12.733351900Z'
+updated: '2026-05-18T16:51:46.685519981Z'
+closed: '2026-05-18T16:51:46.685519981Z'
 acceptance:
 - title: value-flag-map (src/knot/main.clj:174-179) no longer shadows clojure.core/name; bare (name x) inside the fn body is safe; clj-kondo clean.
-  done: false
+  done: true
 - title: 'Parameterised test exercises all four argv shapes (single-line dash, double-dash, alias-shaped, multi-line) across the AC #4 flag surface from kno-01kr0129m0y9, OR a comment documents why a representative subset is equivalent.'
-  done: false
+  done: true
 - title: --dep and --link have at least one create-time test with a dash-leading value; assertion confirms the value survives intact (in :deps/:links or in the error message).
-  done: false
+  done: true
 - title: --remove-tag and --remove-ac have at least one update-time test with a dash-leading value; assertion confirms the matching item is actually removed and the normaliser does not reject.
-  done: false
+  done: true
 - title: bb test green; clj-kondo --lint src test clean.
-  done: false
+  done: true
 links:
 - kno-01kr0129m0y9
 ---
@@ -35,3 +36,9 @@ Code review of kno-01kr0129m0y9 (commit 4dbd61f) found four small gaps worth clo
 **`--dep` / `--link` coverage.** `extract-rel-order` is an *observing* walk (reads tokens but does not consume them), so dash-leading values should pass through. Confirm with one create-time test: `knot create x --dep -bogus` either rejects with the dash-leading id surfaced verbatim in the error, or — for the lenient `--dep` path — round-trips into `:deps`. Same for `--link`.
 
 **`--remove-tag` / `--remove-ac` coverage.** Mirror the existing `--add-tag` / `--add-ac` dash-leading round-trip tests against the remove branch. The `normalize-tag-delta-values` / `normalize-ac-delta-values` paths run after merge, so the test should confirm a dash-leading remove value (a) is not rejected by the normaliser and (b) actually removes the matching item when the ticket originally had one.
+
+## Notes
+
+**2026-05-18T16:51:46.685519981Z**
+
+Renamed value-flag-map's destructured :name to flag-name so clojure.core/name is no longer shadowed (src/knot/main.clj:175-180). Added a comment on dash-leading-value-flags-survive-create-test documenting why the existing --acceptance four-shape doseq + single-shape per-flag tests prove the extract-value-flags walk for all flags. New tests: --dep -bogus round-trips into :deps (lenient); --link -bogus exits 1 with -bogus in stderr (strict); --remove-tag and --remove-ac mirror the --add-* dash-leading tests and assert the matching items are actually removed. 390 tests / 4750 assertions, clj-kondo clean.

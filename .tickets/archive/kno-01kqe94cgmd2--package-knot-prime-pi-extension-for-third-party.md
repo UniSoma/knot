@@ -1,12 +1,13 @@
 ---
 id: kno-01kqe94cgmd2
 title: Package knot-prime Pi extension for third-party installation
-status: open
+status: closed
 type: task
 priority: 4
 mode: hitl
 created: '2026-04-30T04:07:41.844334511Z'
-updated: '2026-05-14T02:40:41.522667176Z'
+updated: '2026-05-18T17:05:19.135087186Z'
+closed: '2026-05-18T17:05:19.135087186Z'
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqgq9vhmvr
@@ -28,3 +29,9 @@ tags:
 The repo already has a Pi coding extension in `knot-prime.ts` that injects `knot prime` output into agent context.
 
 We should turn that into something third-party projects can install and use without copying the file out of this repo by hand. The work likely includes choosing the packaging/distribution mechanism, making the extension consumable outside this repo, and documenting the install/use flow.
+
+## Notes
+
+**2026-05-18T17:05:19.135087186Z**
+
+Won't do...

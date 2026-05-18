@@ -3,10 +3,10 @@ id: kno-01krsytqv33a
 title: Add --show flag on write commands (create/update/add-note/status/close/dep) to skip the verify round-trip
 status: open
 type: feature
-priority: 4
+priority: 1
 mode: hitl
 created: '2026-05-17T03:14:15.000968825Z'
-updated: '2026-05-17T03:14:15.000968825Z'
+updated: '2026-05-18T17:04:05.648411451Z'
 tags:
 - triage
 links:
