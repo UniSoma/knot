@@ -51,12 +51,17 @@
 (defn- static-response
   "Resolve a static URI via the injected asset lookup. Returns a
    ring-style response. nil from the asset lookup → 404 (the file is
-   missing on disk *and* on the classpath)."
-  [asset asset-path content-type]
+   missing on disk *and* on the classpath).
+
+   `dev?` selects the cache policy: in `--dev` mode assets must never
+   be cached so live edits show up immediately; in classpath mode
+   assets are immutable within a binary release, so `no-cache`
+   (allow browser cache but require revalidation) is enough."
+  [asset asset-path content-type dev?]
   (if-let [a (asset asset-path)]
     {:status  200
-     :headers {"Content-Type" (or (:content-type a) content-type)
-               "Cache-Control" "no-store"}
+     :headers {"Content-Type"  (or (:content-type a) content-type)
+               "Cache-Control" (if dev? "no-store" "no-cache")}
      :body    (:body a)}
     {:status 404 :body (str "not found: " asset-path)}))
 
@@ -81,14 +86,16 @@
 (defn route
   "Pure routing function. Takes a ring-style request and a `deps` map
    with `:asset` (path → {:body, :content-type}), `:knot-json!`
-   (varargs → {:status, :headers, :body}), and `:port` (used by the
-   origin-allowlist check). Returns a ring response."
-  [{:keys [request-method uri headers]} {:keys [asset knot-json! port] :as _deps}]
+   (varargs → {:status, :headers, :body}), `:port` (used by the
+   origin-allowlist check), and optional `:dev?` (selects the static
+   asset cache policy). Returns a ring response."
+  [{:keys [request-method uri headers]}
+   {:keys [asset knot-json! port dev?] :as _deps}]
   (cond
     (get static-routes uri)
     (if (= :get request-method)
       (let [{:keys [asset-path content-type]} (get static-routes uri)]
-        (static-response asset asset-path content-type))
+        (static-response asset asset-path content-type (boolean dev?)))
       {:status 405 :body "method not allowed"})
 
     (str/starts-with? uri "/api/")
@@ -139,18 +146,51 @@
       (json/parse-string (slurp path) true)
       (catch Exception _ nil))))
 
+(def ^:private heartbeat-max-age-days
+  "Heartbeats older than this are treated as stale and ignored, even if
+   the recorded pid happens to be alive. Guards against pid reuse after
+   a kill -9: on a long-uptime laptop, a 30-day-old heartbeat's pid is
+   almost certainly an unrelated process now."
+  30)
+
+(defn- heartbeat-fresh?
+  "True iff `started_at` parses and is within `heartbeat-max-age-days`
+   of now. Unparseable or missing timestamps fail closed (treated as
+   stale) so a corrupt heartbeat never blocks a relaunch."
+  [hb]
+  (boolean
+   (when-let [s (:started_at hb)]
+     (try
+       (let [t   (Instant/parse s)
+             now (Instant/now)
+             max-ms (* heartbeat-max-age-days 24 60 60 1000)]
+         (< (- (.toEpochMilli now) (.toEpochMilli t)) max-ms))
+       (catch Exception _ false)))))
+
 (defn already-running?
   "True iff the heartbeat names a pid that is currently alive on this
-   host. We do not try to verify the pid is *our* `knot serve`
-   process — pid reuse is rare enough on a single-user workstation,
-   and a wrong-process false positive only delays a second launch."
+   host *and* the heartbeat is recent. We do not try to verify the pid
+   is *our* `knot serve` process — pid reuse is rare on a single-user
+   workstation, and the age check (see [[heartbeat-max-age-days]])
+   covers the long-lived-laptop case where pid reuse becomes likely."
   [hb]
   (boolean
    (when-let [pid (:pid hb)]
-     (.isPresent (ProcessHandle/of pid)))))
+     (and (.isPresent (ProcessHandle/of pid))
+          (heartbeat-fresh? hb)))))
 
 (def ^:private classpath-asset-prefix "knot/serve/public/")
-(def ^:private dev-asset-prefix "resources/knot/serve/public")
+(def ^:private dev-asset-prefix-rel "resources/knot/serve/public")
+
+(defn- dev-asset-dir
+  "Resolve the `--dev` asset directory against `project-root` so the
+   flag works regardless of which subdirectory the user ran `knot serve`
+   from. Falls back to the relative path when project-root is nil
+   (defensive — `serve-cmd` already gates on `:project-found?`)."
+  [project-root]
+  (if project-root
+    (str (fs/path project-root dev-asset-prefix-rel))
+    dev-asset-prefix-rel))
 
 (defn classpath-asset
   "Read a static asset from the classpath (resources/knot/serve/public/).
@@ -170,40 +210,59 @@
 (defn default-knot-json!
   "Production shell-out for /api/* routes: invoke `knot <args> --json`
    as a child process, forward stdout verbatim. Exit != 0 with empty
-   stdout is reported as a 500 envelope (parity with the prototype —
-   knot itself emits an ok:false envelope on data errors, so an empty
-   stdout means the child died before emitting JSON)."
+   stdout is reported as a 500 envelope — knot itself emits an
+   ok:false envelope on data errors, so an empty stdout means the
+   child died before emitting JSON. On failure the
+   captured stderr is mirrored to the server's stderr and folded into
+   the 500 envelope's error message so the operator can diagnose
+   crashes from the browser console without tailing a log."
   [& args]
-  (let [{:keys [out exit]}
+  (let [{:keys [out err exit]}
         (apply p/shell {:out :string :err :string :continue true}
                "knot" (concat args ["--json"]))]
     (if (and (not (zero? exit)) (str/blank? out))
-      {:status  500
-       :headers {"Content-Type" "application/json"}
-       :body    (str "{\"schema_version\":1,\"ok\":false,"
-                     "\"error\":{\"code\":\"shell_error\","
-                     "\"message\":\"knot exited " exit
-                     " with no stdout\"}}")}
+      (let [err* (str/trim (or err ""))]
+        (when-not (str/blank? err*)
+          (binding [*out* *err*]
+            (println (str "knot serve: subprocess stderr: " err*))
+            (flush)))
+        {:status  500
+         :headers {"Content-Type" "application/json"}
+         :body    (json/generate-string
+                   {:schema_version 1
+                    :ok             false
+                    :error          {:code    "shell_error"
+                                     :message (str "knot exited " exit
+                                                   (when-not (str/blank? err*)
+                                                     (str ": " err*)))}})})
       {:status  200
        :headers {"Content-Type"  "application/json; charset=utf-8"
                  "Cache-Control" "no-store"}
        :body    out})))
 
 (defn start-server!
-  "Boot http-kit on `:port` (0 = ephemeral) with a handler that delegates
-   to `route`. http-kit is lazy-required here so every other knot
-   command stays cheap. Returns `{:stop! fn :port int}` — `:port` is
-   the actually-bound port (resolved from the http-kit stopper's meta
-   when `:port 0` was requested)."
+  "Boot http-kit on `:port` (0 = ephemeral), bound to 127.0.0.1, with a
+   handler that delegates to `route`. http-kit is lazy-required here so
+   every other knot command stays cheap. Returns `{:stop! fn :port int}` —
+   `:port` is the actually-bound port (resolved from http-kit after bind
+   when `:port 0` was requested).
+
+   The deps map handed to `route` is built per-request with `:port` set
+   to the bound port, so the origin allowlist always uses the real port
+   even when the caller passed `:port 0` (ephemeral)."
   [{:keys [port] :as deps}]
   (require 'org.httpkit.server)
   (let [run-server  (resolve 'org.httpkit.server/run-server)
         server-port (resolve 'org.httpkit.server/server-port)
         server-stop (resolve 'org.httpkit.server/server-stop!)
-        handler     (fn [req] (route req deps))
-        srv         (run-server handler {:port (or port 0)
-                                         :legacy-return-value? false})]
-    {:port  (server-port srv)
+        port-atom   (atom (or port 0))
+        handler     (fn [req] (route req (assoc deps :port @port-atom)))
+        srv         (run-server handler {:port                 (or port 0)
+                                         :ip                   "127.0.0.1"
+                                         :legacy-return-value? false})
+        bound-port  (server-port srv)]
+    (reset! port-atom bound-port)
+    {:port  bound-port
      :stop! (fn [] (server-stop srv))}))
 
 (def ^:private default-port 7777)
@@ -253,36 +312,46 @@
    heartbeat file is removed via a JVM shutdown hook so a SIGINT does
    not leave stale state behind. Returns nil (or exits non-zero via
    `System/exit` on a startup failure)."
-  [argv {:keys [project-root]}]
+  [argv {:keys [project-root project-found?]}]
+  (when-not project-found?
+    (println-err "knot serve: no project found at or above this directory")
+    (println-err "  run from a directory inside a knot project, or `knot init` to create one")
+    (System/exit 1))
   (let [{:keys [opts]} (cli/parse-args argv (help/derive-spec (get help/registry :serve)))
         port           (or (:port opts) default-port)
-        dev?           (boolean (:dev opts))
-        hb-path        (heartbeat-path (tmpdir-path) project-root)
-        existing       (read-heartbeat hb-path)]
-    (when (already-running? existing)
-      (println-out (str "knot serve: already running for this project at "
-                        "http://127.0.0.1:" (:port existing) "/"
-                        " (pid " (:pid existing) ")"))
-      (System/exit 0))
-    (let [asset      (if dev?
-                       (partial disk-asset dev-asset-prefix)
-                       classpath-asset)
-          deps-stub  {:asset asset :knot-json! default-knot-json! :port port}
-          {bound-port :port stop! :stop!} (start-server! deps-stub)
-          url        (str "http://127.0.0.1:" bound-port "/")
-          hb         {:pid          (.pid (ProcessHandle/current))
-                      :port         bound-port
-                      :started_at   (str (Instant/now))
-                      :project_root project-root}]
-      (write-heartbeat! hb-path hb)
-      (.addShutdownHook (Runtime/getRuntime)
-                        (Thread. ^Runnable
-                         (fn []
-                           (try (stop!) (catch Exception _ nil))
-                           (try (fs/delete-if-exists hb-path)
-                                (catch Exception _ nil)))))
-      (println-out (str "knot serve — " url))
-      (println-err "  ctrl-c to stop")
-      (when (resolve-open? opts)
-        (open-browser! url))
-      @(promise))))
+        dev?           (boolean (:dev opts))]
+    (when (or (neg? port) (> port 65535))
+      (println-err (str "knot serve: --port must be 0..65535; got " port))
+      (System/exit 1))
+    (let [hb-path  (heartbeat-path (tmpdir-path) project-root)
+          existing (read-heartbeat hb-path)]
+      (when (already-running? existing)
+        (println-out (str "knot serve: already running for this project at "
+                          "http://127.0.0.1:" (:port existing) "/"
+                          " (pid " (:pid existing) ")"))
+        (System/exit 0))
+      (let [asset      (if dev?
+                         (partial disk-asset (dev-asset-dir project-root))
+                         classpath-asset)
+            deps-stub  {:asset      asset
+                        :knot-json! default-knot-json!
+                        :port       port
+                        :dev?       dev?}
+            {bound-port :port stop! :stop!} (start-server! deps-stub)
+            url        (str "http://127.0.0.1:" bound-port "/")
+            hb         {:pid          (.pid (ProcessHandle/current))
+                        :port         bound-port
+                        :started_at   (str (Instant/now))
+                        :project_root project-root}]
+        (write-heartbeat! hb-path hb)
+        (.addShutdownHook (Runtime/getRuntime)
+                          (Thread. ^Runnable
+                           (fn []
+                             (try (stop!) (catch Exception _ nil))
+                             (try (fs/delete-if-exists hb-path)
+                                  (catch Exception _ nil)))))
+        (println-out (str "knot serve — " url))
+        (println-err "  ctrl-c to stop")
+        (when (resolve-open? opts)
+          (open-browser! url))
+        @(promise)))))

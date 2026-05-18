@@ -14,7 +14,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
-            [knot.serve :as serve]))
+            [knot.serve :as serve])
+  (:import (java.net InetAddress Socket)))
 
 (def ^:dynamic ^:private *server* nil)
 
@@ -106,6 +107,45 @@
   (testing "/api/show/ (empty id) → 400"
     (is (= 400 (:status (GET "/api/show/"))))))
 
+(deftest api-allows-loopback-origin-on-bound-port
+  (testing "Origin: http://127.0.0.1:<bound-port> → 200 even when started with :port 0"
+    (let [port    (:port *server*)
+          origin  (str "http://127.0.0.1:" port)
+          r       (GET "/api/ready" {"Origin" origin})
+          env     (json/parse-string (:body r) true)]
+      (is (= 200 (:status r))
+          "the allowlist must use the *bound* port, not the requested one")
+      (is (true? (:ok env))))))
+
+(defn- non-loopback-host
+  "Return an IPv4 address that points at this host but is *not* on the
+   loopback interface, or nil if we can't determine one. Used by the
+   loopback-bind regression test to prove `start-server!` binds only
+   127.0.0.1 rather than 0.0.0.0."
+  []
+  (try
+    (let [host (InetAddress/getLocalHost)
+          ip   (.getHostAddress host)]
+      (when-not (str/starts-with? ip "127.")
+        ip))
+    (catch Exception _ nil)))
+
+(deftest server-binds-loopback-only
+  (testing "TCP connect to the non-loopback host IP is refused"
+    (if-let [ip (non-loopback-host)]
+      (let [port (:port *server*)]
+        (try
+          (with-open [^Socket s (Socket.)]
+            (.connect s (java.net.InetSocketAddress. ^String ip ^int (int port)) 500)
+            (is false (str "expected connection refused on " ip ":" port
+                           " — http-kit appears to be bound to 0.0.0.0")))
+          (catch java.io.IOException _
+            (is true "connect refused as expected"))))
+      ;; CI hosts sometimes only have 127.0.0.1 — the test is vacuously
+      ;; satisfied there. The unit assertion below pins the contract
+      ;; regardless.
+      (is true "no non-loopback address available on this host; skipped"))))
+
 ;; ── End-to-end: spawn `knot serve` and hit it over a real socket. ──
 ;;
 ;; The unit/integration tests above use `start-server!` directly with
@@ -148,6 +188,9 @@
 (deftest spawned-server-binds-and-serves
   (testing "knot serve --port 0 --no-open binds, prints URL, serves /api/ready"
     (let [tmp     (str (fs/create-temp-dir))
+          ;; serve-cmd requires a knot project at or above cwd; .tickets/
+          ;; alone is enough for discover to find a project root.
+          _       (fs/create-dirs (fs/path tmp ".tickets"))
           proc    (spawn-knot-serve tmp "--port" "0" "--no-open")
           out-rdr (io/reader (:out proc))]
       (try
@@ -166,4 +209,13 @@
         (finally
           (.destroy (:proc proc))
           (try (deref proc 5000 nil) (catch Exception _ nil))
+          ;; Explicitly remove the heartbeat file rather than relying on
+          ;; the spawned process's shutdown hook racing our teardown.
+          ;; Otherwise stale heartbeats accumulate under $TMPDIR across
+          ;; test runs.
+          (let [tmpdir (or (System/getenv "TMPDIR")
+                           (System/getProperty "java.io.tmpdir")
+                           "/tmp")
+                hb     (serve/heartbeat-path tmpdir tmp)]
+            (try (fs/delete-if-exists hb) (catch Exception _ nil)))
           (fs/delete-tree tmp))))))

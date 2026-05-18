@@ -231,14 +231,33 @@
           (is (nil? (serve/read-heartbeat path))))
         (finally (fs/delete-tree tmp))))))
 
+(defn- now-iso [] (str (java.time.Instant/now)))
+
+(defn- iso-days-ago [n]
+  (str (.minusSeconds (java.time.Instant/now) (* n 24 60 60))))
+
 (deftest already-running?-test
-  (testing "live pid → true"
+  (testing "live pid + fresh started_at → true"
     (let [my-pid (.pid (java.lang.ProcessHandle/current))]
-      (is (true? (serve/already-running? {:pid my-pid})))))
+      (is (true? (serve/already-running? {:pid my-pid :started_at (now-iso)})))))
 
   (testing "non-existent pid → false"
-    (is (false? (serve/already-running? {:pid 99999999}))))
+    (is (false? (serve/already-running? {:pid 99999999 :started_at (now-iso)}))))
 
   (testing "missing :pid key → false"
     (is (false? (serve/already-running? {})))
-    (is (false? (serve/already-running? nil)))))
+    (is (false? (serve/already-running? nil))))
+
+  (testing "live pid but stale started_at → false (pid-reuse escape hatch)"
+    (let [my-pid (.pid (java.lang.ProcessHandle/current))]
+      (is (false? (serve/already-running? {:pid my-pid :started_at (iso-days-ago 60)}))
+          "heartbeats older than the max-age are treated as stale")))
+
+  (testing "live pid but missing started_at → false (fail closed)"
+    (let [my-pid (.pid (java.lang.ProcessHandle/current))]
+      (is (false? (serve/already-running? {:pid my-pid}))
+          "no timestamp → cannot prove freshness → assume stale")))
+
+  (testing "live pid but unparseable started_at → false"
+    (let [my-pid (.pid (java.lang.ProcessHandle/current))]
+      (is (false? (serve/already-running? {:pid my-pid :started_at "not-an-instant"}))))))

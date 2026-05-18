@@ -1,5 +1,5 @@
 /* ──────────────────────────────────────────────────────────────────────────
- * knot serve prototype — single-column "Stack" layout.
+ * knot serve — single-column "Stack" layout.
  *
  * Three collapsible groups (In progress / Ready / Blocked) rendered as a
  * single column; click a row to expand inline with body + acceptance +
