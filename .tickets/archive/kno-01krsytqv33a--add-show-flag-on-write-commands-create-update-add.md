@@ -1,16 +1,17 @@
 ---
 id: kno-01krsytqv33a
 title: Add --show flag on write commands (create/update/add-note/status/close/dep) to skip the verify round-trip
-status: open
+status: closed
 type: feature
-priority: 1
+priority: 4
 mode: hitl
 created: '2026-05-17T03:14:15.000968825Z'
-updated: '2026-05-18T17:04:05.648411451Z'
-tags:
-- triage
+updated: '2026-05-18T21:11:08.039990905Z'
+closed: '2026-05-18T21:11:08.039990905Z'
 links:
 - kno-01kr0129m0y9
+tags:
+- triage
 ---
 
 ## Description
@@ -30,3 +31,18 @@ Today every write command emits just the saved path (or a small JSON envelope). 
 4. **Default behaviour.** Should `--show` ever become the default with a `--quiet` opt-out, or always remain opt-in? Defaults bias agent workflows; opt-in keeps shell scripts stable.
 
 5. **Skill update.** `.claude/skills/knot/SKILL.md` should advertise `--show` so agents stop chaining `knot create … && knot show <id>` (the pattern that motivated this ticket).
+
+## Notes
+
+**2026-05-18T21:11:08.039990905Z**
+
+Won't do: design grilling (2026-05-18) showed the `--show` flag was solving a documentation problem, not a CLI gap.
+
+Today's `--json` write envelope already returns the full post-mutation ticket under `.data` on every mutating command (`create`, `update`, `add-note`, `status`/`start`/`close`/`reopen`, `dep`/`undep`, `link`/`unlink`) — same shape as `knot show --json` minus the four computed inverse arrays. Agents chaining `knot create … && knot show <id>` are duplicating work they don't need to do.
+
+Disposition: surface the existing `--json` write-envelope semantics at the friction point in `.claude/skills/knot/SKILL.md` instead of adding a new flag. Two edits landed in this commit:
+
+1. Red-flag table row pointing agents at `--json` when they're tempted to chain `knot show` after a write.
+2. Inline guidance in the *Writing tickets → Create* section reinforcing that `--json` returns the full post-mutation ticket and listing every write command that follows the same contract.
+
+The "JSON for parsing" section already documented this contract (L443-446); the gap was placement, not content.

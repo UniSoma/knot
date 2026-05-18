@@ -51,6 +51,7 @@ express what you need, that's a knot bug; file it, don't work around it.
 | Rationalization | Reality |
 |---|---|
 | "I'll just cat the file once to verify the close worked." | `knot show <id>` works on archived tickets too. |
+| "I'll `knot create` then `knot show <new-id>` to verify what landed." | `knot create --json` already returns the full post-mutation ticket under `.data` — no chain needed. Same for every write command. See *JSON for parsing*. |
 | "I just need to peek at `.knot.edn` for the allowed statuses." | `knot prime --json` exposes the schema. |
 | "knot show failed, let me read the markdown directly." | Surface the bug. The file is not the contract. |
 | "I want to see all tickets at once, `ls .tickets/` is faster." | `knot list --json` is stable and sees archive. `ls` doesn't. |
@@ -175,6 +176,16 @@ title-only ticket forces the next reader to reconstruct intent from
 scratch. Default `--mode afk` when the work is well-specified and an
 agent could run end-to-end without a human; otherwise leave the `hitl`
 default.
+
+To verify what landed in a single invocation, pass `--json`. The
+envelope's `.data` carries the full post-mutation ticket (id,
+frontmatter, body) — same shape as `knot show --json` minus the four
+computed inverse arrays (`blockers`/`blocking`/`children`/`linked`).
+**Don't chain `knot show <id>` after a write to read back what you just
+wrote** — the data is already in the write envelope. This applies to
+every mutating command: `create`, `update`, `add-note`,
+`status`/`start`/`close`/`reopen`, `dep`/`undep`, `link`/`unlink`. See
+*JSON for parsing* for per-command payload details.
 
 For multi-line prose flags, use a quoted-delimiter heredoc so `$vars`,
 backticks, and quotes pass through literally:
