@@ -126,17 +126,21 @@ this to nil does not disable it — knot simply does not turn it on."
 
 (defface knot-status-open
   '((t :inherit default))
-  "Face for ticket status `open'."
+  "Face for any status that is neither the project's active status nor one
+of its terminal statuses (the default `open' status, plus any custom
+non-active/non-terminal statuses)."
   :group 'knot)
 
-(defface knot-status-in-progress
+(defface knot-status-active
   '((t :inherit warning))
-  "Face for ticket status `in_progress'."
+  "Face for the project's active status (per `knot info --json's
+`allowed_values.active_status', e.g. `in_progress' by default)."
   :group 'knot)
 
-(defface knot-status-closed
+(defface knot-status-terminal
   '((t :inherit shadow))
-  "Face for ticket status `closed'."
+  "Face for any of the project's terminal statuses (per `knot info --json's
+`allowed_values.terminal_statuses', e.g. `closed' by default)."
   :group 'knot)
 
 (defface knot-priority-0
@@ -226,12 +230,20 @@ this to nil does not disable it — knot simply does not turn it on."
     (or string "")))
 
 (defun knot-format-status (status)
-  "Propertize STATUS string with the matching face."
-  (let ((face (pcase status
-                ("open" 'knot-status-open)
-                ("in_progress" 'knot-status-in-progress)
-                ("closed" 'knot-status-closed)
-                (_ nil))))
+  "Propertize STATUS string with the face matching its role in the project.
+Roles come from the current `knot info --json' envelope: STATUS matches
+`allowed_values.active_status' gets `knot-status-active', anything in
+`allowed_values.terminal_statuses' gets `knot-status-terminal', and
+everything else (including the default `open') gets `knot-status-open'.
+This lets custom status sets in `.knot.edn' be colored by role rather
+than by literal name."
+  (let* ((active   (knot-info-allowed-values 'active_status))
+         (terminal (knot-info-allowed-values 'terminal_statuses))
+         (face (cond
+                ((or (null status) (string-empty-p status)) nil)
+                ((equal status active) 'knot-status-active)
+                ((member status terminal) 'knot-status-terminal)
+                (t 'knot-status-open))))
     (knot-format-propertize (or status "") face)))
 
 (defun knot-format-priority (priority)
