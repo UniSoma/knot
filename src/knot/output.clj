@@ -65,13 +65,16 @@
 
 (def ^:private ansi-codes
   "Map of friendly names to ANSI SGR parameters (numbers as strings)."
-  {:reset  "0"
-   :bold   "1"
-   :faint  "2"
-   :dim    "2"
-   :red    "31"
-   :yellow "33"
-   :cyan   "36"})
+  {:reset   "0"
+   :bold    "1"
+   :faint   "2"
+   :dim     "2"
+   :red     "31"
+   :green   "32"
+   :yellow  "33"
+   :blue    "34"
+   :magenta "35"
+   :cyan    "36"})
 
 (def ^:private ansi-reset "[0m")
 
@@ -362,14 +365,65 @@
    :open     [:cyan]
    :other    []})
 
+(def ^:private type->codes
+  "Direct per-value color map for the TYPE column. Unknown types fall
+   through to `:faint` via `get` default. `task` is intentionally plain
+   (no SGR) so the most-common row stays uncolored and doesn't clash
+   with the `:open` status :cyan."
+  {"bug"     [:red]
+   "feature" [:green]
+   "task"    []
+   "epic"    [:magenta]
+   "chore"   [:faint]})
+
+(def ^:private priority->codes
+  "Direct ordinal color map for the PRI column. Priorities 3 and 4
+   intentionally collapse to `:faint` — the ANSI :dim/:faint code is
+   shared, and the eye-rank between low priorities doesn't warrant a
+   distinct hue. `2` stays plain (no SGR) for the most-common row."
+  {"0" [:red :bold]
+   "1" [:yellow]
+   "2" []
+   "3" [:faint]
+   "4" [:faint]})
+
+(def ^:private mode-role->codes
+  "Role-derived color map for the MODE column. Asymmetric with
+   `type->codes` and `priority->codes` because `:afk-mode` is the only
+   semantic config marker over a flat mode list — see `mode-role`."
+  {:afk     [:blue]
+   :default []
+   :other   [:faint]})
+
+(defn mode-role
+  "Resolve a ticket mode string to a render role based on project config.
+   Returns one of `:afk` (mode equals `afk-mode`),
+   `:default` (mode equals `default-mode` and is not `afk-mode`),
+   `:other` (configured in `modes` but neither, or unknown).
+
+   When `afk-mode` is nil (per .knot.edn convention, disables the AFK
+   preamble entirely) no mode resolves to `:afk`. Roles, not literal mode
+   names, drive color choice so projects with custom `:modes` inherit the
+   same visual contract as the default `afk`/`hitl` pair.
+
+   The `modes` parameter is reserved for arity-symmetry with `status-role`;
+   the resolution does not consult it because both \"configured-but-other\"
+   and \"unknown\" map to `:other`."
+  [mode _modes default-mode afk-mode]
+  (cond
+    (and (some? afk-mode) (= mode afk-mode)) :afk
+    (= mode default-mode)                    :default
+    :else                                    :other))
+
 (defn- color-codes-for
-  [k value status-context]
+  [k value render-ctx]
   (case k
-    :status   (let [{:keys [statuses terminal-statuses active-status]} status-context]
+    :status   (let [{:keys [statuses terminal-statuses active-status]} render-ctx]
                 (role->codes (status-role value statuses terminal-statuses active-status)))
-    :priority (if (= "0" value) [:red :bold] [])
-    :mode     [:faint]
-    :type     [:faint]
+    :priority (get priority->codes value [])
+    :mode     (let [{:keys [modes default-mode afk-mode]} render-ctx]
+                (mode-role->codes (mode-role value modes default-mode afk-mode)))
+    :type     (get type->codes value [:faint])
     []))
 
 (defn- node-label
@@ -455,15 +509,25 @@
    Status colors are role-based (terminal → :dim, active → :yellow,
    intake/open lane → :cyan). The role is resolved per ticket from
    `:statuses`, `:terminal-statuses`, and `:active-status` so projects
-   with custom `:statuses` get matching colors. When any of those keys
+   with custom `:statuses` get matching colors. Mode colors are likewise
+   role-derived from `:modes`, `:default-mode`, and `:afk-mode`. Type
+   and priority colors use direct per-value maps. When any context key
    is missing from `opts`, the fallback comes from `config/defaults` —
    the single source of truth for the v0 schema."
-  [tickets {:keys [color? tty? width statuses terminal-statuses active-status]
-            :or {color? false tty? false width 80}}]
+  [tickets {:keys [color? tty? width
+                   statuses terminal-statuses active-status
+                   modes default-mode afk-mode]
+            :or {color? false tty? false width 80}
+            :as opts}]
   (let [defaults         (config/defaults)
-        status-ctx       {:statuses          (or statuses          (:statuses defaults))
+        render-ctx       {:statuses          (or statuses          (:statuses defaults))
                           :terminal-statuses (or terminal-statuses (:terminal-statuses defaults))
-                          :active-status     (or active-status     (:active-status defaults))}
+                          :active-status     (or active-status     (:active-status defaults))
+                          :modes             (or modes             (:modes defaults))
+                          :default-mode      (or default-mode      (:default-mode defaults))
+                          :afk-mode          (if (contains? opts :afk-mode)
+                                               afk-mode
+                                               (:afk-mode defaults))}
         ls-columns       (ls-columns-for tickets)
         non-title        (vec (butlast ls-columns))
         title-col        (last ls-columns)
@@ -484,7 +548,7 @@
                                  p (pad t w (:align col))]
                              (if color-on?
                                (colorize color?
-                                         (color-codes-for (:key col) t status-ctx)
+                                         (color-codes-for (:key col) t render-ctx)
                                          p)
                                p)))
         format-row       (fn [color-on? raw-row]

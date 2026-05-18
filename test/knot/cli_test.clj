@@ -775,6 +775,69 @@
         (is (not (re-find #"\[33min_progress" out))
             "blocked-cmd does not color a literal in_progress")))))
 
+(deftest list-cmds-thread-mode-context-test
+  ;; Pin the symmetric wiring for :modes / :default-mode / :afk-mode across
+  ;; ls-cmd, ready-cmd, closed-cmd, and blocked-cmd. Each uses a custom-modes
+  ;; ctx so the v0 fallback (:afk-mode "afk") would NOT color the custom
+  ;; :afk-mode ("agent") blue.
+  (testing "ls-cmd threads the afk-mode ctx (custom :afk-mode → blue)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :modes        ["agent" "human" "review"]
+                              :default-mode "human"
+                              :afk-mode     "agent")
+            _ (cli/create-cmd custom-ctx {:title "Agent ticket" :mode "agent"})
+            out (cli/ls-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[34magent" out)
+            "ls-cmd colors a custom :afk-mode (\"agent\") row blue")
+        (is (not (re-find #"\[2magent" out))
+            "ls-cmd does not render a custom :afk-mode row faint"))))
+
+  (testing "ready-cmd threads the afk-mode ctx (custom :afk-mode → blue)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :modes        ["agent" "human" "review"]
+                              :default-mode "human"
+                              :afk-mode     "agent")
+            _ (cli/create-cmd custom-ctx {:title "Agent ticket" :mode "agent"})
+            out (cli/ready-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[34magent" out)
+            "ready-cmd colors a custom :afk-mode (\"agent\") row blue"))))
+
+  (testing "closed-cmd threads the afk-mode ctx (custom :afk-mode → blue)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :modes        ["agent" "human" "review"]
+                              :default-mode "human"
+                              :afk-mode     "agent")
+            path (cli/create-cmd custom-ctx {:title "Agent ticket" :mode "agent"})
+            id   (->> (fs/file-name path)
+                      (re-matches #"(.+)--agent-ticket\.md")
+                      second)
+            _    (cli/close-cmd custom-ctx {:id id})
+            out  (cli/closed-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[34magent" out)
+            "closed-cmd colors a custom :afk-mode (\"agent\") row blue"))))
+
+  (testing "blocked-cmd threads the afk-mode ctx (custom :afk-mode → blue)"
+    (with-tmp tmp
+      (let [custom-ctx (assoc (ctx tmp)
+                              :modes        ["agent" "human" "review"]
+                              :default-mode "human"
+                              :afk-mode     "agent")
+            a-path (cli/create-cmd custom-ctx {:title "Blocker"     :mode "agent"})
+            b-path (cli/create-cmd custom-ctx {:title "Agent blocked" :mode "agent"})
+            a-id (->> (fs/file-name a-path)
+                      (re-matches #"(.+)--blocker\.md")
+                      second)
+            b-id (->> (fs/file-name b-path)
+                      (re-matches #"(.+)--agent-blocked\.md")
+                      second)
+            _ (cli/dep-cmd custom-ctx {:from b-id :to a-id})
+            out (cli/blocked-cmd custom-ctx {:tty? false :color? true :width 200})]
+        (is (re-find #"\[34magent" out)
+            "blocked-cmd colors a custom :afk-mode (\"agent\") row blue")))))
+
 (defn- id-of-created [path slug-pat]
   (->> (fs/file-name path)
        (re-matches (re-pattern (str "(.+)--" slug-pat "\\.md")))

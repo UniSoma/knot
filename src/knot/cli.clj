@@ -1100,13 +1100,14 @@
 
 (defn- ls-table-opts
   "Build the `output/ls-table` options map from CLI `opts` plus the
-   resolved-ctx status fields (`:statuses`, `:terminal-statuses`,
-   `:active-status`). Threading these through is what lets the table
-   color custom-status projects correctly — the renderer otherwise
-   falls back to defaults that hide custom :active-status lanes."
+   resolved-ctx status and mode fields. Threading these through is what
+   lets the table color custom-status / custom-mode projects correctly —
+   the renderer otherwise falls back to defaults that hide custom
+   :active-status lanes and custom :afk-mode marker."
   [resolved opts]
   (merge (select-keys opts [:tty? :color? :width])
-         (select-keys resolved [:statuses :terminal-statuses :active-status])))
+         (select-keys resolved [:statuses :terminal-statuses :active-status
+                                :modes :default-mode :afk-mode])))
 
 (defn ls-cmd
   "List live tickets — those whose status is not in `:terminal-statuses`.

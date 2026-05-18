@@ -329,6 +329,32 @@
                                #{"closed"}
                                "in_progress")))))
 
+(deftest mode-role-test
+  (testing "mode equal to :afk-mode → :afk"
+    (is (= :afk
+           (output/mode-role "afk" ["afk" "hitl"] "hitl" "afk"))))
+  (testing "mode equal to :default-mode (and not afk) → :default"
+    (is (= :default
+           (output/mode-role "hitl" ["afk" "hitl"] "hitl" "afk"))))
+  (testing "configured but neither afk nor default → :other"
+    (is (= :other
+           (output/mode-role "review" ["afk" "hitl" "review"] "hitl" "afk"))))
+  (testing "unknown mode (not in :modes) → :other"
+    (is (= :other
+           (output/mode-role "wat" ["afk" "hitl"] "hitl" "afk"))))
+  (testing ":afk-mode nil disables the :afk role — no mode resolves to :afk"
+    (is (= :default
+           (output/mode-role "hitl" ["afk" "hitl"] "hitl" nil)))
+    (is (= :other
+           (output/mode-role "afk" ["afk" "hitl"] "hitl" nil))))
+  (testing "custom config: roles derive from config, not literal mode names"
+    (let [modes ["agent" "human" "review"]
+          default "human"
+          afk "agent"]
+      (is (= :afk     (output/mode-role "agent"  modes default afk)))
+      (is (= :default (output/mode-role "human"  modes default afk)))
+      (is (= :other   (output/mode-role "review" modes default afk))))))
+
 (def ^:private custom-statuses-tickets
   [{:frontmatter {:id "kno-01abcd0010"
                   :title "Custom open"
@@ -411,6 +437,147 @@
             "terminal lane derived from config/defaults wraps in :dim SGR (2)")
         (is (re-find #"\[36mopen" out)
             "first non-active non-terminal lane derived from config/defaults wraps in :cyan SGR (36)")))))
+
+(def ^:private per-type-tickets
+  [{:frontmatter {:id "kno-01abcd0020" :title "A bug" :status "open" :priority 2
+                  :mode "hitl" :type "bug"     :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0021" :title "A feat" :status "open" :priority 2
+                  :mode "hitl" :type "feature" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0022" :title "A task" :status "open" :priority 2
+                  :mode "hitl" :type "task"    :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0023" :title "An epic" :status "open" :priority 2
+                  :mode "hitl" :type "epic"    :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0024" :title "A chore" :status "open" :priority 2
+                  :mode "hitl" :type "chore"   :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0025" :title "Unknown" :status "open" :priority 2
+                  :mode "hitl" :type "weird"   :assignee "a"} :body ""}])
+
+(deftest ls-table-type-color-test
+  (testing "canonical types receive their per-value SGR; unknown falls back to faint"
+    (let [out (output/ls-table per-type-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "in_progress" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "in_progress"})]
+      (is (re-find #"\[31mbug" out)
+          "bug wraps in :red SGR (31)")
+      (is (re-find #"\[32mfeature" out)
+          "feature wraps in :green SGR (32)")
+      (is (not (re-find #"\[[0-9;]+mtask" out))
+          "task receives no SGR (plain)")
+      (is (re-find #"\[35mepic" out)
+          "epic wraps in :magenta SGR (35)")
+      (is (re-find #"\[2mchore" out)
+          "chore wraps in :faint SGR (2)")
+      (is (re-find #"\[2mweird" out)
+          "unknown type falls back to :faint SGR (2)"))))
+
+(def ^:private per-priority-tickets
+  [{:frontmatter {:id "kno-01abcd0030" :title "P0" :status "open" :priority 0
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0031" :title "P1" :status "open" :priority 1
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0032" :title "P2" :status "open" :priority 2
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0033" :title "P3" :status "open" :priority 3
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0034" :title "P4" :status "open" :priority 4
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}])
+
+(deftest ls-table-priority-color-test
+  (testing "priorities 0..4 receive per-ordinal SGR; 3 and 4 collapse to faint"
+    (let [out (output/ls-table per-priority-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "in_progress" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "in_progress"})]
+      (is (re-find #"\[31;1m  0" out)
+          "priority 0 wraps in :red :bold SGR (31;1)")
+      (is (re-find #"\[33m  1" out)
+          "priority 1 wraps in :yellow SGR (33)")
+      (is (not (re-find #"\[[0-9;]+m  2" out))
+          "priority 2 receives no SGR (plain — most common row)")
+      (is (re-find #"\[2m  3" out)
+          "priority 3 wraps in :faint SGR (2)")
+      (is (re-find #"\[2m  4" out)
+          "priority 4 wraps in :faint SGR (2)"))))
+
+(def ^:private per-default-mode-tickets
+  [{:frontmatter {:id "kno-01abcd0040" :title "Afk row" :status "open" :priority 2
+                  :mode "afk"  :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0041" :title "Hitl row" :status "open" :priority 2
+                  :mode "hitl" :type "task" :assignee "a"} :body ""}])
+
+(deftest ls-table-default-modes-color-roles-test
+  (testing "default modes (afk/hitl): afk → blue, hitl (default) → plain"
+    (let [out (output/ls-table per-default-mode-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "in_progress" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "in_progress"
+                                :modes             ["afk" "hitl"]
+                                :default-mode      "hitl"
+                                :afk-mode          "afk"})]
+      (is (re-find #"\[34mafk" out)
+          ":afk-mode wraps in :blue SGR (34)")
+      (is (not (re-find #"\[[0-9;]+mhitl" out))
+          ":default-mode (hitl) receives no SGR (plain)"))))
+
+(def ^:private per-custom-mode-tickets
+  [{:frontmatter {:id "kno-01abcd0050" :title "Agent row" :status "open" :priority 2
+                  :mode "agent"  :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0051" :title "Human row" :status "open" :priority 2
+                  :mode "human"  :type "task" :assignee "a"} :body ""}
+   {:frontmatter {:id "kno-01abcd0052" :title "Review row" :status "open" :priority 2
+                  :mode "review" :type "task" :assignee "a"} :body ""}])
+
+(deftest ls-table-custom-modes-color-roles-test
+  (testing "custom modes resolve roles from config, not literal names"
+    (let [out (output/ls-table per-custom-mode-tickets
+                               {:color? true :tty? true :width 200
+                                :statuses          ["open" "in_progress" "closed"]
+                                :terminal-statuses #{"closed"}
+                                :active-status     "in_progress"
+                                :modes             ["agent" "human" "review"]
+                                :default-mode      "human"
+                                :afk-mode          "agent"})]
+      (is (re-find #"\[34magent" out)
+          ":afk-mode (\"agent\") wraps in :blue SGR (34)")
+      (is (not (re-find #"\[[0-9;]+mhuman" out))
+          ":default-mode (\"human\") receives no SGR (plain)")
+      (is (re-find #"\[2mreview" out)
+          "non-afk non-default mode (\"review\") wraps in :faint SGR (2)"))))
+
+(deftest ls-table-no-mode-options-back-compat-test
+  (testing "without mode options, ls-table falls back to config/defaults — afk row blue"
+    (let [out (output/ls-table per-default-mode-tickets
+                               {:color? true :tty? true :width 200})]
+      (is (re-find #"\[34mafk" out)
+          "default :afk-mode (\"afk\") wraps in :blue SGR (34) via config/defaults")
+      (is (not (re-find #"\[[0-9;]+mhitl" out))
+          "default :default-mode (\"hitl\") receives no SGR via config/defaults")))
+  (testing "without mode options, fallback follows config/defaults — no baked literals"
+    (with-redefs [config/defaults (constantly
+                                   {:statuses          ["open" "in_progress" "closed"]
+                                    :terminal-statuses #{"closed"}
+                                    :active-status     "in_progress"
+                                    :modes             ["agent" "human" "review"]
+                                    :default-mode      "human"
+                                    :afk-mode          "agent"})]
+      (let [out (output/ls-table per-custom-mode-tickets
+                                 {:color? true :tty? true :width 200})]
+        (is (re-find #"\[34magent" out)
+            ":afk-mode derived from config/defaults wraps \"agent\" in :blue SGR (34)")
+        (is (re-find #"\[2mreview" out)
+            "non-role mode (\"review\") derived from config/defaults wraps in :faint SGR (2)"))))
+  (testing ":afk-mode nil disables the :afk role at the renderer"
+    (let [out (output/ls-table per-default-mode-tickets
+                               {:color? true :tty? true :width 200
+                                :modes        ["afk" "hitl"]
+                                :default-mode "hitl"
+                                :afk-mode     nil})]
+      (is (not (re-find #"\[34mafk" out))
+          "with :afk-mode nil, no mode renders blue"))))
 
 (def ^:private sample-ls-tickets-with-ac
   [{:frontmatter {:id "kno-01abcd0001"

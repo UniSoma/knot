@@ -1,12 +1,13 @@
 ---
 id: kno-01kqdaxz86nv
 title: Richer per-value colors for ls/ready/closed/blocked tables (type, priority, mode)
-status: open
+status: closed
 type: feature
 priority: 1
 mode: hitl
 created: '2026-04-29T19:19:54.374266390Z'
-updated: '2026-05-18T17:42:26.468362197Z'
+updated: '2026-05-18T18:08:46.958102570Z'
+closed: '2026-05-18T18:08:46.958102570Z'
 links:
 - kno-01kqgqapwqvh
 - kno-01kqg37mssy3
@@ -122,3 +123,13 @@ Design recommendation superseded — apply role-derivation pattern from kno-01kq
 **2026-05-14T00:05:25.725717187Z**
 
 Triage 2026-05-14: upstream pattern dependency kno-01kqg37mssy3 (status color role-derivation) has shipped/closed — the design recommendation from the prior note can now be applied. Re-read the canonical role-derivation pattern in src/knot/output.clj before designing :type/:priority/:mode color maps.
+
+**2026-05-18T18:08:46.958102570Z**
+
+Shipped: per-value colors for :type / :priority / :mode in ls/ready/closed/blocked tables.
+
+:type uses a direct map (bug=red, feature=green, task=plain, epic=magenta, chore=faint; unknown→faint).
+:priority uses an ordinal map (0=red+bold, 1=yellow, 2=plain, 3/4=faint).
+:mode is role-derived via new public mode-role (afk=blue, default=plain, other=faint) — parallels status-role so custom :modes inherit the visual contract.
+
+Plumbing: ansi-codes gained :green/:blue/:magenta; status-context renamed to render-ctx; ls-table-opts threads :modes/:default-mode/:afk-mode end-to-end. :afk-mode nil correctly disables the :afk role. 12 new tests; no existing tests broke. Lint clean.
