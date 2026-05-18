@@ -1,0 +1,233 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   knot serve prototype — styles for the single-column "Stack" layout.
+   See docs/adr/0005-knot-serve-stack-layout.md for shape rationale.
+   ────────────────────────────────────────────────────────────────────────── */
+
+:root {
+  --bg:           #0e1116;
+  --bg-elev:      #161b22;
+  --bg-elev-2:    #1f2530;
+  --border:       #2a313c;
+  --border-soft:  #1f242d;
+  --fg:           #d7dbe0;
+  --fg-soft:      #8a929c;
+  --fg-dim:       #5e6671;
+  --accent:       #79b8ff;
+  --accent-soft:  #2c3a4f;
+
+  --p0: #f87171;   /* highest priority */
+  --p1: #fb923c;
+  --p2: #facc15;
+  --p3: #84cc16;
+  --p4: #6b7280;
+
+  --status-in-progress: #79b8ff;
+  --status-open:        #8a929c;
+  --status-blocked:     #c084fc;
+  --status-closed:      #6b7280;
+
+  --mode-afk:  #34d399;
+  --mode-hitl: #79b8ff;
+
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+
+  --topbar-h: 44px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button {
+  background: transparent;
+  color: inherit;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+button:hover { background: var(--bg-elev-2); }
+
+/* ── Topbar ────────────────────────────────────────────────────────────── */
+.topbar {
+  height: var(--topbar-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.topbar-left, .topbar-right { display: flex; align-items: center; gap: 10px; }
+.brand {
+  font-family: var(--mono);
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.brand-sub { color: var(--fg-dim); font-size: 12px; }
+.refresh-btn { font-size: 14px; padding: 2px 8px; }
+
+/* ── Loader / error ────────────────────────────────────────────────────── */
+.loader, .error {
+  padding: 40px;
+  text-align: center;
+  color: var(--fg-dim);
+}
+.error { color: #f87171; white-space: pre-wrap; font-family: var(--mono); text-align: left; }
+
+main#stage {
+  position: relative;
+  min-height: calc(100vh - var(--topbar-h));
+}
+
+/* ── Chips (priority / status / type / mode / tag) ─────────────────────── */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.chip-pri { font-weight: 700; min-width: 18px; justify-content: center; }
+.chip-pri-0 { background: rgba(248,113,113,0.15); color: var(--p0); border-color: rgba(248,113,113,0.4); }
+.chip-pri-1 { background: rgba(251,146,60,0.15);  color: var(--p1); border-color: rgba(251,146,60,0.4); }
+.chip-pri-2 { background: rgba(250,204,21,0.15);  color: var(--p2); border-color: rgba(250,204,21,0.4); }
+.chip-pri-3 { background: rgba(132,204,22,0.15);  color: var(--p3); border-color: rgba(132,204,22,0.4); }
+.chip-pri-4 { background: rgba(107,114,128,0.15); color: var(--p4); border-color: rgba(107,114,128,0.4); }
+
+.chip-status-in_progress { background: rgba(121,184,255,0.12); color: var(--status-in-progress); }
+.chip-status-open        { background: rgba(138,146,156,0.10); color: var(--status-open); }
+.chip-status-blocked     { background: rgba(192,132,252,0.12); color: var(--status-blocked); }
+.chip-status-closed      { background: rgba(107,114,128,0.10); color: var(--status-closed); }
+
+.chip-type { background: rgba(121,184,255,0.06); color: var(--fg-soft); border-color: var(--border); }
+
+.chip-mode-afk  { color: var(--mode-afk);  border-color: rgba(52,211,153,0.3); }
+.chip-mode-hitl { color: var(--mode-hitl); border-color: rgba(121,184,255,0.3); }
+
+.chip-tag {
+  background: var(--bg-elev-2);
+  color: var(--fg-soft);
+  border-color: var(--border);
+}
+
+.chip-stale {
+  background: rgba(251,146,60,0.18);
+  color: var(--p1);
+  border-color: rgba(251,146,60,0.5);
+}
+
+.id-mono { font-family: var(--mono); font-size: 11px; color: var(--fg-dim); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Stack — single-column, three collapsible groups, expand-row-inline.
+   Mirrors knot.el's Magit-style list and the terminal's `knot ready` shape.
+   ══════════════════════════════════════════════════════════════════════════ */
+.stack {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 24px 16px 40px;
+}
+.stack .group {
+  margin-bottom: 28px;
+}
+.stack .group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 4px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
+}
+.stack .group-header:hover { color: var(--accent); }
+.stack .group-title {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.stack .group-count {
+  color: var(--fg-dim);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+.stack .group-caret {
+  margin-left: auto;
+  color: var(--fg-dim);
+  font-size: 10px;
+}
+.stack .group-body { padding: 4px 0; }
+.stack .group.collapsed .group-body { display: none; }
+
+.stack .row {
+  display: grid;
+  grid-template-columns: 28px 130px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.stack .row:hover { background: var(--bg-elev); }
+.stack .row.expanded { background: var(--bg-elev); }
+.stack .row-title { font-size: 14px; }
+.stack .row-meta { display: flex; gap: 6px; align-items: center; }
+.stack .row-detail {
+  padding: 12px 22px 18px;
+  margin: 0 0 4px 38px;
+  border-left: 2px solid var(--accent-soft);
+  font-size: 13px;
+  color: var(--fg-soft);
+}
+.stack .row-detail h4 {
+  margin: 0 0 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--fg-dim);
+  font-weight: 600;
+}
+.stack .row-detail .ac-list { list-style: none; padding: 0; margin: 0 0 12px; }
+.stack .row-detail .ac-list li { padding: 2px 0; font-family: var(--mono); font-size: 12px; }
+.stack .row-detail .ac-list .ac-done { color: var(--mode-afk); }
+.stack .row-detail .ac-list .ac-open { color: var(--fg); }
+.stack .row-detail pre {
+  background: var(--bg);
+  border: 1px solid var(--border-soft);
+  padding: 10px 12px;
+  border-radius: 4px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  max-height: 360px;
+  color: var(--fg-soft);
+}
+
+.stack .empty {
+  padding: 8px 6px;
+  color: var(--fg-dim);
+  font-style: italic;
+}

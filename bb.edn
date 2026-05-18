@@ -46,6 +46,10 @@
            (require '[knot.main])
            (apply (resolve 'knot.main/-main) *command-line-args*))}
 
+  prototype:serve
+  {:doc "Run the knot serve web UI prototype on http://localhost:7777"
+   :task (load-file "prototype/serve/server.bb")}
+
   gen:schema
   {:doc "Regenerate knot.schema.json from the current `knot info` allowed values"
    :task

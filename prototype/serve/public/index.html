@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>knot serve · prototype</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-left">
+      <span class="brand">knot</span>
+      <span class="brand-sub">serve · prototype</span>
+    </div>
+    <div class="topbar-right">
+      <button id="refresh-btn" class="refresh-btn" title="Refresh data">↻</button>
+    </div>
+  </header>
+
+  <main id="stage">
+    <div id="ticket-stack" class="stack" hidden></div>
+    <div id="loader" class="loader">loading…</div>
+    <div id="error" class="error" hidden></div>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
