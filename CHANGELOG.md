@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+- **`knot serve` command — read-only browser panel for the current
+  project.** New subcommand boots an http-kit server on loopback
+  (default `127.0.0.1:7777`; `--port 0` for an ephemeral port,
+  `--no-open` / `--open` to control the browser launch, `--dev` to
+  read UI assets from disk instead of the classpath). Every `/api/*`
+  route shells out to `knot ... --json` and forwards the envelope
+  verbatim, with an origin allowlist accepting only `nil` / `"null"`
+  / `http://(127.0.0.1|localhost):<port>`. A per-project heartbeat
+  at `${TMPDIR}/knot-serve-<sha256(project-root)[:12]>.json` makes
+  a second `knot serve` invocation in the same project detect the
+  running instance and exit `0` instead of binding twice. The UI
+  asset bundle moved from `prototype/serve/public/` to
+  `resources/knot/serve/public/`; `prototype/` is gone. Decisions
+  documented in ADR-0005 (Stack layout), ADR-0006 (read-only v1),
+  and ADR-0007 (shell-out per request). http-kit is lazy-required
+  inside the handler so every other `knot` command stays cheap.
+
 ## [0.5.0] - 2026-05-17
 
 ### Added

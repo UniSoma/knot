@@ -386,6 +386,23 @@
       (is (contains? help/registry sk)
           (str k " references missing subcommand: " sk)))))
 
+(deftest serve-registered-test
+  (testing ":serve is in help/registry with the required shape"
+    (let [entry (get help/registry :serve)]
+      (is (some? entry) ":serve must be registered in help/registry")
+      (is (string? (:description entry))
+          ":serve must have a :description")
+      (is (true? (:restrict? entry))
+          ":serve must declare :restrict? true (rejects unknown flags)")
+      (is (some #(= :port (:name %)) (:flags entry))
+          ":serve must declare a --port flag")
+      (is (some #(= :open (:name %)) (:flags entry))
+          ":serve must declare an --open flag")
+      (is (some #(= :no-open (:name %)) (:flags entry))
+          ":serve must declare a --no-open flag")
+      (is (some #(= :dev (:name %)) (:flags entry))
+          ":serve must declare a --dev flag for disk asset fallback"))))
+
 (deftest update-tag-delta-flags-registered-test
   ;; Pins the registry-level contract for the new tag-delta flags. The
   ;; derived babashka.cli spec is what update-handler reads, so getting

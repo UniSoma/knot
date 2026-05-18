@@ -534,7 +534,27 @@
                   {:cmd "knot schema > knot.schema.json"
                    :note "Write the checked-in schema file (or use `bb gen:schema`)."}]
     :exit-codes  [{:code 0 :when "schema emitted successfully"}
-                  {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}})
+                  {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}
+
+   :serve
+   {:group       :project
+    :description "Run the read-only Web UI on loopback (foreground; ctrl-c to stop)."
+    :args        []
+    :restrict?   true
+    :flags       [{:name :port :coerce :long
+                   :desc "Port to bind (default 7777; 0 = ephemeral, prints the assigned port)."}
+                  {:name :open    :coerce :boolean
+                   :desc "Open the panel in the system browser after binding (default when stdout is a tty)."}
+                  {:name :no-open :coerce :boolean
+                   :desc "Do not open the system browser. Overrides the tty-driven default."}
+                  {:name :dev :coerce :boolean
+                   :desc "Serve UI assets from resources/knot/serve/public on disk instead of the classpath (for local hacking on the front-end)."}]
+    :examples    [{:cmd "knot serve"
+                   :note "Bind 127.0.0.1:7777 and open the panel."}
+                  {:cmd "knot serve --port 0 --no-open"
+                   :note "Bind an ephemeral port and print the URL; do not open a browser."}]
+    :exit-codes  [{:code 0 :when "server bound and shut down cleanly, or another knot serve was already running for this project"}
+                  {:code 1 :when "port unavailable, no project found, or another startup failure"}]}})
 
 (def ^:private group-order
   "Canonical group order and display headers. The renderer walks this
@@ -549,7 +569,7 @@
   "Top-level command order for `top-level-help-text`. Subcommand keys
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
-  [:init :prime :info :check :schema
+  [:init :prime :info :check :schema :serve
    :create :start :status :close :reopen
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed

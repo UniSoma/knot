@@ -587,6 +587,8 @@ add-note / edit / update               annotation (edit is interactive,
                                        with --ac "<title>" --done|--undone)
 dep / undep / dep tree                 directional graph; cycle-checked on add
 link / unlink                          symmetric graph
+serve                                  read-only browser panel on loopback
+                                       (--port, --open / --no-open, --dev)
 ```
 
 Most commands return `0` on success and `1` on error. `knot check`

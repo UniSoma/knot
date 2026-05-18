@@ -2,4 +2,8 @@
 ;; `clojure.tools.deps` with `--config`/`:local/root`, which requires a
 ;; deps.edn manifest at the project root. Runtime deps (clj-yaml, etc.)
 ;; ship bundled with babashka and live in bb.edn alongside :bbin/bin.
-{:paths ["src"]}
+;;
+;; `resources` is on :paths so `knot serve` can resolve its static UI
+;; bundle from the classpath via `io/resource`. bb.edn mirrors this for
+;; the in-tree `bb knot` task; both must list both paths.
+{:paths ["src" "resources"]}

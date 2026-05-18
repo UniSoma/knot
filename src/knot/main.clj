@@ -9,6 +9,7 @@
             [knot.config :as config]
             [knot.help :as help]
             [knot.output :as output]
+            [knot.serve :as serve]
             [knot.store :as store]
             [knot.ticket :as ticket]
             [knot.version :as version]))
@@ -1134,6 +1135,13 @@
                 (cli/prime-cmd {:project-found? false} {})))]
     (println-out out)))
 
+(defn- serve-handler
+  "Boot the Web UI. Delegates argv parsing + the server lifecycle to
+   `knot.serve/serve-cmd`; this thin wrapper only resolves the project
+   context (used to derive a per-project heartbeat path)."
+  [argv]
+  (serve/serve-cmd argv (discover-ctx)))
+
 (defn- usage
   "One-line hint pointing the caller at `knot --help`. Used for bare
    `knot` invocation and as the trailing line on the unknown-command
@@ -1234,6 +1242,7 @@
         "edit"     (edit-handler rest-argv)
         "update"   (update-handler rest-argv)
         "migrate-ac" (migrate-ac-handler rest-argv)
+        "serve"   (serve-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

@@ -1,4 +1,4 @@
-{:paths ["src"]
+{:paths ["src" "resources"]
  ;; All non-bb dependencies (clj-yaml, cheshire, flatland.ordered.map) ship
  ;; bundled with babashka, so no :deps declaration is required at runtime.
  ;; The minimum version below is a conservative floor — it covers the bb
@@ -45,10 +45,6 @@
    :task (do
            (require '[knot.main])
            (apply (resolve 'knot.main/-main) *command-line-args*))}
-
-  prototype:serve
-  {:doc "Run the knot serve web UI prototype on http://localhost:7777"
-   :task (load-file "prototype/serve/server.bb")}
 
   gen:schema
   {:doc "Regenerate knot.schema.json from the current `knot info` allowed values"
