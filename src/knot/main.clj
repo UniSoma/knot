@@ -172,12 +172,12 @@
    replace."
   [{:keys [flags]}]
   (reduce
-   (fn [acc {:keys [name alias coerce body?]}]
+   (fn [acc {flag-name :name :keys [alias coerce body?]}]
      (if (or body? (contains? excluded-value-coerce coerce))
        acc
-       (let [entry      {:key name :repeat? (= coerce [])}
-             long-form  (str "--" (clojure.core/name name))
-             short-form (when alias (str "-" (clojure.core/name alias)))]
+       (let [entry      {:key flag-name :repeat? (= coerce [])}
+             long-form  (str "--" (name flag-name))
+             short-form (when alias (str "-" (name alias)))]
          (cond-> (assoc acc long-form entry)
            short-form (assoc short-form entry)))))
    {}

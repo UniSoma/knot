@@ -219,6 +219,18 @@
   ;; of being reparsed as flag tokens (babashka.cli cli.cljc:344-367 treats
   ;; any dash-leading token as a flag name, including after `=`). See
   ;; kno-01kr0129m0y9 (follow-up to kno-01kqxd0amhnb).
+  ;;
+  ;; Four-shape equivalence (kno-01krsyn5v7sq AC #2): every value-bearing
+  ;; string flag flows through the same `extract-value-flags` walk (see
+  ;; src/knot/main.clj). The four argv shapes (single-line dash,
+  ;; double-dash, alias-shaped, multi-line) test that walk, not per-flag
+  ;; semantics — so the `--acceptance` doseq below proves the walk for
+  ;; all four shapes once. Each other flag then gets a single-shape
+  ;; round-trip test to confirm (a) the walk is wired into that flag's
+  ;; handler and (b) its downstream normaliser / persistence path
+  ;; accepts the extracted value. Flag-specific normalisers
+  ;; (`normalize-tag-delta-values`, `normalize-ac-delta-values`,
+  ;; `extract-rel-order`) have their own targeted assertions below.
   (testing "--acceptance survives all four dash-leading shapes"
     (doseq [[label value rendered]
             [["single-line"  "- text"                "- [ ] - text"]
@@ -281,7 +293,30 @@
         (is (zero? exit) (str "external-ref err=" err))
         (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
           (is (str/includes? shown "- '- one'"))
-          (is (str/includes? shown "- --two")))))))
+          (is (str/includes? shown "- --two"))))))
+  (testing "--dep dash-leading value round-trips into :deps (lenient path)"
+    ;; `--dep` is lenient on missing targets — unresolved ids are kept
+    ;; verbatim as forward refs. extract-rel-order observes argv before
+    ;; extract-value-flags consumes the token; both passes must see the
+    ;; dash-leading value as the flag value, not a flag name.
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--dep" "-bogus")]
+        (is (zero? exit) (str "create --dep err=" err))
+        (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
+          (is (str/includes? shown "- -bogus")
+              "the dash-leading id must land verbatim in :deps")))))
+  (testing "--link dash-leading value surfaces verbatim in the strict-resolution error"
+    ;; `--link` is strict: unresolved targets fail before any write. The
+    ;; success signal is that the dash-leading id reaches the resolver
+    ;; (and shows up in the error) — not that bb-cli swallows it as a
+    ;; flag token.
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit err]} (run-knot tmp "create" "x" "--link" "-bogus")]
+        (is (= 1 exit) "strict --link must reject the unresolved id")
+        (is (str/includes? err "-bogus")
+            "the dash-leading id must appear in the resolver's error message")))))
 
 (deftest dash-leading-value-flags-survive-update-test
   ;; update mirrors create's pre-extraction so dash-leading values land
@@ -340,7 +375,44 @@
             {:keys [exit err]} (run-knot tmp "update" id "--ac" "- task" "--done")]
         (is (zero? exit) (str "update --ac --done err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (str/includes? shown "- [x] - task")))))))
+          (is (str/includes? shown "- [x] - task"))))))
+  (testing "--remove-tag dash-leading value removes the matching tag"
+    ;; Mirrors the --add-tag dash-leading test against the remove branch.
+    ;; normalize-tag-delta-values runs over the extracted values and must
+    ;; accept dash-leading inputs (it only rejects blanks and commas).
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x")
+            id            (id-from-create-out out "x")]
+        (run-knot tmp "update" id "--add-tag" "-foo" "--add-tag" "--bar")
+        (let [{:keys [exit err]} (run-knot tmp "update" id
+                                           "--remove-tag" "-foo"
+                                           "--remove-tag" "--bar")]
+          (is (zero? exit) (str "update --remove-tag err=" err))
+          (let [{shown :out} (run-knot tmp "show" id)]
+            (is (not (str/includes? shown "- -foo"))
+                "the dash-leading tag -foo must actually be removed")
+            (is (not (str/includes? shown "- --bar"))
+                "the dash-leading tag --bar must actually be removed"))))))
+  (testing "--remove-ac dash-leading value removes the matching AC entry"
+    ;; Mirrors the --add-ac dash-leading test against the remove branch.
+    ;; normalize-ac-delta-values runs over the extracted values and must
+    ;; accept dash-leading inputs (it only rejects blanks).
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [out]} (run-knot tmp "create" "x"
+                                    "--acceptance" "- first"
+                                    "--acceptance" "--second")
+            id            (id-from-create-out out "x")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--remove-ac" "- first"
+                                         "--remove-ac" "--second")]
+        (is (zero? exit) (str "update --remove-ac err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (not (str/includes? shown "- [ ] - first"))
+              "the dash-leading AC `- first` must actually be removed")
+          (is (not (str/includes? shown "- [ ] --second"))
+              "the dash-leading AC `--second` must actually be removed"))))))
 
 (deftest dash-leading-value-flags-survive-transition-test
   ;; close/status take --summary; pre-extract lets summaries that start
