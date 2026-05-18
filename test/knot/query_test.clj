@@ -248,16 +248,16 @@
 
   (testing "full mode terminates on cycles in the input graph"
     ;; a -> b -> a (cycle)
+    ;; smoke: must not infinite-loop. The cycle break must be marked
+    ;; somehow (seen-before? on the second a).
     (let [tickets [(ticket "a" "open" ["b"])
                    (ticket "b" "open" ["a"])]
-          tree    (query/dep-tree tickets "a" {:full? true})]
-      ;; smoke: must not infinite-loop. The cycle break must be marked
-      ;; somehow (seen-before? on the second a).
-      (let [b   (first (:children tree))
-            a*  (first (:children b))]
-        (is (= "a" (:id a*)))
-        (is (true? (:seen-before? a*))
-            "even in --full, a true cycle terminates with seen-before?")))))
+          tree    (query/dep-tree tickets "a" {:full? true})
+          b       (first (:children tree))
+          a*      (first (:children b))]
+      (is (= "a" (:id a*)))
+      (is (true? (:seen-before? a*))
+          "even in --full, a true cycle terminates with seen-before?"))))
 
 (deftest broken-refs-test
   (testing "ticket with no :deps and no :parent: empty result"

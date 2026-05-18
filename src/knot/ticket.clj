@@ -10,7 +10,6 @@
 
 (def ^:private timestamp-chars 10)
 (def ^:private random-chars 2)
-(def ^:private id-suffix-chars (+ timestamp-chars random-chars))
 
 (defn- encode-base32
   "Encode `n` as `width` lowercase Crockford-base32 chars, MSB first."

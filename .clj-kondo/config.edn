@@ -1,3 +1,6 @@
 {:lint-as {knot.store-test/with-tmp         clj-kondo.lint-as/def-catch-all
            knot.json-contract-test/with-tmp clj-kondo.lint-as/def-catch-all
-           knot.check-test/with-tmp         clj-kondo.lint-as/def-catch-all}}
+           knot.check-test/with-tmp         clj-kondo.lint-as/def-catch-all
+           knot.cli-test/with-tmp           clj-kondo.lint-as/def-catch-all
+           knot.config-test/with-tmp        clj-kondo.lint-as/def-catch-all
+           knot.integration-test/with-tmp   clj-kondo.lint-as/def-catch-all}}

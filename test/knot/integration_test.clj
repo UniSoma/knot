@@ -24,14 +24,13 @@
    commands which probe stdin (`add-note` without a text arg) do not
    block waiting for the parent's tty."
   [cwd & args]
-  (let [main-clj (str (fs/path project-root "src" "knot" "main.clj"))]
-    @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
-                         "-e"
-                         (str "(require '[knot.main]) "
-                              "(apply (resolve 'knot.main/-main) *command-line-args*)")
-                         "--"]
-                        args)
-                {:dir cwd :in "" :out :string :err :string})))
+  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+                       "-e"
+                       (str "(require '[knot.main]) "
+                            "(apply (resolve 'knot.main/-main) *command-line-args*)")
+                       "--"]
+                      args)
+              {:dir cwd :in "" :out :string :err :string}))
 
 (defn- run-knot-with-stdin
   "Like `run-knot`, but pipes `stdin-str` into the subprocess's stdin

@@ -452,7 +452,7 @@
         ;; init runs in cwd by design — it's how you create a project root
         ctx  {:project-root (str (fs/cwd))}
         path (cli/init-cmd ctx opts)]
-    (println-out (str path))))
+    (println-out path)))
 
 (defn- emit-acceptance-incomplete!
   "Emit the v0.3 acceptance gate failure: JSON envelope with code
