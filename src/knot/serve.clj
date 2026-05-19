@@ -207,6 +207,22 @@
     (when (fs/exists? f)
       {:body (slurp (str f))})))
 
+(defn- windows?
+  []
+  (str/starts-with? (or (System/getProperty "os.name") "") "Windows"))
+
+(defn- knot-shell-cmd
+  "Build the argv for shelling out to `knot`. On Windows we wrap with
+   `cmd /c` so the shell resolves the binary's extension via PATHEXT —
+   `bbin install` produces `knot.bat`, which is invisible to Java's
+   ProcessBuilder (no PATHEXT expansion) when the bare name `knot` is
+   used."
+  [args]
+  (let [argv (concat args ["--json"])]
+    (if (windows?)
+      (concat ["cmd" "/c" "knot"] argv)
+      (cons "knot" argv))))
+
 (defn default-knot-json!
   "Production shell-out for /api/* routes: invoke `knot <args> --json`
    as a child process, forward stdout verbatim. Exit != 0 with empty
@@ -219,7 +235,7 @@
   [& args]
   (let [{:keys [out err exit]}
         (apply p/shell {:out :string :err :string :continue true}
-               "knot" (concat args ["--json"]))]
+               (knot-shell-cmd args))]
     (if (and (not (zero? exit)) (str/blank? out))
       (let [err* (str/trim (or err ""))]
         (when-not (str/blank? err*)

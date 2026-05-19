@@ -33,7 +33,8 @@
           p2   (serve/heartbeat-path tmp root)]
       (try
         (is (= p1 p2))
-        (is (str/starts-with? p1 (str tmp "/")) "lives under TMPDIR")
+        (is (str/starts-with? p1 (str tmp java.io.File/separator))
+            "lives under TMPDIR")
         (is (str/starts-with? (fs/file-name p1) "knot-serve-")
             "filename prefix is knot-serve-")
         (is (str/ends-with? (fs/file-name p1) ".json")
