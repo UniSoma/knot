@@ -643,6 +643,60 @@
          (mapv #(store/load-one project-root tickets-dir %) touched-ids)))
       paths)))
 
+(defn- incoming-refs
+  "Scan every ticket in `all-tickets` (already loaded — live + archive)
+   for `:parent`/`:deps`/`:links` references to `target-id`. Returns a
+   vector of `{:id <referrer-id> :field <kw>}` rows sorted by referrer
+   id for stable scripting. A ticket may contribute multiple rows when
+   it references the target through more than one field."
+  [all-tickets target-id]
+  (->> (for [t     all-tickets
+             :let  [fm    (:frontmatter t)
+                    ref-id (:id fm)]
+             :when (not= ref-id target-id)
+             field [:parent :deps :links]
+             :let  [v (get fm field)]
+             :when (case field
+                     :parent (= v target-id)
+                     (contains? (set v) target-id))]
+         {:id ref-id :field field})
+       (sort-by :id)
+       vec))
+
+(defn delete-cmd
+  "Remove the on-disk file for the ticket whose id is `(:id opts)` (full
+   or partial). Strict-resolves the id (throws `:not-found` /
+   `:ambiguous` ex-info on failure). Refuses (throws
+   `:has-incoming-refs`) when any other ticket — live or archived —
+   names this id in `:parent`, `:deps`, or `:links`. Returns the
+   deleted path string.
+
+   With `:json? true`, returns a v0.3 success-envelope JSON string
+   wrapping `{:deleted {:id <id> :path <posix-path>} :cleaned []}` under
+   `:data`. The `:cleaned` slot is always `[]` here — the cascade slice
+   builds on this and populates it when reference rewrites land."
+  [ctx {:keys [id json?]}]
+  (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
+        loaded   (store/resolve-id project-root tickets-dir id)
+        full-id  (get-in loaded [:frontmatter :id])
+        all      (store/load-all project-root tickets-dir)
+        refs     (incoming-refs all full-id)]
+    (when (seq refs)
+      (throw (ex-info (str (count refs)
+                           " incoming reference"
+                           (when (> (count refs) 1) "s")
+                           " prevent deletion of " full-id)
+                      {:kind      :has-incoming-refs
+                       :id        full-id
+                       :referrers refs})))
+    (let [path    (store/find-existing-path project-root tickets-dir full-id)
+          deleted (store/delete! path)]
+      (if json?
+        (output/envelope-str {:deleted {:id   full-id
+                                        :path (fs/unixify deleted)}
+                              :cleaned []})
+        deleted))))
+
 (defn- resolve-note-content
   "Resolve the note content string from the layered input options:
    explicit `:text` arg wins; if absent and `:stdin-tty?` is false, call

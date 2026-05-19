@@ -2780,6 +2780,166 @@ Restart the daemon.
             "data is a 1-element array when :to does not resolve")
         (is (= a-id (get-in parsed [:data 0 :id])))))))
 
+(deftest delete-cmd-leaf-test
+  (testing "delete-cmd removes a live leaf ticket and returns the removed path"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Junk"})
+            id     (id-of-created path "junk")
+            before (fs/exists? path)
+            out    (cli/delete-cmd (ctx tmp) {:id id})]
+        (is before "precondition: ticket file exists before delete")
+        (is (= (str path) (str out))
+            "delete-cmd returns the removed path string")
+        (is (not (fs/exists? path))
+            "ticket file is gone from .tickets/ after delete"))))
+
+  (testing "delete-cmd removes an archived leaf ticket"
+    (with-tmp tmp
+      (let [path     (cli/create-cmd (ctx tmp) {:title "Old"})
+            id       (id-of-created path "old")
+            _        (cli/close-cmd (ctx tmp) {:id id :summary "shipped"})
+            archived (store/find-existing-path tmp ".tickets" id)
+            out      (cli/delete-cmd (ctx tmp) {:id id})]
+        (is (str/includes? archived "archive")
+            "precondition: closed ticket lives under .tickets/archive/")
+        (is (= (str archived) (str out))
+            "delete-cmd returns the archived path string")
+        (is (not (fs/exists? archived))
+            "archived file is gone after delete")))))
+
+(deftest delete-cmd-refusal-test
+  (testing "delete-cmd refuses (throws :has-incoming-refs) when a live ticket has the target in :deps"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            referrer-p  (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            referrer-id (id-of-created referrer-p "referrer")
+            _           (cli/dep-cmd (ctx tmp) {:from referrer-id :to target-id})]
+        (try
+          (cli/delete-cmd (ctx tmp) {:id target-id})
+          (is false "delete-cmd should throw when there is an incoming :deps reference")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :has-incoming-refs (:kind d))
+                  "ex-info should carry :kind :has-incoming-refs")
+              (is (= [{:id referrer-id :field :deps}] (:referrers d))
+                  "referrers payload should enumerate the referrer + field")
+              (is (fs/exists? target-path)
+                  "target file must NOT be deleted when refusal fires")))))))
+
+  (testing "delete-cmd refuses when a live ticket has the target as :parent"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Parent"})
+            target-id   (id-of-created target-path "parent")
+            child-path  (cli/create-cmd (ctx tmp) {:title "Child" :parent target-id})
+            child-id    (id-of-created child-path "child")]
+        (try
+          (cli/delete-cmd (ctx tmp) {:id target-id})
+          (is false "delete-cmd should throw when a child names the target as :parent")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :has-incoming-refs (:kind d)))
+              (is (= [{:id child-id :field :parent}] (:referrers d)))
+              (is (fs/exists? target-path))))))))
+
+  (testing "delete-cmd refuses when a live ticket has the target in :links"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            peer-path   (cli/create-cmd (ctx tmp) {:title "Peer"})
+            peer-id     (id-of-created peer-path "peer")
+            _           (cli/link-cmd (ctx tmp) {:ids [target-id peer-id]})]
+        (try
+          (cli/delete-cmd (ctx tmp) {:id target-id})
+          (is false "delete-cmd should throw when a peer has the target in :links")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :has-incoming-refs (:kind d)))
+              (is (= [{:id peer-id :field :links}] (:referrers d)))
+              (is (fs/exists? target-path))))))))
+
+  (testing "delete-cmd refuses when an ARCHIVED ticket references the target"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            ref-path    (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id      (id-of-created ref-path "referrer")
+            _           (cli/dep-cmd (ctx tmp) {:from ref-id :to target-id})
+            ;; Close the referrer so its file moves to .tickets/archive/
+            _           (cli/close-cmd (ctx tmp) {:id ref-id :summary "done"})
+            archived    (store/find-existing-path tmp ".tickets" ref-id)]
+        (is (str/includes? archived "archive")
+            "precondition: referrer is now archived")
+        (try
+          (cli/delete-cmd (ctx tmp) {:id target-id})
+          (is false "delete-cmd should throw even when only an archived ticket references the target")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d (ex-data e)]
+              (is (= :has-incoming-refs (:kind d)))
+              (is (= [{:id ref-id :field :deps}] (:referrers d)))
+              (is (fs/exists? target-path))))))))
+
+  (testing "delete-cmd referrer payload enumerates every referrer + field, sorted by id"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            a-path      (cli/create-cmd (ctx tmp) {:title "A"})
+            a-id        (id-of-created a-path "a")
+            b-path      (cli/create-cmd (ctx tmp) {:title "B" :parent target-id})
+            b-id        (id-of-created b-path "b")
+            _           (cli/dep-cmd  (ctx tmp) {:from a-id :to target-id})
+            _           (cli/link-cmd (ctx tmp) {:ids [a-id target-id]})]
+        (try
+          (cli/delete-cmd (ctx tmp) {:id target-id})
+          (is false "delete-cmd should throw with multiple referrers present")
+          (catch clojure.lang.ExceptionInfo e
+            (let [d         (ex-data e)
+                  referrers (:referrers d)
+                  expected  (vec (sort-by :id [{:id a-id :field :deps}
+                                               {:id a-id :field :links}
+                                               {:id b-id :field :parent}]))]
+              (is (= :has-incoming-refs (:kind d)))
+              (is (= expected referrers)
+                  "every referrer×field row appears, sorted by referrer id")
+              (is (= referrers (vec (sort-by :id referrers)))
+                  "rows are sorted by :id for stable scripting"))))))))
+
+(deftest delete-cmd-json-success-test
+  (testing "delete-cmd with :json? true returns a success envelope wrapping deleted{id,path} and cleaned []"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp) {:title "Junk"})
+            id     (id-of-created path "junk")
+            out    (cli/delete-cmd (ctx tmp) {:id id :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (= 1 (:schema_version parsed)))
+        (is (true? (:ok parsed)))
+        (is (not (contains? parsed :error)))
+        (is (= id (get-in parsed [:data :deleted :id]))
+            "data.deleted.id is the resolved full id")
+        (is (= [] (get-in parsed [:data :cleaned]))
+            "data.cleaned is always [] for the leaf-only slice")
+        (let [out-path (get-in parsed [:data :deleted :path])]
+          (is (string? out-path))
+          (is (str/includes? out-path ".tickets/")
+              (str "data.deleted.path includes .tickets/, got " out-path))
+          (is (str/ends-with? out-path "--junk.md"))
+          (is (not (str/includes? out-path "\\"))
+              "POSIX separators only (mirrors meta.archived_to from close --json)"))
+        (is (not (fs/exists? path))
+            "file still removed under --json"))))
+
+  (testing "delete-cmd with :json? true on an archived ticket emits an archive path"
+    (with-tmp tmp
+      (let [path     (cli/create-cmd (ctx tmp) {:title "Old"})
+            id       (id-of-created path "old")
+            _        (cli/close-cmd (ctx tmp) {:id id :summary "shipped"})
+            out      (cli/delete-cmd (ctx tmp) {:id id :json? true})
+            parsed   (cheshire/parse-string out true)
+            out-path (get-in parsed [:data :deleted :path])]
+        (is (true? (:ok parsed)))
+        (is (str/includes? out-path ".tickets/archive/")
+            (str "archived path includes .tickets/archive/, got " out-path))))))
+
 (deftest load-config-malformed-edn-test
   (testing "malformed EDN error includes the file path for context"
     (with-tmp tmp

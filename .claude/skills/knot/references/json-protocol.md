@@ -143,9 +143,10 @@ carries, and which commands surface it.
 
 | Code              | Trigger                                                          | Extra fields              | Commands                                                                 |
 |-------------------|------------------------------------------------------------------|---------------------------|--------------------------------------------------------------------------|
-| `not_found`       | Strict-resolved id matched no ticket (live or archive).          | —                         | `show`, `start`, `status`, `close`, `reopen`, `dep` (from), `undep` (from), `link` (either), `unlink` (from), `add-note`, `update`. |
+| `not_found`       | Strict-resolved id matched no ticket (live or archive).          | —                         | `show`, `start`, `status`, `close`, `reopen`, `delete`, `dep` (from), `undep` (from), `link` (either), `unlink` (from), `add-note`, `update`. |
 | `ambiguous_id`    | Strict-resolved partial id matched >1 ticket.                    | `candidates: string[]`    | Same set as `not_found` plus `dep tree`.                                 |
 | `cycle`           | `dep <from> <to>` would create a cycle.                          | `cycle: string[]` (path)  | `dep`.                                                                   |
+| `has_incoming_refs` | `delete <id>` target is referenced by another ticket (`:parent`/`:deps`/`:links`). | `referrers: {id, field}[]` | `delete`. Drop the refs first (`undep`, `unlink`, `update --parent ""`); a future `--cascade` slice will opt into rewriting them. |
 | `invalid_argument` | Validation failure on a flag value or flag combination.         | —                         | `info --json` (e.g. unknown flag); also surfaces from `update --json` for conflicting body flags. Other commands keep argument-parse errors on stderr (see *Argument-parsing errors* below). |
 | `acceptance_incomplete` | Active→terminal transition attempted while at least one frontmatter `:acceptance` entry is unchecked. | `open_acceptance: {title}[]` | `close --json`, `status --json` (terminal target), `update --json` (with `--status <terminal>`). Pass `--force --summary "<reason>"` to override. |
 | `no_project`      | No `.knot.edn` and no `.tickets/` discoverable from cwd.         | —                         | `check --json` (exit 2), `info --json` (exit 1).                         |
@@ -240,6 +241,7 @@ Optional keys that may be present:
 | `unlink <from> <to>`        | `ticket[]`   | no    | —       | Both touched tickets returned.                                 |
 | `add-note <id> "<text>"`    | `ticket`     | yes   | —       | `data.body` includes the new note.                             |
 | `update <id> [flags...]`    | `ticket`     | yes   | —       | `update` never archives, so `meta` is never present.           |
+| `delete <id>`               | `{deleted: {id, path}, cleaned: []}` | n/a | — | Target is gone; envelope carries the removed id + posix path. `cleaned` is always `[]` in the leaf-only path. Refusal: `has_incoming_refs` error envelope. |
 | `migrate-ac`                | `{migrated, unchanged, total}` | n/a | — | Counts triple. `total == migrated + unchanged` invariant.   |
 
 ### `info` shape

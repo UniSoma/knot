@@ -383,3 +383,11 @@
       (if (= :not-found (:kind (ex-data e)))
         input
         (throw e)))))
+
+(defn delete!
+  "Unlink the on-disk file at `path` and return the path string. Caller
+   resolves the id first; this is a thin wrapper so the boundary stays
+   in `store`."
+  [path]
+  (fs/delete path)
+  (str path))

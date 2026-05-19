@@ -714,6 +714,68 @@
       (catch Exception e
         (die (str "knot unlink: " (or (.getMessage e) (.toString e))))))))
 
+(defn- format-referrer-lines
+  "Render a referrer payload as one `  - <id> <field>` line per row for
+   the plain-text refusal output. Sort is preserved from the cli layer
+   (alphabetical by `:id`)."
+  [referrers]
+  (->> referrers
+       (map (fn [{:keys [id field]}] (str "  - " id " " (name field))))
+       (str/join "\n")))
+
+(defn- emit-has-incoming-refs!
+  "Plain-text refusal: enumerate referrer + field on stderr; exit 1.
+   `--json`: emit the v0.3 `has_incoming_refs` error envelope on stdout
+   (referrers field-keyword stringified for JSON consumers)."
+  [json? msg referrers]
+  (if json?
+    (emit-error-envelope! {:code      "has_incoming_refs"
+                           :message   msg
+                           :referrers (mapv (fn [r] (update r :field name))
+                                            referrers)})
+    (binding [*out* *err*]
+      (println (str "knot delete: " msg))
+      (println (format-referrer-lines referrers))
+      (println (str "drop each reference first "
+                    "(`knot undep`, `knot unlink`, "
+                    "or `knot update <id> --parent \"\"`) "
+                    "and re-run."))
+      (System/exit 1))))
+
+(defn- delete-handler
+  "Run `knot delete <id>`: leaf-only file removal across live + archive.
+   Refuses when any other ticket — live or archived — references the
+   target via `:parent`/`:deps`/`:links`; the refusal enumerates each
+   referrer + field. Plain text prints the removed path on stdout; under
+   `--json`, emits the v0.3 success envelope (or `has_incoming_refs`
+   error envelope on refusal). Not-found and ambiguous-id failures
+   follow the standard envelopes used by other write commands."
+  [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :delete))
+        id                  (first args)
+        json?               (boolean (:json opts))]
+    (when (or (nil? id) (str/blank? id))
+      (die "knot delete: an id is required"))
+    (try
+      (let [out (cli/delete-cmd (discover-ctx) {:id id :json? json?})]
+        (println-out (str out)))
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (cond
+            (= :has-incoming-refs (:kind data))
+            (emit-has-incoming-refs! json? (.getMessage e) (:referrers data))
+
+            (and json? (= :ambiguous (:kind data)))
+            (emit-ambiguous-envelope! e data)
+
+            (and json? (= :not-found (:kind data)))
+            (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
+
+            (= :not-found (:kind data))
+            (die (str "knot delete: " (.getMessage e)))
+
+            :else (throw e)))))))
+
 (def ^:private editor-header
   "# Lines starting with '#' will be ignored.\n")
 
@@ -1231,6 +1293,7 @@
         "start"   (transition-handler "start"  :start  1 cli/start-cmd  rest-argv)
         "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)
         "reopen"  (transition-handler "reopen" :reopen 1 cli/reopen-cmd rest-argv)
+        "delete"  (delete-handler rest-argv)
         "dep"      (dep-handler rest-argv)
         "undep"    (edge-handler "undep" :undep cli/undep-cmd rest-argv)
         "link"     (link-handler   rest-argv)

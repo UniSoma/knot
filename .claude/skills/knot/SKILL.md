@@ -21,8 +21,8 @@ signal — the user may already use a different tracker.
 `knot blocked` / `knot closed` / `knot prime`.
 
 **Write tickets only via** `knot create` / `knot start` / `knot status` /
-`knot close` / `knot reopen` / `knot add-note` / `knot edit` /
-`knot update` / `knot dep` / `knot link`.
+`knot close` / `knot reopen` / `knot delete` / `knot add-note` /
+`knot edit` / `knot update` / `knot dep` / `knot link`.
 
 **Validate project integrity via** `knot check` (cycles, dangling refs,
 schema, archive placement).
@@ -72,6 +72,7 @@ one of these against `.tickets/`, switch to the knot equivalent:
 | `Edit` (modify file) | `knot add-note <id> "..."` (additive), `knot update <id> --title ... --description ...` (non-interactive set/replace), or `knot edit <id>` (interactive) |
 | `Bash` + `mv` to `archive/` | `knot close <id> --summary "..."` |
 | `Bash` + `mv` from `archive/` | `knot reopen <id>` |
+| `Bash` + `rm` on a ticket file | `knot delete <id>` (refuses when other tickets reference the target — drop the refs first) |
 | `sed -i` to flip `status:` | `knot status <id> <new>` |
 
 ### Already primed?
@@ -212,11 +213,23 @@ knot start <id>                                # → in_progress
 knot status <id> <new-status>                  # generic transition
 knot close <id> --summary "shipped in #482"
 knot reopen <id>                               # restore from archive
+knot delete <id>                               # remove the file (leaf-only)
 ```
 
 Always pass `--summary` to `knot close`. The summary becomes a timestamped
 note and is the most useful artifact for "what did we ship recently?"
 later. Skipping it loses information for free.
+
+`knot delete <id>` is the destructive twin of `close` — useful for
+typo'd `create`s, AI-generated duplicates, and pruning archive noise.
+Leaf-only: it **refuses** (exit 1) when any other ticket — live or
+archived — references the target via `:parent`, `:deps`, or `:links`.
+The refusal enumerates each referrer + the field. Drop the refs first
+(`knot undep`, `knot unlink`, or `knot update <other> --parent ""`) and
+re-run. There is no undo — `.tickets/` is git-tracked; `git checkout`
+is the documented recovery path. `--json` returns
+`{ok:true, data:{deleted:{id,path}, cleaned:[]}}` on success and the
+`has_incoming_refs` error envelope on refusal.
 
 For projects with custom `:statuses` (e.g. adding `"review"` between
 `in_progress` and `closed`), prefer explicit `knot status <id> <new>` over
@@ -457,9 +470,10 @@ touched ticket under `.data` — eliminating the read-after-write
 round-trip. Lifecycle commands, `add-note`, and `update` emit a
 single ticket object (body included). `dep`/`undep` emit the `from`
 ticket with the updated `:deps`. `link`/`unlink` emit an array of
-every touched ticket (body excluded, ls-shape). `close --json` (and
-any `status` transition to a terminal status) adds `meta.archived_to`
-with the archive path:
+every touched ticket (body excluded, ls-shape). `delete --json`
+emits `{deleted:{id,path}, cleaned:[]}` instead of a ticket payload
+(the target is gone). `close --json` (and any `status` transition to
+a terminal status) adds `meta.archived_to` with the archive path:
 
 ```json
 {"schema_version": 1, "ok": true, "data": {...ticket...},
@@ -472,11 +486,13 @@ Mutating-command error envelopes mirror the read-side contract:
 missing ids emit `{ok:false, error:{code:"not_found", ...}}`
 (exit 1); partial-id ambiguity emits `code: "ambiguous_id"` with a
 `candidates` array; `dep --json` cycle rejection emits `code:
-"cycle"` with the offending path under `error.cycle`. `info --json`
-adds `invalid_argument` (unknown flag), and both `info --json` and
-`check --json` add `no_project` / `config_invalid` for discovery
-failures (exit 1 / exit 2 respectively). For most other commands,
-argument-parsing errors stay on stderr — see
+"cycle"` with the offending path under `error.cycle`; `delete --json`
+refusal emits `code: "has_incoming_refs"` with a `referrers`
+array. `info --json` adds `invalid_argument` (unknown flag), and
+both `info --json` and `check --json` add `no_project` /
+`config_invalid` for discovery failures (exit 1 / exit 2
+respectively). For most other commands, argument-parsing errors stay
+on stderr — see
 [`references/json-protocol.md`](references/json-protocol.md) for the
 full code catalogue.
 
@@ -589,6 +605,9 @@ start / status / close / reopen        lifecycle (--summary on close;
                                        --force --summary to bypass the
                                        acceptance and open-children
                                        gates at close)
+delete                                 remove a leaf ticket file (refuses
+                                       on incoming :parent / :deps /
+                                       :links refs; drop the refs first)
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode
@@ -607,9 +626,10 @@ adds `2` for unable-to-scan (no project root or invalid `.knot.edn`).
 Every read command supports `--json` and the filter flags `--type`,
 `--mode`, `--tag`, `--status`, `--assignee` (each repeatable). Every
 mutating command (`create`, `start`, `status`, `close`, `reopen`,
-`dep`, `undep`, `link`, `unlink`, `add-note`, `update`) also
-supports `--json` — the envelope's `data` is the touched ticket(s);
-`close --json` and terminal `status --json` add `meta.archived_to`.
+`delete`, `dep`, `undep`, `link`, `unlink`, `add-note`, `update`) also
+supports `--json` — the envelope's `data` is the touched ticket(s)
+(or `{deleted, cleaned}` for `delete`); `close --json` and terminal
+`status --json` add `meta.archived_to`.
 `knot check` uses its own filters: `--severity` (error|warning,
 closed enum) and `--code` (open enum), both repeatable; OR within a
 flag, AND across flags.

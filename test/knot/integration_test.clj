@@ -2671,3 +2671,100 @@
           (is (= 1 (count (str/split-lines trimmed)))
               "stdout has exactly one line — no extra prose"))))))
 
+(deftest delete-end-to-end-test
+  (testing "knot delete <id> removes a leaf live ticket and prints the removed path"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Junk")
+            id          (id-of c-out "junk")
+            ticket-path (str/trim c-out)
+            _           (is (fs/exists? ticket-path) "precondition: ticket file exists")
+            {:keys [exit out err]} (run-knot tmp "delete" id)]
+        (is (zero? exit) (str "delete exited non-zero; err=" err))
+        (is (= ticket-path (str/trim out))
+            "stdout is the removed path on its own line")
+        (is (str/blank? err))
+        (is (not (fs/exists? ticket-path))
+            "file is gone from disk"))))
+
+  (testing "knot delete <id> removes a leaf archived ticket"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Old")
+            id           (id-of c-out "old")
+            _            (run-knot tmp "close" id "--summary" "shipped")
+            ;; locate the archived path before delete
+            {ls-out :out}     (run-knot tmp "closed" "--json")
+            archived-rel
+            (-> (json/parse-string ls-out true)
+                :data first)
+            _ (is (= id (:id archived-rel)))
+            {:keys [exit out]} (run-knot tmp "delete" id)]
+        (is (zero? exit))
+        (is (str/includes? out "archive/")
+            (str "removed path is under archive/, got " out)))))
+
+  (testing "knot delete <id> refuses when any live ticket has the target in :deps; exit 1, enumerate referrers on stderr"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            target-path  (str/trim a-out)
+            {b-out :out} (run-knot tmp "create" "Referrer")
+            ref-id       (id-of b-out "referrer")
+            _            (run-knot tmp "dep" ref-id target-id)
+            {:keys [exit out err]} (run-knot tmp "delete" target-id)]
+        (is (= 1 exit))
+        (is (str/blank? out)
+            (str "plain-text refusal goes to stderr, not stdout; got out=" out))
+        (is (str/includes? err ref-id)
+            (str "stderr enumerates the referrer id; got err=" err))
+        (is (re-find #"(?i)deps" err)
+            (str "stderr names the field; got err=" err))
+        (is (fs/exists? target-path)
+            "target file survives the refusal"))))
+
+  (testing "knot delete <id> --json success envelope shape"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Junk")
+            id           (id-of c-out "junk")
+            {:keys [exit out err]} (run-knot tmp "delete" id "--json")]
+        (is (zero? exit) (str "err=" err))
+        (let [env (json/parse-string (str/trim out) true)]
+          (is (= 1 (:schema_version env)))
+          (is (true? (:ok env)))
+          (is (= id (get-in env [:data :deleted :id])))
+          (is (string? (get-in env [:data :deleted :path])))
+          (is (= [] (get-in env [:data :cleaned])))))))
+
+  (testing "knot delete <id> --json refusal envelope: code=has_incoming_refs, referrers payload"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            target-path  (str/trim a-out)
+            {b-out :out} (run-knot tmp "create" "Referrer")
+            ref-id       (id-of b-out "referrer")
+            _            (run-knot tmp "dep" ref-id target-id)
+            {:keys [exit out err]} (run-knot tmp "delete" target-id "--json")]
+        (is (= 1 exit))
+        (is (str/blank? err)
+            "JSON refusal envelope routes to stdout, not stderr")
+        (let [env (json/parse-string (str/trim out) true)]
+          (is (= 1 (:schema_version env)))
+          (is (false? (:ok env)))
+          (is (= "has_incoming_refs" (get-in env [:error :code])))
+          (let [referrers (get-in env [:error :referrers])]
+            (is (vector? referrers))
+            (is (= [{:id ref-id :field "deps"}] referrers)
+                "field is serialized as a string in the JSON payload")))
+        (is (fs/exists? target-path)
+            "target file is NOT deleted under JSON refusal"))))
+
+  (testing "knot check is clean after a successful delete (no unknown_id from the removed leaf)"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Junk")
+            id           (id-of c-out "junk")
+            _            (run-knot tmp "delete" id)
+            {:keys [exit out]} (run-knot tmp "check" "--json")
+            env (json/parse-string (str/trim out) true)
+            issues (get-in env [:data :issues])]
+        (is (zero? exit) (str "check should exit 0; issues=" issues))
+        (is (= [] issues)
+            (str "no issues after deleting a leaf; got " issues))))))

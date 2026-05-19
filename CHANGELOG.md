@@ -14,7 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added/Changed/Fixed/Removed
+### Added
+
+- **`knot delete <id>` — leaf-only file removal across live + archive.**
+  New lifecycle subcommand for cleaning up typo'd tickets, AI-generated
+  duplicates, and archive noise. Strict-resolves the id, scans every
+  other ticket (live + archive) for incoming `:parent`/`:deps`/`:links`
+  references, and either unlinks the file (`stdout` = removed path) or
+  refuses (exit 1; stderr enumerates each referrer + the field). Under
+  `--json`, success emits `{ok:true, data:{deleted:{id,path}, cleaned:[]}}`;
+  refusal emits the new `has_incoming_refs` error envelope with a
+  `referrers: {id, field}[]` payload sorted alphabetically by id.
+  Not-found and ambiguous-id failures follow the standard envelopes used
+  by every other write command. The `--cascade` opt-in (which mutates
+  referrers) is a separate slice; bare `delete` doubles as the dry-run.
+  Decision documented in ADR-0008. The bundled `.claude/skills/knot`
+  reflects the new command and the `has_incoming_refs` code in the same
+  release.
+
+### Changed/Fixed/Removed
 
 ## [0.6.0] - 2026-05-19
 

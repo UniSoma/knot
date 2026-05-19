@@ -322,7 +322,7 @@
    plus the `dep` subcommand. The registry must cover all of these."
   #{:init :prime :info :check :migrate-ac
     :create :show :list
-    :status :start :close :reopen
+    :status :start :close :reopen :delete
     :dep :dep/tree :undep
     :link :unlink
     :ready :blocked :closed
@@ -603,6 +603,14 @@
     (let [{:keys [exit out]} (run-knot "help" "list")]
       (is (zero? exit))
       (is (str/includes? out "knot list"))
+      (is (str/includes? out "FLAGS"))))
+
+  (testing "knot help delete prints the delete help block"
+    (let [{:keys [exit out err]} (run-knot "help" "delete")]
+      (is (zero? exit) (str "err=" err))
+      (is (str/includes? out "knot delete"))
+      (is (str/includes? out "leaf"))
+      (is (str/includes? out "--json"))
       (is (str/includes? out "FLAGS")))))
 
 (deftest body-flag-help-interaction-test

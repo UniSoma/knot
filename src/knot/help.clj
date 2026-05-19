@@ -284,6 +284,20 @@
     :examples    [{:cmd "knot reopen kno-01abc"
                    :note "Reopen a closed ticket."}]}
 
+   :delete
+   {:group       :lifecycle
+    :description "Delete a ticket file (leaf-only; refuses on incoming refs)."
+    :args        [{:name "id" :required true}]
+    :restrict?   true
+    :flags       [{:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope instead of the removed path."}]
+    :examples    [{:cmd "knot delete kno-01abc"
+                   :note "Remove a leaf ticket (live or archive) from disk."}
+                  {:cmd "knot delete kno-01abc --json"
+                   :note "Same, JSON envelope; refusal emits has_incoming_refs."}]
+    :exit-codes  [{:code 0 :when "file removed"}
+                  {:code 1 :when "not found, ambiguous id, or incoming refs present"}]}
+
    :dep
    {:group       :graph
     :description "Add <to> to <from>'s :deps (cycle-checked)."
@@ -570,7 +584,7 @@
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
   [:init :prime :info :check :schema :serve
-   :create :start :status :close :reopen
+   :create :start :status :close :reopen :delete
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed
    :add-note :edit :update])
