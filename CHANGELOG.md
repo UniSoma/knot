@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+## [0.6.0] - 2026-05-19
+
+### Added
+
 - **`knot serve` command — read-only browser panel for the current
   project.** New subcommand boots an http-kit server on loopback
   (default `127.0.0.1:7777`; `--port 0` for an ephemeral port,
@@ -32,6 +36,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   documented in ADR-0005 (Stack layout), ADR-0006 (read-only v1),
   and ADR-0007 (shell-out per request). http-kit is lazy-required
   inside the handler so every other `knot` command stays cheap.
+- **Per-value colors for `:type`, `:priority`, `:mode` in list
+  tables.** `knot ls / ready / closed / blocked` now hue-code these
+  three columns the way `:status` already did. `:type` is mapped
+  directly (`feature` / `bug` / `task` / `chore` / `epic` each get
+  a distinguishable hue); `:priority` graduates from red-bold at 0
+  through to faint at 4; `:mode` is role-derived through a new
+  public `knot.output/mode-role` helper (`:afk-mode` from config
+  gets the highlighted role, the default mode renders plain,
+  anything else is faint — `:afk` resolves to nothing when
+  `:afk-mode` is `nil`). No new config surface; custom-configured
+  types and modes degrade gracefully to faint.
+- **Dash-leading-safe values for every value-bearing string flag.**
+  Generalises the body-flag extract pattern to a registry-driven
+  walk over every value-bearing string flag across `create` /
+  `update` / `status` / `close` / list family (`list` / `ready` /
+  `blocked` / `closed`) / `prime` / `init` / `check`. Values
+  starting with `-` (e.g. `--acceptance "- text"`,
+  `--summary "-cancelled"`, `--tags "-foo"`, `--remove-tag "-foo"`,
+  `--dep "-bogus"`, `--link "-bogus"`) survive babashka.cli's
+  `parse-key` without the previous "Unknown option" failure.
+  Per-command extract maps are derived from `knot.help/registry`,
+  not hand-maintained. The dash-leading hint copy from v0.5.0 is
+  trimmed; the hint function stays as a defensive fallback. Test
+  coverage walks all four argv shapes (`"- text"`, `"--text"`,
+  `"-x"`, multi-line bullet list) across the full flag surface,
+  including the `--add-*` / `--remove-*` and `--dep` / `--link`
+  paths that flow through a separate `extract-rel-order` walk.
+- **`knot.el`: status cells colored by role, not literal name.**
+  `knot-format-status` now drives face choice off
+  `knot info --json`'s `allowed_values` — the configured
+  `:active-status` gets `knot-status-active`, anything in
+  `:terminal-statuses` gets `knot-status-terminal`, everything
+  else falls through to `knot-status-open`. Custom status sets
+  (e.g. `:statuses ["open" "active" "closed"]` with
+  `:active-status "active"`) now render with correct faces in
+  `knot-list` views; previously they rendered unpropertized because
+  the `pcase` was hardcoded against `"open"` / `"in_progress"` /
+  `"closed"`. Faces renamed in parallel to match the roles the code
+  actually checks; no back-compat aliases.
 
 ## [0.5.0] - 2026-05-17
 
