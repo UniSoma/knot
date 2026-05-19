@@ -202,10 +202,22 @@
               (when m
                 (let [port (Long/parseLong (second m))
                       url  (str "http://127.0.0.1:" port "/api/ready")
-                      r    (http/get url {:throw false})
-                      env  (json/parse-string (:body r) true)]
-                  (is (= 200 (:status r)))
-                  (is (contains? env :ok) "envelope shape present"))))))
+                      r    (http/get url {:throw false})]
+                  ;; When the shell-out fails (e.g. PATH propagation
+                  ;; quirks on Windows runners), the server returns its
+                  ;; 500 envelope with the underlying stderr captured in
+                  ;; :error.message. Surface that on failure so CI logs
+                  ;; carry the actual diagnostic — without this dump the
+                  ;; test only reports "expected 200, got 500".
+                  (when (not= 200 (:status r))
+                    (binding [*out* *err*]
+                      (println "spawned-server-binds-and-serves: status="
+                               (:status r))
+                      (println "spawned-server-binds-and-serves: body="
+                               (pr-str (:body r)))))
+                  (let [env (json/parse-string (:body r) true)]
+                    (is (= 200 (:status r)))
+                    (is (contains? env :ok) "envelope shape present")))))))
         (finally
           (.destroy (:proc proc))
           (try (deref proc 5000 nil) (catch Exception _ nil))
