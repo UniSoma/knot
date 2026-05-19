@@ -742,23 +742,45 @@
                     "and re-run."))
       (System/exit 1))))
 
+(defn- emit-cleaned-audit!
+  "Write one stderr line per cleaned referrer in the same alphabetical
+   order they were processed: `knot delete: cleaned <id> (:f1, :f2)`.
+   The `:`-prefixed field names match the keyword vocabulary used in
+   the refusal output and in ADR-0008."
+  [cleaned]
+  (binding [*out* *err*]
+    (doseq [{:keys [id fields]} cleaned]
+      (println (str "knot delete: cleaned " id
+                    " ("
+                    (str/join ", " (map (fn [f] (str ":" (name f))) fields))
+                    ")")))))
+
 (defn- delete-handler
-  "Run `knot delete <id>`: leaf-only file removal across live + archive.
-   Refuses when any other ticket — live or archived — references the
-   target via `:parent`/`:deps`/`:links`; the refusal enumerates each
-   referrer + field. Plain text prints the removed path on stdout; under
-   `--json`, emits the v0.3 success envelope (or `has_incoming_refs`
-   error envelope on refusal). Not-found and ambiguous-id failures
-   follow the standard envelopes used by other write commands."
+  "Run `knot delete <id>` (`--cascade` opts into reference cleanup
+   across live + archive). Without `--cascade`, refuses when any other
+   ticket references the target via `:parent`/`:deps`/`:links` and
+   enumerates each referrer + field on stderr (exit 1). With
+   `--cascade`, rewrites every referrer first (drop `:deps`/`:links`
+   entries, dissoc `:parent` when it pointed at the target) and emits
+   one `knot delete: cleaned <id> (:field, ...)` line per referrer on
+   stderr before unlinking the target. Stdout always carries the
+   removed path on its own line; under `--json`, the v0.3 success
+   envelope (or `has_incoming_refs` error envelope on refusal)."
   [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :delete))
         id                  (first args)
-        json?               (boolean (:json opts))]
+        json?               (boolean (:json opts))
+        cascade?            (boolean (:cascade opts))]
     (when (or (nil? id) (str/blank? id))
       (die "knot delete: an id is required"))
     (try
-      (let [out (cli/delete-cmd (discover-ctx) {:id id :json? json?})]
-        (println-out (str out)))
+      (let [out (cli/delete-cmd (discover-ctx)
+                                {:id id :json? json? :cascade? cascade?})]
+        (if json?
+          (println-out (str out))
+          (let [{:keys [path cleaned]} out]
+            (when (seq cleaned) (emit-cleaned-audit! cleaned))
+            (println-out (str path)))))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (cond

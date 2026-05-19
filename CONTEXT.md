@@ -36,6 +36,10 @@ A live (non-terminal) ticket whose every `:deps` entry is in a terminal status. 
 **Blocked**:
 A live ticket with at least one non-terminal `:deps` entry.
 
+**Referrer**:
+A live or archived ticket that names another ticket's id in any of its relationship fields (`:parent`, `:deps`, `:links`). The inverse of those three fields, viewed from the referenced ticket's side. Surfaced by `knot delete <id>` as the `has_incoming_refs` envelope: a target's referrers either block the bare delete or get rewritten by `--cascade`.
+_Avoid_: "incoming ref" (non-noun, splits the vocabulary), "blocker" (that's a `:deps` semantic specifically), "back-reference" (drifts toward implementation).
+
 ## Relationships
 
 - **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; **release-tag smoke** runs post-push on tag. All three are independent gates with distinct triggers and consumers — none implies the other.

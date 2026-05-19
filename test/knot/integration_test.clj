@@ -2768,3 +2768,77 @@
         (is (zero? exit) (str "check should exit 0; issues=" issues))
         (is (= [] issues)
             (str "no issues after deleting a leaf; got " issues))))))
+
+(deftest delete-cascade-end-to-end-test
+  (testing "knot delete --cascade rewrites a :deps referrer, unlinks the target, prints one cleaned audit line on stderr and only the removed path on stdout"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            target-path  (str/trim a-out)
+            {b-out :out} (run-knot tmp "create" "Referrer")
+            ref-id       (id-of b-out "referrer")
+            _            (run-knot tmp "dep" ref-id target-id)
+            {:keys [exit out err]} (run-knot tmp "delete" target-id "--cascade")]
+        (is (zero? exit) (str "cascade exited non-zero; err=" err))
+        (is (= target-path (str/trim out))
+            "stdout is the removed path on its own line")
+        (is (= 1 (count (str/split-lines (str/trim out))))
+            "stdout has exactly one line — only the removed path")
+        (is (str/includes? err (str "knot delete: cleaned " ref-id))
+            (str "stderr emits a cleaned audit line for the referrer; got err=" err))
+        (is (str/includes? err ":deps")
+            (str "stderr names the cleaned field with a leading colon; got err=" err))
+        (is (not (fs/exists? target-path))
+            "target file is gone after cascade"))))
+
+  (testing "knot delete --cascade emits one stderr audit line per cleaned referrer"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            {b-out :out} (run-knot tmp "create" "Alpha")
+            alpha-id     (id-of b-out "alpha")
+            {c-out :out} (run-knot tmp "create" "Beta")
+            beta-id      (id-of c-out "beta")
+            _            (run-knot tmp "dep" alpha-id target-id)
+            _            (run-knot tmp "dep" beta-id  target-id)
+            {:keys [exit err]} (run-knot tmp "delete" target-id "--cascade")
+            audit-lines  (->> (str/split-lines err)
+                              (filter #(str/starts-with? % "knot delete: cleaned ")))]
+        (is (zero? exit))
+        (is (= 2 (count audit-lines))
+            (str "two referrers → two audit lines; got " audit-lines))
+        (is (every? #(re-find #"\(:deps\)" %) audit-lines)
+            (str "each line names the cleaned field; got " audit-lines)))))
+
+  (testing "knot delete --cascade --json populates data.cleaned with referrer + fields rows"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            {b-out :out} (run-knot tmp "create" "Referrer")
+            ref-id       (id-of b-out "referrer")
+            _            (run-knot tmp "dep"  ref-id target-id)
+            _            (run-knot tmp "link" ref-id target-id)
+            {:keys [exit out err]} (run-knot tmp "delete" target-id
+                                             "--cascade" "--json")]
+        (is (zero? exit) (str "err=" err))
+        (let [env (json/parse-string (str/trim out) true)]
+          (is (true? (:ok env)))
+          (is (= target-id (get-in env [:data :deleted :id])))
+          (is (= [{:id ref-id :fields ["deps" "links"]}]
+                 (get-in env [:data :cleaned]))
+              "cleaned row carries every field cleaned on the referrer (deps + links)")))))
+
+  (testing "knot check reports zero unknown_id issues after a successful cascade delete"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Target")
+            target-id    (id-of a-out "target")
+            {b-out :out} (run-knot tmp "create" "Referrer")
+            ref-id       (id-of b-out "referrer")
+            _            (run-knot tmp "dep" ref-id target-id)
+            _            (run-knot tmp "delete" target-id "--cascade")
+            {:keys [exit out]} (run-knot tmp "check" "--json")
+            env (json/parse-string (str/trim out) true)
+            issues (get-in env [:data :issues])]
+        (is (zero? exit))
+        (is (= [] issues)
+            (str "no unknown_id issues attributable to the deleted target; got " issues))))))

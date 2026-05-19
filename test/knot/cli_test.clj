@@ -2781,15 +2781,17 @@ Restart the daemon.
         (is (= a-id (get-in parsed [:data 0 :id])))))))
 
 (deftest delete-cmd-leaf-test
-  (testing "delete-cmd removes a live leaf ticket and returns the removed path"
+  (testing "delete-cmd removes a live leaf ticket and returns {:path :cleaned []}"
     (with-tmp tmp
       (let [path   (cli/create-cmd (ctx tmp) {:title "Junk"})
             id     (id-of-created path "junk")
             before (fs/exists? path)
             out    (cli/delete-cmd (ctx tmp) {:id id})]
         (is before "precondition: ticket file exists before delete")
-        (is (= (str path) (str out))
-            "delete-cmd returns the removed path string")
+        (is (= (str path) (str (:path out)))
+            "delete-cmd returns the removed path under :path")
+        (is (= [] (:cleaned out))
+            ":cleaned is [] for the leaf-only path")
         (is (not (fs/exists? path))
             "ticket file is gone from .tickets/ after delete"))))
 
@@ -2802,8 +2804,10 @@ Restart the daemon.
             out      (cli/delete-cmd (ctx tmp) {:id id})]
         (is (str/includes? archived "archive")
             "precondition: closed ticket lives under .tickets/archive/")
-        (is (= (str archived) (str out))
-            "delete-cmd returns the archived path string")
+        (is (= (str archived) (str (:path out)))
+            "delete-cmd returns the archived path under :path")
+        (is (= [] (:cleaned out))
+            ":cleaned is [] for the leaf-only path")
         (is (not (fs/exists? archived))
             "archived file is gone after delete")))))
 
@@ -2903,6 +2907,223 @@ Restart the daemon.
                   "every referrer×field row appears, sorted by referrer id")
               (is (= referrers (vec (sort-by :id referrers)))
                   "rows are sorted by :id for stable scripting"))))))))
+
+(deftest delete-cmd-cascade-deps-test
+  (testing "delete-cmd with :cascade? true drops the target from a referrer's :deps and unlinks the file"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            ref-path    (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id      (id-of-created ref-path "referrer")
+            _           (cli/dep-cmd (ctx tmp) {:from ref-id :to target-id})
+            out         (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})]
+        (is (= (str target-path) (str (:path out)))
+            "returned :path is the removed target's path")
+        (is (= [{:id ref-id :fields [:deps]}] (:cleaned out))
+            ":cleaned has one row naming the referrer + its dropped field")
+        (is (not (fs/exists? target-path))
+            "target file is unlinked after cascade")
+        (let [ref-after (store/load-one tmp ".tickets" ref-id)]
+          (is (not (contains? (:frontmatter ref-after) :deps))
+              "referrer no longer carries a :deps key (dropped when list emptied)")))))
+
+  (testing "cascade preserves a referrer's surviving :deps entries (only the target id is removed)"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            other-path  (cli/create-cmd (ctx tmp) {:title "Other"})
+            other-id    (id-of-created other-path "other")
+            ref-path    (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id      (id-of-created ref-path "referrer")
+            _           (cli/dep-cmd (ctx tmp) {:from ref-id :to target-id})
+            _           (cli/dep-cmd (ctx tmp) {:from ref-id :to other-id})
+            _           (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})
+            ref-after   (store/load-one tmp ".tickets" ref-id)]
+        (is (= [other-id] (get-in ref-after [:frontmatter :deps]))
+            ":deps keeps every non-target entry; key remains because list non-empty")))))
+
+(deftest delete-cmd-cascade-links-test
+  (testing "cascade drops the target from a referrer's :links"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            peer-path   (cli/create-cmd (ctx tmp) {:title "Peer"})
+            peer-id     (id-of-created peer-path "peer")
+            _           (cli/link-cmd (ctx tmp) {:ids [target-id peer-id]})
+            out         (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})]
+        (is (= [{:id peer-id :fields [:links]}] (:cleaned out)))
+        (is (not (fs/exists? target-path)))
+        (let [peer-after (store/load-one tmp ".tickets" peer-id)]
+          (is (not (contains? (:frontmatter peer-after) :links))
+              "peer no longer carries a :links key (dropped when list emptied)"))))))
+
+(deftest delete-cmd-cascade-parent-test
+  (testing "cascade dissocs a child's :parent when it pointed to the deleted target"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Parent"})
+            target-id   (id-of-created target-path "parent")
+            child-path  (cli/create-cmd (ctx tmp) {:title "Child" :parent target-id})
+            child-id    (id-of-created child-path "child")
+            out         (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})]
+        (is (= [{:id child-id :fields [:parent]}] (:cleaned out)))
+        (is (not (fs/exists? target-path)))
+        (let [child-after (store/load-one tmp ".tickets" child-id)]
+          (is (not (contains? (:frontmatter child-after) :parent))
+              "child no longer carries a :parent key after cascade"))))))
+
+(deftest delete-cmd-cascade-archived-referrer-test
+  (testing "cascade rewrites archived referrers and bumps their :updated"
+    (with-tmp tmp
+      (let [target-path  (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id    (id-of-created target-path "target")
+            ref-path     (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id       (id-of-created ref-path "referrer")
+            _            (cli/dep-cmd (ctx tmp) {:from ref-id :to target-id})
+            _            (cli/close-cmd (ctx tmp) {:id ref-id :summary "done"})
+            archived     (store/find-existing-path tmp ".tickets" ref-id)
+            updated-pre  (get-in (store/load-one tmp ".tickets" ref-id)
+                                 [:frontmatter :updated])
+            ;; Delete the target using a context whose :now is later than
+            ;; the archived referrer's :updated, so the bump is observable.
+            later-ctx    (assoc (ctx tmp) :now "2026-04-29T11:00:00Z")
+            out          (cli/delete-cmd later-ctx {:id target-id :cascade? true})]
+        (is (str/includes? archived "archive")
+            "precondition: referrer is archived")
+        (is (= [{:id ref-id :fields [:deps]}] (:cleaned out))
+            ":cleaned reports the archived referrer was rewritten")
+        (let [ref-after  (store/load-one tmp ".tickets" ref-id)
+              updated-post (get-in ref-after [:frontmatter :updated])]
+          (is (not (contains? (:frontmatter ref-after) :deps))
+              "archived referrer no longer has :deps")
+          (is (not= updated-pre updated-post)
+              ":updated is bumped on the archived referrer")
+          (is (= "2026-04-29T11:00:00Z" updated-post)
+              ":updated reflects the cascade's now")
+          (is (str/includes? (store/find-existing-path tmp ".tickets" ref-id)
+                             "archive")
+              "rewritten referrer stays under archive/ (status untouched)"))))))
+
+(deftest delete-cmd-cascade-multi-field-referrer-test
+  (testing "a referrer holding the target in :deps AND :links is cleaned in a single :cleaned row listing both fields"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            ref-path    (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id      (id-of-created ref-path "referrer")
+            _           (cli/dep-cmd  (ctx tmp) {:from ref-id :to target-id})
+            _           (cli/link-cmd (ctx tmp) {:ids [ref-id target-id]})
+            out         (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})]
+        (is (= [{:id ref-id :fields [:deps :links]}] (:cleaned out))
+            "one :cleaned row per referrer, fields vector lists both keys")
+        (let [ref-after (store/load-one tmp ".tickets" ref-id)
+              fm        (:frontmatter ref-after)]
+          (is (not (contains? fm :deps)))
+          (is (not (contains? fm :links))
+              "both fields are dropped in the same save"))))))
+
+(deftest delete-cmd-cascade-on-leaf-test
+  (testing "--cascade on a leaf ticket is a silent no-op: file removed, :cleaned []"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "Junk"})
+            id   (id-of-created path "junk")
+            out  (cli/delete-cmd (ctx tmp) {:id id :cascade? true})]
+        (is (= (str path) (str (:path out))))
+        (is (= [] (:cleaned out))
+            ":cleaned is [] when nothing referenced the target")
+        (is (not (fs/exists? path)))))))
+
+(deftest delete-cmd-cascade-json-success-test
+  (testing "delete-cmd --cascade --json populates data.cleaned with [{id, fields:[...]}]"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            ref-path    (cli/create-cmd (ctx tmp) {:title "Referrer"})
+            ref-id      (id-of-created ref-path "referrer")
+            _           (cli/dep-cmd (ctx tmp) {:from ref-id :to target-id})
+            out         (cli/delete-cmd (ctx tmp)
+                                        {:id target-id :cascade? true :json? true})
+            parsed      (cheshire/parse-string out true)]
+        (is (= 1 (:schema_version parsed)))
+        (is (true? (:ok parsed)))
+        (is (= target-id (get-in parsed [:data :deleted :id])))
+        (is (= [{:id ref-id :fields ["deps"]}]
+               (get-in parsed [:data :cleaned]))
+            "data.cleaned rows carry the referrer id + a string-typed fields array")
+        (is (not (fs/exists? target-path))))))
+
+  (testing "--cascade --json with multiple referrers sorts cleaned rows alphabetically by id"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            a-path      (cli/create-cmd (ctx tmp) {:title "A"})
+            a-id        (id-of-created a-path "a")
+            b-path      (cli/create-cmd (ctx tmp) {:title "B" :parent target-id})
+            b-id        (id-of-created b-path "b")
+            _           (cli/dep-cmd  (ctx tmp) {:from a-id :to target-id})
+            _           (cli/link-cmd (ctx tmp) {:ids [a-id target-id]})
+            out         (cli/delete-cmd (ctx tmp)
+                                        {:id target-id :cascade? true :json? true})
+            parsed      (cheshire/parse-string out true)
+            cleaned     (get-in parsed [:data :cleaned])
+            ids         (mapv :id cleaned)]
+        (is (= (sort ids) ids) "cleaned rows sorted by :id")
+        (is (= [{:id a-id :fields ["deps" "links"]}
+                {:id b-id :fields ["parent"]}]
+               cleaned)
+            "each referrer appears once with every cleaned field"))))
+
+  (testing "--cascade --json on a leaf emits data.cleaned: []"
+    (with-tmp tmp
+      (let [path (cli/create-cmd (ctx tmp) {:title "Junk"})
+            id   (id-of-created path "junk")
+            out  (cli/delete-cmd (ctx tmp) {:id id :cascade? true :json? true})
+            parsed (cheshire/parse-string out true)]
+        (is (true? (:ok parsed)))
+        (is (= [] (get-in parsed [:data :cleaned])))))))
+
+(deftest delete-cmd-cascade-partial-failure-test
+  (testing "when a mid-batch referrer save throws, target survives and re-running --cascade is idempotent"
+    (with-tmp tmp
+      (let [target-path (cli/create-cmd (ctx tmp) {:title "Target"})
+            target-id   (id-of-created target-path "target")
+            a-path      (cli/create-cmd (ctx tmp) {:title "Alpha"})
+            a-id        (id-of-created a-path "alpha")
+            b-path      (cli/create-cmd (ctx tmp) {:title "Beta"})
+            b-id        (id-of-created b-path "beta")
+            _           (cli/dep-cmd (ctx tmp) {:from a-id :to target-id})
+            _           (cli/dep-cmd (ctx tmp) {:from b-id :to target-id})
+            real-save   store/save!
+            ;; First referrer save succeeds; second throws.
+            call-count  (atom 0)]
+        (try
+          (with-redefs [store/save!
+                        (fn [& args]
+                          (swap! call-count inc)
+                          (if (= 2 @call-count)
+                            (throw (ex-info "simulated mid-batch failure"
+                                            {:kind ::simulated}))
+                            (apply real-save args)))]
+            (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})
+            (is false "delete-cmd should re-throw on mid-batch failure"))
+          (catch clojure.lang.ExceptionInfo e
+            (is (= ::simulated (:kind (ex-data e)))
+                "the original exception propagates out of delete-cmd")))
+        (is (fs/exists? target-path)
+            "target file is NOT unlinked when cascade fails mid-write")
+        ;; One referrer was already cleaned, the other still references the target.
+        (let [a-after  (store/load-one tmp ".tickets" a-id)
+              b-after  (store/load-one tmp ".tickets" b-id)
+              with-ref (filter (fn [t] (some #{target-id}
+                                             (get-in t [:frontmatter :deps])))
+                               [a-after b-after])]
+          (is (= 1 (count with-ref))
+              "exactly one referrer still has the target — the half-applied state"))
+        ;; Idempotent re-run: now only one referrer remains; cascade succeeds.
+        (let [out (cli/delete-cmd (ctx tmp) {:id target-id :cascade? true})]
+          (is (not (fs/exists? target-path))
+              "second cascade successfully unlinks the target")
+          (is (= 1 (count (:cleaned out)))
+              "only the still-referring ticket is cleaned on the re-run"))))))
 
 (deftest delete-cmd-json-success-test
   (testing "delete-cmd with :json? true returns a success envelope wrapping deleted{id,path} and cleaned []"

@@ -666,22 +666,30 @@
 (defn delete-cmd
   "Remove the on-disk file for the ticket whose id is `(:id opts)` (full
    or partial). Strict-resolves the id (throws `:not-found` /
-   `:ambiguous` ex-info on failure). Refuses (throws
-   `:has-incoming-refs`) when any other ticket — live or archived —
-   names this id in `:parent`, `:deps`, or `:links`. Returns the
-   deleted path string.
+   `:ambiguous` ex-info on failure). Without `:cascade?`, refuses
+   (throws `:has-incoming-refs`) when any other ticket — live or
+   archived — names this id in `:parent`, `:deps`, or `:links`. With
+   `:cascade?`, rewrites every referrer first to drop the target from
+   `:deps`/`:links` and dissoc `:parent`, dropping the field key when
+   the resulting list is empty (mirrors `undep`/`unlink`); the save
+   bumps each referrer's `:updated`. Write order is referrers first
+   (alphabetical by id), target last — so a partial-cleanup failure
+   never leaves dangling references against a no-longer-existent
+   target. Returns `{:path <removed-path> :cleaned [{:id, :fields
+   [<kw>...]} ...]}`; `cleaned` is `[]` when no rewrites happened.
 
    With `:json? true`, returns a v0.3 success-envelope JSON string
-   wrapping `{:deleted {:id <id> :path <posix-path>} :cleaned []}` under
-   `:data`. The `:cleaned` slot is always `[]` here — the cascade slice
-   builds on this and populates it when reference rewrites land."
-  [ctx {:keys [id json?]}]
-  (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
+   wrapping `{:deleted {:id <id> :path <posix-path>} :cleaned [{:id,
+   :fields [<string>...]}]}` under `:data` (field names serialized as
+   strings)."
+  [ctx {:keys [id json? cascade?]}]
+  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+        (resolve-ctx ctx)
         loaded   (store/resolve-id project-root tickets-dir id)
         full-id  (get-in loaded [:frontmatter :id])
         all      (store/load-all project-root tickets-dir)
         refs     (incoming-refs all full-id)]
-    (when (seq refs)
+    (when (and (seq refs) (not cascade?))
       (throw (ex-info (str (count refs)
                            " incoming reference"
                            (when (> (count refs) 1) "s")
@@ -689,13 +697,44 @@
                       {:kind      :has-incoming-refs
                        :id        full-id
                        :referrers refs})))
-    (let [path    (store/find-existing-path project-root tickets-dir full-id)
-          deleted (store/delete! path)]
-      (if json?
-        (output/envelope-str {:deleted {:id   full-id
-                                        :path (fs/unixify deleted)}
-                              :cleaned []})
-        deleted))))
+    (let [grouped   (->> refs
+                         (group-by :id)
+                         (sort-by key)
+                         (mapv (fn [[rid rows]]
+                                 {:id rid :fields (mapv :field rows)})))
+          save-opts {:now now :terminal-statuses terminal-statuses}
+          cleaned   (atom [])]
+      (try
+        (doseq [{rid :id rfields :fields} grouped]
+          (let [t  (store/load-one project-root tickets-dir rid)
+                t* (reduce (fn [acc field]
+                             (case field
+                               :parent (update acc :frontmatter dissoc :parent)
+                               (:deps :links)
+                               (let [existing (vec (or (get-in acc [:frontmatter field]) []))
+                                     kept     (vec (remove #{full-id} existing))]
+                                 (if (empty? kept)
+                                   (update acc :frontmatter dissoc field)
+                                   (assoc-in acc [:frontmatter field] kept)))))
+                           t rfields)]
+            (store/save! project-root tickets-dir rid nil t* save-opts)
+            (swap! cleaned conj {:id rid :fields rfields})))
+        (catch Throwable e
+          (warn! (str "knot delete: cascade aborted mid-write; cleaned referrers so far: "
+                      (if (seq @cleaned)
+                        (str/join ", " (map :id @cleaned))
+                        "(none)")
+                      "; target " full-id " was NOT deleted"))
+          (throw e)))
+      (let [path    (store/find-existing-path project-root tickets-dir full-id)
+            deleted (store/delete! path)
+            rows    @cleaned]
+        (if json?
+          (output/envelope-str
+           {:deleted {:id   full-id
+                      :path (fs/unixify deleted)}
+            :cleaned (mapv (fn [r] (update r :fields #(mapv name %))) rows)})
+          {:path deleted :cleaned rows})))))
 
 (defn- resolve-note-content
   "Resolve the note content string from the layered input options:

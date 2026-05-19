@@ -26,11 +26,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refusal emits the new `has_incoming_refs` error envelope with a
   `referrers: {id, field}[]` payload sorted alphabetically by id.
   Not-found and ambiguous-id failures follow the standard envelopes used
-  by every other write command. The `--cascade` opt-in (which mutates
-  referrers) is a separate slice; bare `delete` doubles as the dry-run.
-  Decision documented in ADR-0008. The bundled `.claude/skills/knot`
-  reflects the new command and the `has_incoming_refs` code in the same
-  release.
+  by every other write command. Bare `delete` doubles as the dry-run for
+  `--cascade`. Decision documented in ADR-0008. The bundled
+  `.claude/skills/knot` reflects the new command and the
+  `has_incoming_refs` code in the same release.
+- **`knot delete <id> --cascade` — reference cleanup path.** Opts into
+  the rewrite that bare `delete` refuses: every referrer (live + archive)
+  has the target dropped from `:deps`/`:links` and its `:parent` dissoc'd;
+  the field key is dropped when its list empties (mirrors `undep` /
+  `unlink`). Each cleaned referrer's `:updated` is bumped. Write order is
+  referrers first (alphabetical by id), target last; on a mid-batch save
+  failure a stderr breadcrumb names the already-committed referrers and
+  the target is left in place — re-running `--cascade` is idempotent.
+  Stderr emits one `knot delete: cleaned <id> (:field, ...)` line per
+  cleaned referrer; stdout stays a single line (removed path). Under
+  `--json`, `data.cleaned` is populated with `[{id, fields:[...]}]`
+  (sorted alphabetically by id; fields serialized as strings).
+  `--cascade` on a leaf (zero referrers) is a silent no-op. Pinned by
+  ADR-0008; bundled `.claude/skills/knot` and json-protocol reference
+  updated in the same release.
 
 ### Changed/Fixed/Removed
 

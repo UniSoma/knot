@@ -286,17 +286,21 @@
 
    :delete
    {:group       :lifecycle
-    :description "Delete a ticket file (leaf-only; refuses on incoming refs)."
+    :description "Delete a ticket file (leaf-only by default; --cascade rewrites referrers)."
     :args        [{:name "id" :required true}]
     :restrict?   true
     :flags       [{:name :json :coerce :boolean
-                   :desc "Emit a JSON envelope instead of the removed path."}]
+                   :desc "Emit a JSON envelope instead of the removed path."}
+                  {:name :cascade :coerce :boolean
+                   :desc "Rewrite every referrer (live + archive) to drop the target from :deps/:links and dissoc :parent before unlinking the file."}]
     :examples    [{:cmd "knot delete kno-01abc"
-                   :note "Remove a leaf ticket (live or archive) from disk."}
+                   :note "Remove a leaf ticket (live or archive) from disk; refuses on incoming refs."}
                   {:cmd "knot delete kno-01abc --json"
-                   :note "Same, JSON envelope; refusal emits has_incoming_refs."}]
+                   :note "Same, JSON envelope; refusal emits has_incoming_refs."}
+                  {:cmd "knot delete kno-01abc --cascade"
+                   :note "Rewrite each referrer to drop the target, then delete."}]
     :exit-codes  [{:code 0 :when "file removed"}
-                  {:code 1 :when "not found, ambiguous id, or incoming refs present"}]}
+                  {:code 1 :when "not found, ambiguous id, or incoming refs present (without --cascade)"}]}
 
    :dep
    {:group       :graph

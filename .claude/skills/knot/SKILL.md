@@ -72,7 +72,7 @@ one of these against `.tickets/`, switch to the knot equivalent:
 | `Edit` (modify file) | `knot add-note <id> "..."` (additive), `knot update <id> --title ... --description ...` (non-interactive set/replace), or `knot edit <id>` (interactive) |
 | `Bash` + `mv` to `archive/` | `knot close <id> --summary "..."` |
 | `Bash` + `mv` from `archive/` | `knot reopen <id>` |
-| `Bash` + `rm` on a ticket file | `knot delete <id>` (refuses when other tickets reference the target — drop the refs first) |
+| `Bash` + `rm` on a ticket file | `knot delete <id>` (refuses when other tickets reference the target — drop the refs first, or use `--cascade` to rewrite them) |
 | `sed -i` to flip `status:` | `knot status <id> <new>` |
 
 ### Already primed?
@@ -214,6 +214,7 @@ knot status <id> <new-status>                  # generic transition
 knot close <id> --summary "shipped in #482"
 knot reopen <id>                               # restore from archive
 knot delete <id>                               # remove the file (leaf-only)
+knot delete <id> --cascade                     # also rewrite every referrer
 ```
 
 Always pass `--summary` to `knot close`. The summary becomes a timestamped
@@ -222,14 +223,29 @@ later. Skipping it loses information for free.
 
 `knot delete <id>` is the destructive twin of `close` — useful for
 typo'd `create`s, AI-generated duplicates, and pruning archive noise.
-Leaf-only: it **refuses** (exit 1) when any other ticket — live or
-archived — references the target via `:parent`, `:deps`, or `:links`.
-The refusal enumerates each referrer + the field. Drop the refs first
-(`knot undep`, `knot unlink`, or `knot update <other> --parent ""`) and
-re-run. There is no undo — `.tickets/` is git-tracked; `git checkout`
-is the documented recovery path. `--json` returns
-`{ok:true, data:{deleted:{id,path}, cleaned:[]}}` on success and the
-`has_incoming_refs` error envelope on refusal.
+Leaf-only by default: it **refuses** (exit 1) when any other ticket —
+live or archived — references the target via `:parent`, `:deps`, or
+`:links`. The refusal enumerates each referrer + the field. The bare
+command doubles as the dry-run for `--cascade` (same scan, same
+referrer list).
+
+`knot delete <id> --cascade` opts into the rewrite: every referrer
+(live + archive) has the target dropped from `:deps`/`:links` and its
+`:parent` dissoc'd; the resulting field key is dropped when its list
+empties (mirrors `undep` / `unlink`). Each cleaned referrer's
+`:updated` is bumped — including archived ones. Write order is
+referrers first (alphabetical by id), target last; a mid-batch save
+failure emits a stderr breadcrumb and aborts before unlinking the
+target, so `unknown_id` never leaks. Re-running `--cascade` is
+idempotent (already-cleaned referrers are no-ops). Stderr gets one
+`knot delete: cleaned <id> (:field, ...)` line per cleaned referrer;
+stdout is still just the removed path. `--cascade` on a leaf (zero
+referrers) is a silent no-op.
+
+There is no undo — `.tickets/` is git-tracked; `git checkout` is the
+documented recovery path. `--json` returns
+`{ok:true, data:{deleted:{id,path}, cleaned:[{id,fields:[...]}]}}` on
+success and the `has_incoming_refs` error envelope on refusal.
 
 For projects with custom `:statuses` (e.g. adding `"review"` between
 `in_progress` and `closed`), prefer explicit `knot status <id> <new>` over
@@ -471,9 +487,11 @@ round-trip. Lifecycle commands, `add-note`, and `update` emit a
 single ticket object (body included). `dep`/`undep` emit the `from`
 ticket with the updated `:deps`. `link`/`unlink` emit an array of
 every touched ticket (body excluded, ls-shape). `delete --json`
-emits `{deleted:{id,path}, cleaned:[]}` instead of a ticket payload
-(the target is gone). `close --json` (and any `status` transition to
-a terminal status) adds `meta.archived_to` with the archive path:
+emits `{deleted:{id,path}, cleaned:[{id,fields:[...]}]}` instead of a
+ticket payload (the target is gone); `cleaned` is `[]` without
+`--cascade` and populated otherwise. `close --json` (and any `status`
+transition to a terminal status) adds `meta.archived_to` with the
+archive path:
 
 ```json
 {"schema_version": 1, "ok": true, "data": {...ticket...},
@@ -605,9 +623,12 @@ start / status / close / reopen        lifecycle (--summary on close;
                                        --force --summary to bypass the
                                        acceptance and open-children
                                        gates at close)
-delete                                 remove a leaf ticket file (refuses
-                                       on incoming :parent / :deps /
-                                       :links refs; drop the refs first)
+delete                                 remove a ticket file. Leaf-only
+                                       by default (refuses on incoming
+                                       :parent / :deps / :links refs);
+                                       --cascade rewrites every referrer
+                                       first (live + archive) and then
+                                       deletes the file
 add-note / edit / update               annotation (edit is interactive,
                                        update is non-interactive set/replace
                                        with --title --type --priority --mode
