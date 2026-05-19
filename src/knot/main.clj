@@ -29,7 +29,13 @@
    whether the walk-up actually hit a marker so commands like `prime` can
    render a fallback preamble without conditional fall-throughs."
   []
-  (let [cwd       (str (fs/cwd))
+  (let [;; Canonicalize cwd so the fallback agrees with config/discover's
+        ;; walk-up (which canonicalizes start-dir via fs/canonicalize). On
+        ;; Windows this resolves 8.3 short names (e.g. RUNNER~1) to long
+        ;; names (runneradmin), so paths emitted by `knot create` (no marker
+        ;; yet → fallback) match those emitted by later commands (marker
+        ;; found → canonical).
+        cwd       (str (fs/canonicalize (fs/cwd)))
         discovered (config/discover cwd)
         root      (or (:project-root discovered) cwd)
         cfg       (or (:config discovered) (config/defaults))

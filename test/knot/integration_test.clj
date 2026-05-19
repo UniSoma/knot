@@ -2699,7 +2699,7 @@
             _ (is (= id (:id archived-rel)))
             {:keys [exit out]} (run-knot tmp "delete" id)]
         (is (zero? exit))
-        (is (str/includes? out "archive/")
+        (is (str/includes? out (str fs/file-separator "archive" fs/file-separator))
             (str "removed path is under archive/, got " out)))))
 
   (testing "knot delete <id> refuses when any live ticket has the target in :deps; exit 1, enumerate referrers on stderr"
