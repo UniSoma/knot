@@ -91,6 +91,7 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `o`          | `knot-list-sort`                   |
 |                        | `s`          | `knot-start`                       |
 |                        | `x`          | `knot-close`                       |
+|                        | `K`          | `knot-delete`                      |
 |                        | `M`          | `knot-update-from-show` (transient)|
 |                        | `m`          | `knot-list-mark`                   |
 |                        | `u`          | `knot-list-unmark`                 |
@@ -100,9 +101,10 @@ state; `C-c C-c` commits and `C-c C-k` discards regardless of state.
 |                        | `T`          | `knot-tags-transient`              |
 | `knot-show-mode`       | `RET`        | context action                     |
 |                        | `+`          | `knot-show-add-at-point`           |
-|                        | `-` / `K`    | `knot-show-remove-at-point`        |
+|                        | `-`          | `knot-show-remove-at-point`        |
 |                        | `s`          | `knot-start`                       |
 |                        | `x`          | `knot-close`                       |
+|                        | `K`          | `knot-delete`                      |
 |                        | `M`          | `knot-update-from-show` (transient)|
 |                        | `[` / `]`    | prev / next ticket                 |
 |                        | `D`          | `knot-deps-transient`              |
@@ -156,13 +158,26 @@ acceptance, `d` dep, `l` link, `t` tag). The four `+`-aware
 sections are always rendered, with an italic placeholder when
 empty.
 
-`-` and `K` both call `knot-show-remove-at-point`, the symmetric
-remover — dispatching on the row's text property: the `tags:`
-line → `knot-update-remove-tags`, a `## Blockers` row → `knot
-undep`, a `## Blocking` row → reverse `knot undep`, a `## Linked`
-row → `knot unlink`, an acceptance row → `--remove-ac`. `-`
-shadows evil's `evil-previous-line-first-non-blank` motion in
-knot-show buffers; use `k` for up-line.
+`-` calls `knot-show-remove-at-point`, the symmetric remover —
+dispatching on the row's text property: the `tags:` line →
+`knot-update-remove-tags`, a `## Blockers` row → `knot undep`, a
+`## Blocking` row → reverse `knot undep`, a `## Linked` row →
+`knot unlink`, an acceptance row → `--remove-ac`. `-` shadows
+evil's `evil-previous-line-first-non-blank` motion in knot-show
+buffers; use `k` for up-line.
+
+`K` in both `knot-list-mode` and `knot-show-mode` calls
+`knot-delete` against the contextual id (row at point in list,
+`knot-show--id` in show — marks are ignored, mirroring `s` / `x`).
+A y/n confirm runs bare `knot delete`; on a `has_incoming_refs`
+refusal a popup buffer (`*knot-delete: <id>*` in
+`knot-delete-refusal-mode`) lists referrers as `<id>  (:field)`
+with buttonized ids, and a second y/n offers `--cascade`. Cascade
+`n` leaves the popup open so the user can `RET` into a referrer,
+edit it, and re-invoke `K`; `q` dismisses the popup. On success
+the deleted ticket's show buffer (if any) is killed — windows
+restore via the back-buffer chain — and visible list buffers
+refresh.
 
 RET on the `tags:` line still invokes the full `knot-update-set-tags`
 replace via `knot-show--field->command`; use `+` / `-` for deltas

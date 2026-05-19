@@ -285,15 +285,19 @@ than by literal name."
   (or (executable-find knot-executable)
       knot-executable))
 
-(defun knot-cli-call (args &optional stdin)
-  "Run the knot binary with ARGS, return the envelope's `data' field.
+(defun knot-cli-call-envelope (args &optional stdin)
+  "Run the knot binary with ARGS, return the parsed envelope alist verbatim.
 ARGS is a list of strings passed as argv; --json is appended.
 
 When STDIN is non-nil it is a string piped to the subprocess's
 standard input via `call-process-region'.
 
-Signals `user-error' when the envelope reports ok:false, when the
-subprocess emits no parseable output, or when JSON parsing fails."
+Unlike `knot-cli-call', does not raise on ok:false — callers
+inspect the `error' object themselves (e.g. to branch on
+`has_incoming_refs').  Still raises `user-error' when the
+subprocess emits no parseable output or when JSON parsing fails,
+since those are infrastructure failures rather than envelope
+outcomes."
   (let* ((program (knot-cli--program))
          (final-args (append args (list "--json"))))
     (with-temp-buffer
@@ -302,28 +306,34 @@ subprocess emits no parseable output, or when JSON parsing fails."
                              stdin nil program nil t nil final-args)
                     (apply #'call-process
                            program nil t nil final-args))))
-        (knot-cli--parse exit (buffer-string))))))
+        (knot-cli--parse-envelope exit (buffer-string))))))
 
-(defun knot-cli--parse (exit output)
-  "Parse the knot --json envelope in OUTPUT, given subprocess EXIT code."
+(defun knot-cli-call (args &optional stdin)
+  "Run the knot binary with ARGS, return the envelope's `data' field.
+Thin wrapper over `knot-cli-call-envelope' that raises `user-error'
+on `ok:false' with the envelope's `error.message'."
+  (let* ((env (knot-cli-call-envelope args stdin)))
+    (if (alist-get 'ok env)
+        (alist-get 'data env)
+      (let* ((error-obj (alist-get 'error env))
+             (message (or (alist-get 'message error-obj)
+                          "knot subprocess reported failure")))
+        (user-error "knot: %s" message)))))
+
+(defun knot-cli--parse-envelope (exit output)
+  "Parse the knot --json envelope in OUTPUT, given subprocess EXIT code.
+Returns the envelope alist verbatim — caller inspects `ok'."
   (when (or (null output) (string-empty-p output))
     (user-error "knot: no output from subprocess (exit %s)" exit))
-  (let* ((envelope (condition-case err
-                       (json-parse-string output
-                                          :object-type 'alist
-                                          :array-type 'list
-                                          :null-object nil
-                                          :false-object nil)
-                     (error
-                      (user-error "knot: failed to parse JSON (exit %s): %s"
-                                  exit (error-message-string err)))))
-         (ok (alist-get 'ok envelope)))
-    (if ok
-        (alist-get 'data envelope)
-      (let* ((error-obj (alist-get 'error envelope))
-             (message (or (alist-get 'message error-obj)
-                          (format "knot exited with code %s" exit))))
-        (user-error "knot: %s" message)))))
+  (condition-case err
+      (json-parse-string output
+                         :object-type 'alist
+                         :array-type 'list
+                         :null-object nil
+                         :false-object nil)
+    (error
+     (user-error "knot: failed to parse JSON (exit %s): %s"
+                 exit (error-message-string err)))))
 
 
 ;;;; Completing-read annotations (shared ticket-picker affixation)
@@ -909,6 +919,7 @@ miscomputes the right edge when invoked from `header-line-format'."
     (keymap-set map "RET" #'knot-list-show-at-point)
     (keymap-set map "s" #'knot-start)
     (keymap-set map "x" #'knot-close)
+    (keymap-set map "K" #'knot-delete)
     (keymap-set map "," #'knot-update-from-show)
     (keymap-set map "m" #'knot-list-mark)
     (keymap-set map "u" #'knot-list-unmark)
@@ -1510,6 +1521,7 @@ laterally without growing the chain.  Nil falls through to
     (keymap-set map "," #'knot-update-from-show)
     (keymap-set map "s" #'knot-start)
     (keymap-set map "x" #'knot-close)
+    (keymap-set map "K" #'knot-delete)
     (keymap-set map "e" #'knot-show-edit-description)
     (keymap-set map "d" #'knot-show-edit-design)
     (keymap-set map "b" #'knot-show-edit-body)
@@ -2999,6 +3011,195 @@ to every visible knot.el buffer for this project via
     (knot--after-mutation)))
 
 
+;;;; Delete (knot-delete — bare + cascade)
+;;
+;; `K' in list / show invokes `knot-delete' against the contextual id
+;; (row at point in list, `knot-show--id' in show).  Two-step flow
+;; mirrors the CLI's bare-default + `--cascade' opt-in (ADR-0008): a
+;; y/n confirm runs bare `knot delete'; on `has_incoming_refs'
+;; refusal, a popup surfaces the referrer list with buttonized ids
+;; and a second y/n offers `--cascade'.
+
+(defconst knot-delete--prompt-title-width 60
+  "Max characters of the title shown in the bare delete confirmation prompt.")
+
+(defun knot-delete--list-row-title (id)
+  "Look up the title for ID in `knot-list--rows', or nil when absent."
+  (when knot-list--rows
+    (alist-get 'title
+               (cl-find id knot-list--rows
+                        :key (lambda (r) (alist-get 'id r))
+                        :test #'equal))))
+
+(defun knot-delete--context ()
+  "Return (ID . TITLE) for the contextual ticket; signal `user-error' on miss.
+TITLE may be nil when the originating buffer does not carry it
+locally (the prompt then degrades to id-only)."
+  (cond
+   ((derived-mode-p 'knot-show-mode)
+    (unless (and knot-show--id (not (string-empty-p knot-show--id)))
+      (user-error "knot-delete: no ticket in this show buffer"))
+    (cons knot-show--id
+          (and knot-show--data (alist-get 'title knot-show--data))))
+   ((derived-mode-p 'knot-list-mode)
+    (let ((id (tabulated-list-get-id)))
+      (unless id
+        (user-error "knot-delete: no ticket on this list row"))
+      (cons id (knot-delete--list-row-title id))))
+   (t
+    (user-error "knot-delete: not in a knot.el show or list buffer"))))
+
+(defun knot-delete--bare-prompt (id title)
+  "Return the y/n confirmation string for the bare delete of ID."
+  (if (and title (not (string-empty-p title)))
+      (format "Delete %s — %s? "
+              id
+              (truncate-string-to-width
+               title knot-delete--prompt-title-width nil nil "…"))
+    (format "Delete %s? " id)))
+
+(defun knot-delete--cascade-prompt (id n)
+  "Return the y/n cascade-confirmation string for ID and N referrers."
+  (format "%s has %d referrer%s.  Cascade delete? "
+          id n (if (= n 1) "" "s")))
+
+(defun knot-delete--kill-show-buffers (id)
+  "Kill every `knot-show-mode' buffer rendering ID, restoring back-buffers.
+Each window currently displaying such a buffer is switched to
+that buffer's `knot-show--back-buffer' (when live) before the kill,
+so the user lands back on the originating list / show buffer."
+  (dolist (buf (buffer-list))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf
+                 (and (derived-mode-p 'knot-show-mode)
+                      (equal knot-show--id id))))
+      (let ((back (buffer-local-value 'knot-show--back-buffer buf)))
+        (dolist (window (get-buffer-window-list buf nil t))
+          (when (and back (buffer-live-p back))
+            (set-window-buffer window back)))
+        (kill-buffer buf)))))
+
+(defun knot-delete--refusal-buffer-name (id)
+  "Return the canonical refusal popup buffer name for ID."
+  (format "*knot-delete: %s*" id))
+
+(defvar knot-delete-refusal-mode-map
+  (let ((map (make-sparse-keymap)))
+    (set-keymap-parent map special-mode-map)
+    (keymap-set map "q" #'quit-window)
+    (keymap-set map "RET" #'push-button)
+    (keymap-set map "TAB" #'forward-button)
+    (keymap-set map "<backtab>" #'backward-button)
+    map)
+  "Keymap for `knot-delete-refusal-mode'.")
+
+(define-derived-mode knot-delete-refusal-mode special-mode "Knot-Delete-Refusal"
+  "Read-only popup enumerating referrers that blocked a `knot-delete'.
+
+Each row carries one referrer id (buttonized) followed by the
+`(:field)' that points at the target.  `RET' on the id opens
+that ticket's show buffer; `q' dismisses the popup.
+
+\\{knot-delete-refusal-mode-map}"
+  (setq buffer-read-only t)
+  (setq-local truncate-lines nil))
+
+(defun knot-delete--render-refusal (buffer id referrers)
+  "Render REFERRERS into BUFFER for ID."
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert (format "knot delete %s refused — %d referrer%s:\n\n"
+                      id
+                      (length referrers)
+                      (if (= (length referrers) 1) "" "s")))
+      (dolist (r referrers)
+        (let ((rid (alist-get 'id r))
+              (field (alist-get 'field r)))
+          (insert (format "%s  (:%s)\n" (or rid "") (or field "")))))
+      (knot-id-buttonize-region (point-min) (point-max))
+      (goto-char (point-min)))))
+
+(defun knot-delete--open-refusal-popup (id referrers)
+  "Open (or refresh) the refusal popup for ID with REFERRERS; return its buffer."
+  (let* ((buf-name (knot-delete--refusal-buffer-name id))
+         (buf (get-buffer-create buf-name)))
+    (with-current-buffer buf
+      (unless (derived-mode-p 'knot-delete-refusal-mode)
+        (knot-delete-refusal-mode))
+      (knot-delete--render-refusal buf id referrers))
+    (pop-to-buffer buf)
+    buf))
+
+(defun knot-delete--finalize (id data cascaded)
+  "Post-success teardown after a bare or cascade `knot delete'.
+DATA is the envelope's `:data' (success).  CASCADED non-nil means
+the cascade path ran; the count of cleaned referrers is taken
+from DATA's `:cleaned'.  A leaf cascade (empty `:cleaned')
+degrades to the bare echo."
+  (knot-delete--kill-show-buffers id)
+  (knot--after-mutation)
+  (let* ((cleaned (and (listp data) (alist-get 'cleaned data)))
+         (n (length cleaned)))
+    (if (and cascaded (> n 0))
+        (message "Deleted %s; cascaded across %d referrer%s."
+                 id n (if (= n 1) "" "s"))
+      (message "Deleted %s." id))))
+
+(defun knot-delete--cascade (id)
+  "Run `knot delete <id> --cascade' and finalize on success.
+A non-`has_incoming_refs' refusal here is treated as the
+standard `user-error' surface (e.g. a partial-failure mid-batch)."
+  (let* ((env (knot-cli-call-envelope (list "delete" id "--cascade"))))
+    (if (alist-get 'ok env)
+        (knot-delete--finalize id (alist-get 'data env) t)
+      (user-error
+       "knot: %s"
+       (or (alist-get 'message (alist-get 'error env))
+           "cascade delete failed")))))
+
+(defun knot-delete--handle-refusal (id error-obj)
+  "Open the refusal popup for ID and offer `--cascade'.
+ERROR-OBJ is the envelope's `:error' object.  Non-`has_incoming_refs'
+codes fall through to the standard `user-error' surface."
+  (let ((code (alist-get 'code error-obj))
+        (msg  (alist-get 'message error-obj)))
+    (unless (equal code "has_incoming_refs")
+      (user-error "knot: %s" (or msg "delete failed")))
+    (let* ((referrers (alist-get 'referrers error-obj))
+           (buf (knot-delete--open-refusal-popup id referrers)))
+      (when (y-or-n-p (knot-delete--cascade-prompt id (length referrers)))
+        (kill-buffer buf)
+        (knot-delete--cascade id)))))
+
+;;;###autoload
+(defun knot-delete ()
+  "Delete the contextual ticket via `knot delete <id>'.
+
+Two-step destructive flow.  A y/n confirm runs bare `knot delete';
+on `has_incoming_refs' refusal a popup buffer (in
+`knot-delete-refusal-mode') surfaces the referrer list with
+buttonized ids and a second y/n offers `--cascade'.  Cascade `n'
+leaves the popup open so the user can inspect / edit referrers
+and re-invoke `K'.
+
+Context id comes from the show buffer's `knot-show--id' or the
+tabulated-list row at point.  Marks in `knot-list-mode' are
+ignored — operates on the row at point only, mirroring `s' / `x'.
+
+Refresh propagates to every visible knot.el buffer for this
+project via `knot--after-mutation'."
+  (interactive)
+  (let* ((ctx (knot-delete--context))
+         (id (car ctx))
+         (title (cdr ctx)))
+    (when (y-or-n-p (knot-delete--bare-prompt id title))
+      (let* ((env (knot-cli-call-envelope (list "delete" id))))
+        (if (alist-get 'ok env)
+            (knot-delete--finalize id (alist-get 'data env) nil)
+          (knot-delete--handle-refusal id (alist-get 'error env)))))))
+
+
 ;;;; Deps + links transients (knot-deps / knot-links modules)
 
 (defun knot-deps--context-id ()
@@ -3508,6 +3709,7 @@ binding under the evil scheme.")
      ("o"       . knot-list-sort)
      ("s"       . knot-start)
      ("x"       . knot-close)
+     ("K"       . knot-delete)
      ("M"       . knot-update-from-show)
      ("m"       . knot-list-mark)
      ("u"       . knot-list-unmark)
@@ -3524,10 +3726,10 @@ binding under the evil scheme.")
      ("-"       . knot-show-remove-at-point)
      ("s"       . knot-start)
      ("x"       . knot-close)
+     ("K"       . knot-delete)
      ("M"       . knot-update-from-show)
      ("["       . knot-show-prev-ticket)
      ("]"       . knot-show-next-ticket)
-     ("K"       . knot-show-remove-at-point)
      ("D"       . knot-deps-transient)
      ("L"       . knot-links-transient)
      ("T"       . knot-tags-transient)
