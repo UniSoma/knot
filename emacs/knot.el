@@ -218,6 +218,13 @@ non-active/non-terminal statuses)."
   "Face for nodes in the deps tree that reference a missing ticket."
   :group 'knot)
 
+(defface knot-show-terminal-ref
+  '((t :strike-through t))
+  "Face for terminal-status ids on the top-line of `knot-show-mode'.
+Applied to ids on the `**deps:**' and `**links:**' rows whose
+referent has a status in `terminal_statuses'."
+  :group 'knot)
+
 (defface knot-marked
   '((t :inherit region :extend t))
   "Face overlaid on rows that are part of the `knot-list-mode' mark set."
@@ -1832,6 +1839,44 @@ the list as a whole."
   (when (and items (listp items) (not (null items)))
     (insert (format "**%s:** %s\n" label (string-join items ", ")))))
 
+(defun knot-show--render-relationship-ids (label ids inverse-entries)
+  "Insert a `**LABEL:** csv' line for IDS, marking each id by referent role.
+INVERSE-ENTRIES is the expanded array (`blockers' for `deps',
+`linked' for `links') carrying `{id, title, status}' or
+`{id, missing: true}' entries.  Each id whose matching entry has
+a terminal status (per `(knot-info-allowed-values \\='terminal_statuses)')
+gets `knot-show-terminal-ref'; missing referents get `knot-deps-missing';
+everything else is rendered plain.  The face is applied via an
+overlay rather than a text property so it survives font-lock
+unfontification in the parent `markdown-view-mode' and composes on
+top of the `knot-id' face that buttonization provides via the
+`knot-id-button' category."
+  (when (and ids (listp ids) (not (null ids)))
+    (let ((terminal (knot-info-allowed-values 'terminal_statuses))
+          (first t))
+      (insert (format "**%s:** " label))
+      (dolist (id ids)
+        (if first
+            (setq first nil)
+          (insert ", "))
+        (let* ((entry (seq-find (lambda (e) (equal (alist-get 'id e) id))
+                                inverse-entries))
+               (status (alist-get 'status entry))
+               (missing (alist-get 'missing entry))
+               (face (cond
+                      (missing 'knot-deps-missing)
+                      ((and status (member status terminal))
+                       'knot-show-terminal-ref)
+                      (t nil)))
+               (start (point)))
+          (insert id)
+          (when face
+            (let ((ov (make-overlay start (point))))
+              (overlay-put ov 'face face)
+              (overlay-put ov 'evaporate t)
+              (overlay-put ov 'knot-show--relationship-face t)))))
+      (insert "\n"))))
+
 (defun knot-show--insert-field (field value)
   "Insert VALUE at point and annotate its character span with `knot-field' FIELD.
 VALUE is coerced to a string (numbers stringified, nil rendered
@@ -1893,8 +1938,8 @@ unannotated so RET there falls through to the no-op user-error."
         (insert "**tags:** ")
         (knot-show--insert-field 'tags (string-join tags ", "))
         (insert "\n"))
-      (knot-show--render-scalar-list "deps" deps)
-      (knot-show--render-scalar-list "links" links)
+      (knot-show--render-relationship-ids "deps" deps blockers)
+      (knot-show--render-relationship-ids "links" links linked)
       (knot-show--render-scalar-list "external" external)
       (when created (insert (format "**created:** %s\n" created)))
       (when updated (insert (format "**updated:** %s\n" updated)))
