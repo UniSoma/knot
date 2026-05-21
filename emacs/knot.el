@@ -867,10 +867,12 @@ sort-key symbol, so `knot-list--sort' is left untouched."
         (when sym
           (setq knot-list--sort (cons sym (not flip))))))))
 
-(defun knot-list--header-line (view filters &optional sort)
+(defun knot-list--header-line (view filters &optional sort count)
   "Render the header-line string for VIEW with active FILTERS.
 When SORT is non-nil, render its key + direction between the view tag
 and the filter chips (e.g. \"[ready] sort=priority↑ mode=afk\").
+When COUNT is non-nil, render it as a bare integer immediately after
+the view tag (e.g. \"[ready] 12 sort=priority↑ mode=afk\").
 When `knot-list--marks' is non-empty, appends a right-aligned
 `[N marked]' chunk via an inline `:align-to' display spec, so the
 operational mark state sits visually apart from the filter context.
@@ -879,6 +881,8 @@ underlying helper hardcodes a lookup in `mode-line-format' and so
 miscomputes the right edge when invoked from `header-line-format'."
   (let* ((view-tag (propertize (format "[%s]" view)
                                'face 'mode-line-emphasis))
+         (count-tag (when count
+                      (propertize (format "%d" count) 'face 'shadow)))
          (sort-tag (when sort
                      (propertize
                       (format "sort=%s%s"
@@ -897,7 +901,7 @@ miscomputes the right edge when invoked from `header-line-format'."
          (filter-part (if flag-strs
                           (string-join flag-strs " ")
                         (propertize "(no filters)" 'face 'shadow)))
-         (left (string-join (delq nil (list view-tag sort-tag filter-part))
+         (left (string-join (delq nil (list view-tag count-tag sort-tag filter-part))
                             " "))
          (marks-tag (when knot-list--marks
                       (propertize (format "[%d marked]"
@@ -1067,7 +1071,8 @@ intersect count."
           (cl-intersection knot-list--marks rendered :test #'equal)))
   (setq header-line-format
         (knot-list--header-line knot-list--view knot-list--filters
-                                (knot-list--effective-sort))))
+                                (knot-list--effective-sort)
+                                (length knot-list--rows))))
 
 (defun knot-list--region-row-bounds ()
   "Return (BEG . END) covering every full line touched by the active region.
