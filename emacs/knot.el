@@ -473,6 +473,23 @@ is intentionally one-shot per Emacs session even after manual
         (alist-get 'prefix project)
         "knot")))
 
+(defun knot-info--worktree-suffix (&optional info)
+  "Return \" [<basename>]\" when INFO's worktree differs from the project name.
+Worktree-keyed rather than branch-keyed: the on-disk checkout location
+is stable, while a branch label can flip under it without moving the
+buffer's `default-directory'.  Suffix appears only when the worktree
+directory basename differs from the project name (case-insensitive),
+so single-worktree users see no change."
+  (let* ((info (or info (knot-info-current)))
+         (project (knot-info--project-name info))
+         (root (knot-info--project-root info))
+         (basename (and root (file-name-nondirectory
+                              (directory-file-name root)))))
+    (when (and basename
+               (not (string-empty-p basename))
+               (not (string-equal-ignore-case basename project)))
+      (format " [%s]" basename))))
+
 (defun knot-info--project-root (&optional info)
   "Return the project root path from INFO."
   (let* ((info (or info (knot-info-current)))
@@ -602,7 +619,8 @@ including when the show buffer already existed."
   (let* ((info (knot-info-current))
          (project (knot-info--project-name info))
          (project-root (knot-info--project-root info))
-         (buf-name (format "*knot-info: %s*" project))
+         (buf-name (format "*knot-info: %s%s*" project
+                           (or (knot-info--worktree-suffix info) "")))
          (inhibit-read-only t))
     (with-current-buffer (get-buffer-create buf-name)
       (knot-info-mode)
@@ -986,15 +1004,16 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
   (when knot-pixel-scroll
     (pixel-scroll-precision-mode 1)))
 
-(defun knot-list--buffer-name (project)
-  "Return the canonical list buffer name for PROJECT."
-  (format "*knot-list: %s*" project))
+(defun knot-list--buffer-name (project &optional info)
+  "Return the canonical list buffer name for PROJECT, scoped to INFO's worktree."
+  (format "*knot-list: %s%s*" project
+          (or (knot-info--worktree-suffix info) "")))
 
 (defun knot-list--ensure-buffer (info)
   "Return (or create) the list buffer for INFO, initialized in `knot-list-mode'."
   (let* ((project (knot-info--project-name info))
          (project-root (knot-info--project-root info))
-         (buffer (get-buffer-create (knot-list--buffer-name project))))
+         (buffer (get-buffer-create (knot-list--buffer-name project info))))
     (with-current-buffer buffer
       (unless (derived-mode-p 'knot-list-mode)
         (knot-list-mode))
@@ -1515,9 +1534,11 @@ show buffer when reached via a buttonized id).  `]'/`[' step
 laterally without growing the chain.  Nil falls through to
 `quit-window'.")
 
-(defun knot-show--buffer-name (project id)
-  "Return the canonical show buffer name for PROJECT and ID."
-  (format "*knot-show: %s · %s*" project id))
+(defun knot-show--buffer-name (project id &optional info)
+  "Return the canonical show buffer name for PROJECT and ID.
+INFO scopes the buffer to its worktree."
+  (format "*knot-show: %s%s · %s*" project
+          (or (knot-info--worktree-suffix info) "") id))
 
 (defvar knot-show-mode-map
   (let ((map (make-sparse-keymap)))
@@ -1999,7 +2020,7 @@ as nil to avoid self-loops."
          (project-root (knot-info--project-root info))
          (data (knot-cli-call (list "show" id)))
          (real-id (or (alist-get 'id data) id))
-         (buf-name (knot-show--buffer-name project real-id))
+         (buf-name (knot-show--buffer-name project real-id info))
          (buffer (get-buffer-create buf-name)))
     (with-current-buffer buffer
       (unless (derived-mode-p 'knot-show-mode)
@@ -2086,11 +2107,14 @@ element with no shell escaping."
   :lighter " Knot-Capture"
   :keymap knot-capture-mode-map)
 
-(defun knot-capture--buffer-name (project id field)
-  "Return the canonical capture buffer name for PROJECT, ID, and FIELD."
+(defun knot-capture--buffer-name (project id field &optional info)
+  "Return the canonical capture buffer name for PROJECT, ID, and FIELD.
+Scoped to INFO's worktree so drafts in one checkout aren't erased by
+opening the same id's capture from another worktree."
   (let ((label (or (alist-get field knot-capture--field->label)
                    (symbol-name field))))
-    (format "*knot-%s: %s · %s*" label project id)))
+    (format "*knot-%s: %s%s · %s*" label project
+            (or (knot-info--worktree-suffix info) "") id)))
 
 (defun knot-capture--extract-section (body section)
   "Extract the SECTION subtree from a markdown BODY string.
@@ -2130,7 +2154,7 @@ CALLBACK is a thunk called after a successful commit."
   (let* ((info         (knot-info-current))
          (project      (knot-info--project-name info))
          (project-root (knot-info--project-root info))
-         (buf-name     (knot-capture--buffer-name project id field))
+         (buf-name     (knot-capture--buffer-name project id field info))
          (buffer       (get-buffer-create buf-name))
          (label        (or (alist-get field knot-capture--field->label)
                            (symbol-name field))))
@@ -3508,9 +3532,11 @@ subtrees).
   (when knot-pixel-scroll
     (pixel-scroll-precision-mode 1)))
 
-(defun knot-deps--buffer-name (project id)
-  "Return the canonical deps buffer name for PROJECT and ID."
-  (format "*knot-deps: %s · %s*" project id))
+(defun knot-deps--buffer-name (project id &optional info)
+  "Return the canonical deps buffer name for PROJECT and ID.
+INFO scopes the buffer to its worktree."
+  (format "*knot-deps: %s%s · %s*" project
+          (or (knot-info--worktree-suffix info) "") id))
 
 (defun knot-deps--status-glyph (status)
   "Return the status glyph for STATUS — ✓ when closed, ○ otherwise."
@@ -3591,7 +3617,7 @@ switches back to it."
   (let* ((info         (knot-info-current))
          (project      (knot-info--project-name info))
          (project-root (knot-info--project-root info))
-         (buf-name     (knot-deps--buffer-name project id))
+         (buf-name     (knot-deps--buffer-name project id info))
          (buffer       (get-buffer-create buf-name))
          (full         (and (buffer-live-p buffer)
                             (buffer-local-value 'knot-deps--full buffer)))
