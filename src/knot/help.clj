@@ -227,10 +227,13 @@
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
+                  {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot list --mode afk --tag p0"
                    :note "Show afk-mode tickets tagged p0."}
+                  {:cmd "knot list --parent kno-01abc"
+                   :note "Show the direct children of kno-01abc."}
                   {:cmd "knot list --acceptance-complete=false"
                    :note "Show tickets with at least one undone acceptance criterion."}]}
 
@@ -368,10 +371,13 @@
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
+                  {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot ready --mode afk"
-                   :note "Show afk-mode tickets ready to start."}]}
+                   :note "Show afk-mode tickets ready to start."}
+                  {:cmd "knot ready --parent kno-01abc"
+                   :note "Show ready direct children of kno-01abc."}]}
 
    :blocked
    {:group       :listing
@@ -387,12 +393,15 @@
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
+                  {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot blocked"
                    :note "Show tickets currently blocked by an open dep."}
                   {:cmd "knot blocked --mode afk"
-                   :note "Show afk-mode blocked tickets."}]}
+                   :note "Show afk-mode blocked tickets."}
+                  {:cmd "knot blocked --parent kno-01abc"
+                   :note "Show blocked direct children of kno-01abc."}]}
 
    :closed
    {:group       :listing
@@ -408,12 +417,15 @@
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
+                  {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot closed --limit 10"
                    :note "Show the ten most-recently-closed tickets."}
                   {:cmd "knot closed --type bug"
-                   :note "Show closed bug tickets."}]}
+                   :note "Show closed bug tickets."}
+                  {:cmd "knot closed --parent kno-01abc"
+                   :note "Show closed direct children of kno-01abc."}]}
 
    :add-note
    {:group       :notes

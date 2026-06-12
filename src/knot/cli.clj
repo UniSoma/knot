@@ -1129,7 +1129,8 @@
         (keep (fn [k]
                 (when-let [v (get opts k)]
                   (when (seq v) [k v]))))
-        [:status :assignee :tag :type :mode :priority :acceptance-complete]))
+        [:status :assignee :tag :type :mode :priority :acceptance-complete
+         :parent]))
 
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`

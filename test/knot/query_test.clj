@@ -434,6 +434,22 @@
              (mapv #(get-in % [:frontmatter :id])
                    (query/filter-tickets ts {:tag #{"urgent" "frontend"}}))))))
 
+  (testing ":parent criteria matches direct children by :parent equality"
+    (let [ts [(ft "c1" :parent "p")
+              (ft "c2" :parent "p")
+              (ft "c3" :parent "other")
+              (ft "orphan")]]
+      (is (= ["c1" "c2"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:parent #{"p"}})))
+          "direct children only — flat equality on :parent")
+      (is (= ["c1" "c2" "c3"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:parent #{"p" "other"}})))
+          "set semantics: repeatable values OR together")
+      (is (empty? (query/filter-tickets [(ft "orphan")] {:parent #{"p"}}))
+          "tickets without :parent never match — no none sentinel")))
+
   (testing ":acceptance-complete filters by frontmatter acceptance completion"
     (let [ts [(ft "no-ac")
               (ft "one-undone" :acceptance [{:title "x" :done false}])

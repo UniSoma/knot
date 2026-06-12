@@ -408,7 +408,36 @@
               (assoc acc k s)
               acc))
           {}
-          [:status :assignee :tag :type :mode :priority :acceptance-complete]))
+          [:status :assignee :tag :type :mode :priority :acceptance-complete
+           :parent]))
+
+(defn- resolve-parent-filter!
+  "Resolve every `--parent` value in `opts` to its canonical full id via
+   the standard partial-id resolution (live+archive), returning `opts`
+   with `:parent` replaced by the vector of resolved ids. This is the
+   only list filter whose values resolve, so it happens in the handler
+   before `filter-opts-from-cli` projection. A value that does not
+   resolve fails loudly: under `--json` it emits the same not_found /
+   ambiguous_id error envelopes as `show` (exit 1); otherwise it dies on
+   stderr (exit 1). No-op when no `--parent` was given."
+  [ctx opts json?]
+  (if-let [vs (seq (:parent opts))]
+    (assoc opts :parent
+           (mapv (fn [v]
+                   (try
+                     (get-in (store/resolve-id (:project-root ctx)
+                                               (:tickets-dir ctx) v)
+                             [:frontmatter :id])
+                     (catch clojure.lang.ExceptionInfo e
+                       (let [data (ex-data e)]
+                         (cond
+                           (and json? (= :ambiguous (:kind data)))
+                           (emit-ambiguous-envelope! e data)
+                           (and json? (= :not-found (:kind data)))
+                           (emit-not-found-envelope! v)
+                           :else (die (str "knot: " (.getMessage e))))))))
+                 vs))
+    opts))
 
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
@@ -436,6 +465,8 @@
         opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
+        ctx      (discover-ctx)
+        opts     (resolve-parent-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -447,7 +478,7 @@
                                  :color? color?})
                    (:limit opts) (assoc :limit (:limit opts))
                    tty?          (assoc :width (output/terminal-width)))
-        out      (cli/ls-cmd (discover-ctx) ls-opts)]
+        out      (cli/ls-cmd ctx ls-opts)]
     (println-out out)))
 
 (defn- init-handler [argv]
@@ -637,6 +668,8 @@
         opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
         json?    (boolean (:json opts))
+        ctx      (discover-ctx)
+        opts     (resolve-parent-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -648,7 +681,7 @@
                                  :color? color?})
                    (:limit opts) (assoc :limit (:limit opts))
                    tty?          (assoc :width (output/terminal-width)))
-        out      (list-fn (discover-ctx) cmd-opts)]
+        out      (list-fn ctx cmd-opts)]
     (println-out out)))
 
 (defn- link-handler

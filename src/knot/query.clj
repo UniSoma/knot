@@ -16,9 +16,11 @@
   "True when ticket `t` matches the value-set `vs` under criteria key `k`.
    Empty/nil `vs` is a no-op match. `:tag` checks set overlap with the
    ticket's `:tags`; the scalar enum keys (`:type`, `:status`, `:mode`,
-   `:assignee`, `:priority`) do equality lookup on the matching frontmatter
-   key. `:priority` matches integer-equality; tickets without a `:priority`
-   field are excluded (mirrors `:assignee`/`:mode`).
+   `:assignee`, `:priority`, `:parent`) do equality lookup on the matching
+   frontmatter key. `:priority` matches integer-equality; tickets without a
+   `:priority` field are excluded (mirrors `:assignee`/`:mode`). `:parent`
+   matches direct children by canonical-id equality; tickets without a
+   `:parent` are excluded (no orphan sentinel).
    `:acceptance-complete` requires the ticket to have at least one
    `:acceptance` entry and matches against the boolean
    `(every? :done acceptance)` — tickets with no AC list are excluded
@@ -36,6 +38,7 @@
         :assignee (contains? vs (:assignee fm))
         :type     (contains? vs (:type fm))
         :priority (contains? vs (:priority fm))
+        :parent   (contains? vs (:parent fm))
         :acceptance-complete
         (let [ac (:acceptance fm)]
           (and (seq ac) (contains? vs (every? :done ac))))

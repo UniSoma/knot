@@ -721,6 +721,134 @@
         (is (not (str/includes? out "all-done"))
             "tickets where every AC is done are excluded")))))
 
+(defn- id-of-create
+  "Extract the ticket id from a create-cmd stdout path, slug-agnostic:
+   the id is everything before the `--<slug>.md` suffix."
+  [out]
+  (-> (str/trim out) fs/file-name str (str/split #"--") first))
+
+(deftest parent-filter-end-to-end-test
+  (testing "list --parent filters to the direct children of the resolved id"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella")
+            parent-id    (id-of-create p-out)]
+        (run-knot tmp "create" "Child one" "--parent" parent-id)
+        (run-knot tmp "create" "Child two" "--parent" parent-id)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--parent" parent-id)]
+          (is (zero? exit) (str "list --parent err=" err))
+          (is (str/includes? out "Child one"))
+          (is (str/includes? out "Child two"))
+          (is (not (str/includes? out "Unrelated"))
+              "non-children are excluded")
+          (is (not (str/includes? out "Umbrella"))
+              "the parent itself is not a child of itself")))))
+
+  (testing "list --parent resolves a partial id (suffix form)"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella")
+            parent-id    (id-of-create p-out)
+            suffix       (subs parent-id (inc (str/index-of parent-id "-")))]
+        (run-knot tmp "create" "Child one" "--parent" parent-id)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--parent" suffix)]
+          (is (zero? exit) (str "list --parent <suffix> err=" err))
+          (is (str/includes? out "Child one"))
+          (is (not (str/includes? out "Unrelated")))))))
+
+  (testing "list --parent is repeatable: children of either parent (OR)"
+    (with-tmp tmp
+      (let [{p1-out :out} (run-knot tmp "create" "Parent A")
+            p1            (id-of-create p1-out)
+            {p2-out :out} (run-knot tmp "create" "Parent B")
+            p2            (id-of-create p2-out)]
+        (run-knot tmp "create" "Child of A" "--parent" p1)
+        (run-knot tmp "create" "Child of B" "--parent" p2)
+        (run-knot tmp "create" "Orphan ticket")
+        (let [{:keys [exit out err]}
+              (run-knot tmp "list" "--parent" p1 "--parent" p2)]
+          (is (zero? exit) (str "list --parent --parent err=" err))
+          (is (str/includes? out "Child of A"))
+          (is (str/includes? out "Child of B"))
+          (is (not (str/includes? out "Orphan ticket")))))))
+
+  (testing "list --parent on an unknown id dies in text mode (exit 1, stderr)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "list" "--parent" "kno-ghost")]
+        (is (= 1 exit))
+        (is (str/blank? out) "no rows printed when resolution fails")
+        (is (str/includes? err "kno-ghost")
+            "stderr names the unresolvable value"))))
+
+  (testing "list --parent --json on an unknown id emits a not_found envelope on stdout"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "list" "--parent" "kno-ghost" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err) "envelope routes to stdout, not stderr")
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code])))
+        (is (str/includes? (get-in parsed [:error :message]) "kno-ghost")))))
+
+  (testing "list --parent --json on an ambiguous id emits an ambiguous_id envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc111111--a.md"))
+            "---\nid: kno-01abc111111\nstatus: open\n---\n\n# A\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--b.md"))
+            "---\nid: kno-01abc222222\nstatus: open\n---\n\n# B\n")
+      (let [{:keys [exit out err]}
+            (run-knot tmp "list" "--parent" "kno-01abc" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "ambiguous_id" (get-in parsed [:error :code])))
+        (is (= ["kno-01abc111111" "kno-01abc222222"]
+               (get-in parsed [:error :candidates]))))))
+
+  (testing "--parent works on ready and blocked"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella")
+            parent-id    (id-of-create p-out)
+            {bk-out :out} (run-knot tmp "create" "Blocker")
+            blocker-id   (id-of-create bk-out)
+            {rd-out :out} (run-knot tmp "create" "Ready child" "--parent" parent-id)
+            ready-id     (id-of-create rd-out)
+            {bd-out :out} (run-knot tmp "create" "Blocked child" "--parent" parent-id)
+            blocked-id   (id-of-create bd-out)]
+        (run-knot tmp "dep" blocked-id blocker-id)
+        (run-knot tmp "create" "Ready non-child")
+        (let [{:keys [exit out err]} (run-knot tmp "ready" "--parent" parent-id)]
+          (is (zero? exit) (str "ready --parent err=" err))
+          (is (str/includes? out "Ready child"))
+          (is (not (str/includes? out "Ready non-child"))
+              "ready --parent filters the ready set to children")
+          (is (not (str/includes? out "Blocked child"))
+              "blocked child is not ready"))
+        (let [{:keys [exit out err]} (run-knot tmp "blocked" "--parent" parent-id)]
+          (is (zero? exit) (str "blocked --parent err=" err))
+          (is (str/includes? out "Blocked child"))
+          (is (not (str/includes? out "Ready child")))))))
+
+  (testing "closed --parent finds children of an ARCHIVED parent"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella")
+            parent-id    (id-of-create p-out)
+            {c-out :out} (run-knot tmp "create" "Done child" "--parent" parent-id)
+            child-id     (id-of-create c-out)]
+        ;; Close the child (it archives) and the parent (it archives too),
+        ;; so resolving the parent id must reach the archive.
+        (run-knot tmp "close" child-id "--summary" "shipped")
+        (run-knot tmp "close" parent-id "--summary" "shipped")
+        (let [{:keys [exit out err]} (run-knot tmp "closed" "--parent" parent-id)]
+          (is (zero? exit) (str "closed --parent err=" err))
+          (is (str/includes? out "Done child")
+              "an archived parent still resolves and matches its child"))))))
+
 (deftest show-json-end-to-end-test
   (testing "show --json emits a v0.3 success envelope wrapping the ticket"
     (with-tmp tmp
