@@ -703,7 +703,7 @@ the boolean `acceptance-complete' filter).  Filters with nil or
 empty-string values are treated as unset.")
 
 (defconst knot-list--filter-keys
-  '(mode type status tag assignee priority limit acceptance-complete)
+  '(mode type status tag assignee priority parent limit acceptance-complete)
   "Filter keys accepted by the list views, in display order.")
 
 (defconst knot-list--filter-cli-flags
@@ -713,6 +713,7 @@ empty-string values are treated as unset.")
     (tag                 . "--tag")
     (assignee            . "--assignee")
     (priority            . "--priority")
+    (parent              . "--parent")
     (limit               . "--limit")
     (acceptance-complete . "--acceptance-complete"))
   "Map from filter key to the CLI flag string.")
@@ -721,7 +722,10 @@ empty-string values are treated as unset.")
   "Return non-nil when VIEW accepts filter KEY.
 For slice 2 every view accepts every filter; the hook stays to
 let later slices degrade gracefully when CLI flag surfaces
-diverge (see kno-01kreh3g266x AC #4)."
+diverge (see kno-01kreh3g266x AC #4).  `parent' does not exercise
+this hook: --parent is accepted by all four list views (list,
+ready, blocked, closed); only `prime' lacks it, and `prime' is
+not a list view this transient drives."
   t)
 
 (defun knot-list--filter-string-value (value)
@@ -1399,6 +1403,19 @@ free input is allowed."
     (knot-list--current-filter-value 'acceptance-complete)))
   (knot-list--render))
 
+(defun knot-list-filter-set-parent (&optional include-closed)
+  "Prompt for `--parent' and update the active filter.
+Delegates to `knot-update--read-parent' for `id  title' completion
+over tickets (live by default; with a prefix argument,
+\\[universal-argument], closed tickets are appended).  Plain RET
+on the pre-filled value keeps the current parent filter; deleting
+the text and RET clears it."
+  (interactive "P")
+  (knot-list--set-filter
+   'parent (knot-update--read-parent
+            (knot-list--current-filter-value 'parent) include-closed))
+  (knot-list--render))
+
 (defun knot-list-clear-filters ()
   "Clear every active filter on the current list buffer and re-render."
   (interactive)
@@ -1418,6 +1435,7 @@ filter at once."
    ("T" "tag"                   knot-list-filter-set-tag)
    ("a" "assignee"              knot-list-filter-set-assignee)
    ("p" "priority"              knot-list-filter-set-priority)
+   ("P" "parent"                knot-list-filter-set-parent)
    ("l" "limit"                 knot-list-filter-set-limit)
    ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
   ["Other"
