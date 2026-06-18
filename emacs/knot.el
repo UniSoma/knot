@@ -1254,6 +1254,20 @@ does not derive counts client-side."
         (format "%d/%d" (or (alist-get 'children_terminal row) 0) total)
       "-")))
 
+(defun knot-list--cursor-umbrella-id ()
+  "Return the ticket id at point when its row is an umbrella, else nil.
+Reads the already-rendered CHLD cell from the tabulated-list entry
+at point — a non-\"-\" cell marks the row as having children — and
+returns that row's id via `tabulated-list-get-id'.  Requires no
+extra CLI call.  Degrades to nil when the CHLD column is absent or
+point is not on an umbrella row."
+  (let* ((entry (tabulated-list-get-entry))
+         (idx (cl-position "CHLD" tabulated-list-format
+                           :key #'car :test #'string=))
+         (cell (and entry idx (< idx (length entry)) (aref entry idx))))
+    (when (and (stringp cell) (not (string= cell "-")))
+      (tabulated-list-get-id))))
+
 (defun knot-list--age-days (updated-iso &optional now)
   "Return integer days between UPDATED-ISO and NOW.
 NOW defaults to `current-time'.  Returns nil for nil/blank/unparseable
@@ -1420,14 +1434,18 @@ free input is allowed."
 (defun knot-list-filter-set-parent (&optional include-closed)
   "Prompt for `--parent' and update the active filter.
 Delegates to `knot-update--read-parent' for `id  title' completion
-over tickets (live by default; with a prefix argument,
-\\[universal-argument], closed tickets are appended).  Plain RET
-on the pre-filled value keeps the current parent filter; deleting
-the text and RET clears it."
+over umbrella tickets only (those with children); with a prefix
+argument, \\[universal-argument], closed/archived umbrellas are
+appended.  The minibuffer pre-fills with the umbrella id at point
+when the cursor sits on an umbrella row, else the active parent
+filter, else empty — so `,P RET' on an umbrella applies it
+immediately.  Deleting the text and RET clears the filter."
   (interactive "P")
   (knot-list--set-filter
    'parent (knot-update--read-parent
-            (knot-list--current-filter-value 'parent) include-closed))
+            (or (knot-list--cursor-umbrella-id)
+                (knot-list--current-filter-value 'parent))
+            include-closed nil t))
   (knot-list--render))
 
 (defun knot-list-clear-filters ()
@@ -2539,7 +2557,7 @@ Free input is allowed, so brand-new tag names still work."
   (read-string prompt (and current (not (string-empty-p (format "%s" current)))
                            (format "%s" current))))
 
-(defun knot-update--read-parent (current &optional include-closed count)
+(defun knot-update--read-parent (current &optional include-closed count umbrellas-only)
   "Prompt for a parent id with completion over tickets.
 Candidates are formatted `id  title' and selection extracts the
 id.  The minibuffer pre-fills with CURRENT so plain RET keeps the
@@ -2547,11 +2565,19 @@ existing parent; deleting the text and RET clears it.  By
 default only live tickets are offered; with INCLUDE-CLOSED
 non-nil, closed tickets are appended after the live set.  When
 COUNT is a number > 1, the prompt gains a `(N marked)' chunk and
-the pre-fill is suppressed."
+the pre-fill is suppressed.  With UMBRELLAS-ONLY non-nil,
+candidate rows are restricted to umbrella tickets (those with
+`children_total' > 0) before choices/annotations are built."
   (let* ((live (knot-cli-call '("list")))
          (closed (and include-closed
                       (knot-cli-call '("list" "--status" "closed"))))
          (rows (append live closed))
+         (rows (if umbrellas-only
+                   (seq-filter (lambda (r)
+                                 (let ((total (alist-get 'children_total r)))
+                                   (and (numberp total) (> total 0))))
+                               rows)
+                 rows))
          (choices (mapcar (lambda (r)
                             (format "%s  %s"
                                     (or (alist-get 'id r) "")
