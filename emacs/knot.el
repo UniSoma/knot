@@ -994,6 +994,7 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
          ("Assignee" 10 t)
          ("Age"       5 t)
          ("AC"        5 t)
+         ("CHLD"      5 t)
          ("Title"     0 t)])
   (setq tabulated-list-padding 1)
   ;; `tabulated-list-sort-key' is set per-render from
@@ -1218,7 +1219,8 @@ is conceptually different across views."
          (type      (alist-get 'type row))
          (assignee  (or (alist-get 'assignee row) ""))
          (age-cell  (knot-list--age-cell row))
-         (ac-cell   (knot-list--ac-cell row)))
+         (ac-cell   (knot-list--ac-cell row))
+         (chld-cell (knot-list--chld-cell row)))
     (list id
           (vector (knot-format-propertize id 'knot-id)
                   (knot-format-status status)
@@ -1228,6 +1230,7 @@ is conceptually different across views."
                   assignee
                   age-cell
                   ac-cell
+                  chld-cell
                   title))))
 
 (defun knot-list--ac-cell (row)
@@ -1238,6 +1241,17 @@ Empty acceptance lists render as \"-\"."
         (let ((total (length ac))
               (done  (cl-count-if (lambda (a) (alist-get 'done a)) ac)))
           (format "%d/%d" done total))
+      "-")))
+
+(defun knot-list--chld-cell (row)
+  "Return the CHLD column text for ROW.
+Reads the pre-computed `children_terminal'/`children_total' scalars
+from the umbrella rollup (the CLI emits them only on umbrella rows);
+non-umbrella rows render \"-\".  Unlike `knot-list--ac-cell', this
+does not derive counts client-side."
+  (let ((total (alist-get 'children_total row)))
+    (if (numberp total)
+        (format "%d/%d" (or (alist-get 'children_terminal row) 0) total)
       "-")))
 
 (defun knot-list--age-days (updated-iso &optional now)
@@ -1957,6 +1971,8 @@ unannotated so RET there falls through to the no-op user-error."
            (blockers  (alist-get 'blockers data))
            (blocking  (alist-get 'blocking data))
            (children  (alist-get 'children data))
+           (children-total    (alist-get 'children_total data))
+           (children-terminal (alist-get 'children_terminal data))
            (linked    (alist-get 'linked data)))
       (insert (format "# %s\n\n" (or title "")))
       (insert (format "**id:** %s\n" (or id "")))
@@ -2014,7 +2030,11 @@ unannotated so RET there falls through to the no-op user-error."
        "Blockers" blockers 'knot-dep-id 'blockers "_(no blockers)_")
       (knot-show--render-relationship
        "Blocking" blocking 'knot-rdep-id 'blocking "_(not blocking any tickets)_")
-      (knot-show--render-relationship "Children" children)
+      (knot-show--render-relationship
+       (if (numberp children-total)
+           (format "Children (%d/%d)" (or children-terminal 0) children-total)
+         "Children")
+       children)
       (knot-show--render-relationship
        "Linked" linked 'knot-link-id 'linked "_(no linked tickets)_"))
     (knot-id-buttonize-region (point-min) (point-max))))

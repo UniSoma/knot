@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: hitl
 created: '2026-06-18T16:21:00.719625945Z'
-updated: '2026-06-18T17:10:27.734796233Z'
+updated: '2026-06-18T18:02:16.782870112Z'
 closed: '2026-06-18T17:10:27.734796233Z'
 acceptance:
 - title: query-side children-progress fn returns [terminal total] for direct children, mirroring acceptance/progress
@@ -21,6 +21,8 @@ acceptance:
   done: true
 - title: .claude/skills/knot/SKILL.md updated for new column + json fields in same commit
   done: true
+links:
+- kno-01kvdybmymby
 ---
 
 ## Description
