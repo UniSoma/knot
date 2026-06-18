@@ -259,6 +259,21 @@
       (warn! (str "knot: " src-id ": " (name kind)
                   " reference " id " is missing")))))
 
+(defn- annotate-children-progress
+  "Attach `:children-progress [terminal total]` to each umbrella ticket in
+   `tickets` — those with at least one direct child anywhere in `corpus`
+   (the full live+archive set, so closed children in the archive still
+   count). Non-umbrellas are left untouched, so `:children-progress`
+   absence doubles as the umbrella predicate the renderers and JSON
+   projection key on."
+  [tickets corpus terminal-statuses]
+  (mapv (fn [t]
+          (let [[_ total :as cp] (query/children-progress
+                                  corpus (get-in t [:frontmatter :id]) terminal-statuses)]
+            (cond-> t
+              (pos? total) (assoc :children-progress cp))))
+        tickets))
+
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. `:id` may be partial — `store/resolve-id`
@@ -270,11 +285,12 @@
    — for both human and JSON modes. Broken `:deps`/`:parent` references
    emit one stderr warning each — they never abort the command."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir]} (resolve-ctx ctx)
+  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
         loaded (resolve-or-nil project-root tickets-dir (:id opts))]
     (when loaded
       (let [all       (store/load-all project-root tickets-dir)
-            inverses* (query/inverses loaded all)]
+            inverses* (query/inverses loaded all)
+            loaded    (first (annotate-children-progress [loaded] all terminal-statuses))]
         (warn-broken-refs! loaded all)
         (if (:json? opts)
           (output/show-json loaded inverses*)
@@ -1223,7 +1239,8 @@
                    all
                    (query/non-terminal all terminal-statuses))
         visible  (query/filter-tickets base criteria)
-        result   (apply-limit visible (:limit opts))]
+        result   (annotate-children-progress (apply-limit visible (:limit opts))
+                                             all terminal-statuses)]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1352,7 +1369,8 @@
         all      (store/load-all project-root tickets-dir)
         ready*   (query/ready all terminal-statuses)
         filtered (query/filter-tickets ready* (filter-criteria opts))
-        result   (apply-limit filtered (:limit opts))]
+        result   (annotate-children-progress (apply-limit filtered (:limit opts))
+                                             all terminal-statuses)]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1391,7 +1409,8 @@
         terminal (filter (partial closed? terminal-statuses) all)
         filtered (query/filter-tickets terminal (filter-criteria opts))
         sorted   (sort by-closed-desc filtered)
-        result   (apply-limit sorted (:limit opts))]
+        result   (annotate-children-progress (apply-limit sorted (:limit opts))
+                                             all terminal-statuses)]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1411,7 +1430,8 @@
         all      (store/load-all project-root tickets-dir)
         blocked* (query/blocked all terminal-statuses)
         filtered (query/filter-tickets blocked* (filter-criteria opts))
-        result   (apply-limit filtered (:limit opts))]
+        result   (annotate-children-progress (apply-limit filtered (:limit opts))
+                                             all terminal-statuses)]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)

@@ -849,6 +849,46 @@
           (is (str/includes? out "Done child")
               "an archived parent still resolves and matches its child"))))))
 
+(deftest umbrella-progress-rollup-end-to-end-test
+  (testing "list/show surface the CHLD rollup, counting archived (closed) children"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella")
+            parent-id    (id-of-create p-out)
+            {c1-out :out} (run-knot tmp "create" "Child one" "--parent" parent-id)
+            child1-id     (id-of-create c1-out)]
+        (run-knot tmp "create" "Child two" "--parent" parent-id)
+        ;; Closing child one archives it; the rollup must still count it.
+        (run-knot tmp "close" child1-id "--summary" "shipped")
+        (testing "list text: parent row shows CHLD 1/2; non-umbrella child shows -"
+          (let [{:keys [exit out err]} (run-knot tmp "list")
+                line (some (fn [l] (when (str/includes? l parent-id) l))
+                           (str/split-lines out))]
+            (is (zero? exit) (str "list err=" err))
+            (is (str/includes? out "CHLD") "CHLD header surfaces when an umbrella is present")
+            (is (some? line))
+            (is (re-find #"\b1/2\b" line) "parent rolls up 1 of 2 children terminal")
+            (let [child-line (some (fn [l] (when (str/includes? l "Child two") l))
+                                   (str/split-lines out))]
+              (is (some? child-line))
+              (is (str/includes? child-line " - ") "non-umbrella child renders -"))))
+        (testing "list --json: parent emits children_total/terminal; child omits them"
+          (let [{:keys [out]} (run-knot tmp "list" "--json")
+                parsed (json/parse-string (str/trim out) true)
+                by-id  (into {} (map (juxt :id identity)) (:data parsed))]
+            (is (= 2 (get-in by-id [parent-id :children_total])))
+            (is (= 1 (get-in by-id [parent-id :children_terminal])))
+            (let [child-two (some (fn [t] (when (= "Child two" (:title t)) t))
+                                  (:data parsed))]
+              (is (not (contains? child-two :children_total))))))
+        (testing "show text: parent gets ## Children (1/2)"
+          (let [{:keys [out]} (run-knot tmp "show" parent-id)]
+            (is (str/includes? out "## Children (1/2)"))))
+        (testing "show --json: parent emits children_total/terminal"
+          (let [{:keys [out]} (run-knot tmp "show" parent-id "--json")
+                parsed (json/parse-string (str/trim out) true)]
+            (is (= 2 (get-in parsed [:data :children_total])))
+            (is (= 1 (get-in parsed [:data :children_terminal])))))))))
+
 (deftest show-json-end-to-end-test
   (testing "show --json emits a v0.3 success envelope wrapping the ticket"
     (with-tmp tmp

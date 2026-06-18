@@ -133,6 +133,18 @@ It is repeatable (children of any given parent), and its value resolves like
 any partial id (live+archive) — an unresolvable value fails loudly (stderr
 die, or a `not_found` / `ambiguous_id` envelope under `--json`).
 
+**Umbrella progress (`CHLD`).** When a result set contains at least one
+*umbrella* (a ticket with ≥1 direct child), the four listing commands add a
+`CHLD` column showing `terminal/total` of that ticket's direct children
+(`-` for non-umbrellas); the column is hidden entirely when no umbrella is
+present. `show` mirrors this as a `## Children (d/t)` heading. `terminal`
+counts every closed child including `Won't do:` closures, and the tally spans
+live+archive, so it asserts nothing about readiness — an umbrella at `0/5`
+can still be `ready`. In `--json`, umbrella rows carry
+`children_total`/`children_terminal` (present only on umbrellas, so
+`jq 'select(has("children_total"))'` selects them); read these instead of
+re-deriving the rollup from `--parent` queries.
+
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
 afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
 `knot closed --type bug --limit 5`, `knot list --parent kno-01abc`.

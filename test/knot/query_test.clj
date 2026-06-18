@@ -359,6 +359,30 @@
       (is (= ["c1" "c2" "c3"] (mapv #(get-in % [:frontmatter :id])
                                     (query/children [c1 c2 c3] "p")))))))
 
+(deftest children-progress-test
+  (testing "returns [terminal total] for direct children of id"
+    (let [p  {:frontmatter {:id "p" :status "open"}}
+          c1 {:frontmatter {:id "c1" :status "closed" :parent "p"}}
+          c2 {:frontmatter {:id "c2" :status "open"   :parent "p"}}
+          c3 {:frontmatter {:id "c3" :status "open"   :parent "p"}}]
+      (is (= [1 3] (query/children-progress [p c1 c2 c3] "p" #{"closed"})))))
+
+  (testing "Won't-do / any terminal-status closure counts toward terminal"
+    (let [p  {:frontmatter {:id "p" :status "open"}}
+          c1 {:frontmatter {:id "c1" :status "closed"    :parent "p"}}
+          c2 {:frontmatter {:id "c2" :status "cancelled" :parent "p"}}]
+      (is (= [2 2] (query/children-progress [p c1 c2] "p" #{"closed" "cancelled"})))))
+
+  (testing "[0 0] when id has no children (non-umbrella)"
+    (let [a {:frontmatter {:id "a" :status "open"}}]
+      (is (= [0 0] (query/children-progress [a] "a" #{"closed"})))))
+
+  (testing "counts only direct children, not children-of-children"
+    (let [p  {:frontmatter {:id "p" :status "open"}}
+          c  {:frontmatter {:id "c" :status "open" :parent "p"}}
+          gc {:frontmatter {:id "gc" :status "closed" :parent "c"}}]
+      (is (= [0 1] (query/children-progress [p c gc] "p" #{"closed"}))))))
+
 (defn- ft
   "Compact ticket constructor for filter tests."
   [id & {:as fm}]

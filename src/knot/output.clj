@@ -34,10 +34,16 @@
 (defn- render-inverse-sections
   "Build the trailing inverse-section markdown for `show-text`. Empty
    sections are omitted; sections are separated by a blank line. Returns
-   `\"\"` when every section is empty."
-  [inverses]
+   `\"\"` when every section is empty. When `children-progress` (a
+   `[terminal total]` tuple) is supplied, the `## Children` heading carries
+   the `(d/t)` rollup; otherwise it renders plain `## Children`."
+  [inverses children-progress]
   (let [parts (for [[k header] inverse-section-order
-                    :let [entries (get inverses k)]
+                    :let [entries (get inverses k)
+                          header  (if (and (= k :children) children-progress)
+                                    (let [[term total] children-progress]
+                                      (str header " (" term "/" total ")"))
+                                    header)]
                     :when (seq entries)]
                 (str header "\n\n"
                      (str/join "\n" (map inverse-line entries))
@@ -61,7 +67,7 @@
   ([ticket inverses]
    (str (ticket/render ticket)
         (acceptance/render-section (get-in ticket [:frontmatter :acceptance]))
-        (render-inverse-sections inverses))))
+        (render-inverse-sections inverses (:children-progress ticket)))))
 
 (def ^:private ansi-codes
   "Map of friendly names to ANSI SGR parameters (numbers as strings)."
@@ -198,12 +204,14 @@
    `json-vector-default-keys` are appended as `[]` at the end of the map
    (JSON object key order is non-semantic) so consumers can iterate
    without `null[]` errors."
-  [{:keys [frontmatter body] :as _ticket} {:keys [include-body?]
-                                           :or {include-body? true}}]
-  (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
-                  frontmatter
-                  json-vector-default-keys)
-    include-body? (assoc :body body)))
+  [{:keys [frontmatter body children-progress] :as _ticket} {:keys [include-body?]
+                                                             :or {include-body? true}}]
+  (let [[term total] children-progress]
+    (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
+                    frontmatter
+                    json-vector-default-keys)
+      include-body?     (assoc :body body)
+      children-progress (assoc :children_total total :children_terminal term))))
 
 (defn- jsonify-inverse-entry
   "Project an inverse-section entry into the JSON shape: resolved entries
@@ -290,18 +298,27 @@
 (def ^:private ls-ac-column
   {:key :acceptance :header "AC" :align :left})
 
+(def ^:private ls-chld-column
+  {:key :children :header "CHLD" :align :left})
+
 (defn- ls-columns-for
-  "Return the column list for `tickets`. AGE is always present (immediately
-   before TITLE, or before AC when AC is shown). Splices the AC column in
-   immediately before TITLE when at least one ticket carries
-   `(seq :acceptance)`; otherwise omits the column entirely so the
-   header and slot disappear from quiet projects."
+  "Return the column list for `tickets`. AGE is always present. The AC and
+   CHLD columns are independently spliced in immediately before TITLE — AC
+   when at least one ticket carries `(seq :acceptance)`, CHLD when at least
+   one ticket is an umbrella (carries `:children-progress`). Layout is
+   `AGE, [AC], [CHLD], TITLE`; either omitted column makes its header and
+   slot disappear, so quiet projects see neither."
   [tickets]
-  (if (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
-    (let [head (vec (butlast ls-columns-base))
-          title-col (last ls-columns-base)]
-      (conj head ls-ac-column title-col))
-    ls-columns-base))
+  (let [ac?       (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
+        umbrella? (some :children-progress tickets)
+        head      (vec (butlast ls-columns-base))
+        title-col (last ls-columns-base)
+        extra     (cond-> []
+                    ac?       (conj ls-ac-column)
+                    umbrella? (conj ls-chld-column))]
+    (if (seq extra)
+      (conj (into head extra) title-col)
+      ls-columns-base)))
 
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
@@ -318,6 +335,9 @@
                     (let [[d t] (acceptance/progress ac)]
                       (str d "/" t))
                     "-"))
+    :children (if-let [[term total] (:children-progress ticket)]
+                (str term "/" total)
+                "-")
     :age (format-age-days (:age-days ticket))
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))

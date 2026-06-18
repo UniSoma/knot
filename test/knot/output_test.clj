@@ -100,6 +100,30 @@
       (is (str/includes? s "title: Alpha"))
       (is (not (str/includes? s "## Blockers"))))))
 
+(deftest show-text-children-progress-heading-test
+  (testing "## Children heading carries the (d/t) rollup when :children-progress is present"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body.\n"
+                  :children-progress [1 2]}
+          inverses {:blockers [] :blocking []
+                    :children [(mk-resolved "kno-C" "Gamma")
+                               (mk-resolved "kno-D" "Delta")]
+                    :linked []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "## Children (1/2)")
+          "heading shows terminal/total of direct children")
+      (is (str/includes? s "- kno-C  Gamma")
+          "per-child list is unchanged")
+      (is (str/includes? s "- kno-D  Delta"))))
+
+  (testing "heading falls back to plain `## Children` when no :children-progress attached"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          inverses {:blockers [] :blocking []
+                    :children [(mk-resolved "kno-C" "Gamma")] :linked []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "## Children\n")
+          "no rollup suffix when progress wasn't computed"))))
+
 (deftest show-text-acceptance-test
   (testing "frontmatter :acceptance is synthesized as a `## Acceptance Criteria` checklist"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
@@ -654,6 +678,49 @@
       (is (re-find #"\b2/5\b" out)
           "force-closed ticket with 2 of 5 AC done renders 2/5"))))
 
+(def ^:private sample-ls-tickets-with-children
+  "First ticket is an umbrella (carries :children-progress [terminal total]);
+   the second is a plain ticket. Mirrors how the cli annotates result rows."
+  [(assoc (first sample-ls-tickets) :children-progress [2 5])
+   (second sample-ls-tickets)])
+
+(deftest ls-table-chld-column-shown-when-any-ticket-is-umbrella-test
+  (testing "CHLD column header appears when at least one ticket has :children-progress"
+    (let [out (output/ls-table sample-ls-tickets-with-children {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bCHLD\b" first-line)
+          "CHLD header surfaces when any input ticket is an umbrella")))
+
+  (testing "CHLD sits before TITLE and after ASSIGNEE"
+    (let [out (output/ls-table sample-ls-tickets-with-children {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          assignee-i (str/index-of first-line "ASSIGNEE")
+          chld-i     (str/index-of first-line "CHLD")
+          title-i    (str/index-of first-line "TITLE")]
+      (is (every? some? [assignee-i chld-i title-i]))
+      (is (< assignee-i chld-i title-i)
+          "CHLD sits between ASSIGNEE and TITLE")))
+
+  (testing "umbrella row renders d/t (e.g. 2/5)"
+    (let [out (output/ls-table sample-ls-tickets-with-children {:color? false :tty? false})]
+      (is (re-find #"\b2/5\b" out)
+          "umbrella with 2 of 5 children terminal renders 2/5")))
+
+  (testing "non-umbrella row renders \"-\" in the CHLD cell"
+    (let [out  (output/ls-table sample-ls-tickets-with-children {:color? false :tty? false})
+          line (some (fn [l] (when (str/includes? l "kno-01abcd0002") l))
+                     (str/split-lines out))]
+      (is (some? line))
+      (is (re-find #"bob\s+-\s+" line)
+          "non-umbrella renders `-` in its CHLD cell"))))
+
+(deftest ls-table-chld-column-omitted-when-no-umbrella-test
+  (testing "CHLD column header is absent when no input ticket is an umbrella"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bCHLD\b" first-line))
+          "no CHLD header when no ticket carries :children-progress"))))
+
 (deftest ls-table-age-column-header-test
   (testing "AGE column header appears in ls-table output"
     (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
@@ -754,6 +821,20 @@
              ac)
           "acceptance entries pass through unchanged through the JSON envelope"))))
 
+(deftest show-json-children-progress-test
+  (testing "umbrella ticket emits children_total/children_terminal under :data"
+    (let [ticket (assoc {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+                        :children-progress [1 4])
+          parsed (json/parse-string (output/show-json ticket) true)]
+      (is (= 4 (get-in parsed [:data :children_total])))
+      (is (= 1 (get-in parsed [:data :children_terminal])))))
+
+  (testing "non-umbrella ticket omits the fields"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          parsed (json/parse-string (output/show-json ticket) true)]
+      (is (not (contains? (:data parsed) :children_total)))
+      (is (not (contains? (:data parsed) :children_terminal))))))
+
 (deftest show-json-inverses-test
   (testing "show-json with inverses adds blockers/blocking/children/linked arrays"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
@@ -826,6 +907,19 @@
   (testing "an empty list renders as :data []"
     (let [parsed (json/parse-string (output/ls-json []) true)]
       (is (= [] (:data parsed))))))
+
+(deftest ls-json-children-progress-test
+  (testing "umbrella rows emit children_total/children_terminal; others omit them"
+    (let [tickets [(assoc {:frontmatter {:id "p" :status "open"} :body ""}
+                          :children-progress [2 5])
+                   {:frontmatter {:id "leaf" :status "open"} :body ""}]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [umb leaf] (:data parsed)]
+      (is (= 5 (:children_total umb)))
+      (is (= 2 (:children_terminal umb)))
+      (is (not (contains? leaf :children_total))
+          "non-umbrella rows carry no children_total (doubles as the predicate)")
+      (is (not (contains? leaf :children_terminal))))))
 
 (deftest colorize-test
   (testing "with color? false, returns the text unchanged"

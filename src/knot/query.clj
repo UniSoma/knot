@@ -212,6 +212,22 @@
   (filter (fn [t] (= id (get-in t [:frontmatter :parent])))
           tickets))
 
+(defn children-progress
+  "Return `[terminal-count total-count]` for the direct children of `id`
+   within `tickets`, mirroring `acceptance/progress`. `total` is the number
+   of tickets whose `:parent` equals `id`; `terminal` is the subset whose
+   `:status` is in `terminal-statuses` (so a `Won't do:` closure counts —
+   the metric is \"off the umbrella's plate\", not \"shipped\"). `[0 0]`
+   when `id` has no children, so callers can treat `(pos? total)` as the
+   umbrella predicate. Counts direct children only — never descendants."
+  [tickets id terminal-statuses]
+  (let [kids     (children tickets id)
+        terminal (count (filter (fn [t]
+                                  (contains? terminal-statuses
+                                             (get-in t [:frontmatter :status])))
+                                kids))]
+    [terminal (count kids)]))
+
 (defn- resolve-ref-list
   "Map a sequence of ids to inverse-section entries: `{:id ... :ticket ...}`
    for known ids, `{:id ... :missing? true}` for unknown ones. Preserves
