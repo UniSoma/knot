@@ -1,12 +1,13 @@
 ---
 id: kno-01kvdybmymby
 title: knot.el — surface umbrella progress rollup (CHLD column + show "Children (d/t)" heading)
-status: in_progress
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-06-18T18:02:12.819988445Z'
-updated: '2026-06-18T18:09:09.722598128Z'
+updated: '2026-06-18T18:16:01.540263560Z'
+closed: '2026-06-18T18:16:01.540263560Z'
 tags:
 - emacs
 acceptance:
@@ -55,3 +56,9 @@ Show view:
 Not in scope: emacs/README.md change (it doesn't enumerate columns); elisp ERT test infrastructure (intentionally skipped); making Children an editable section; a semantic CHLD sort key; touching AC.
 
 Constraints: no AI attribution in commits/trailers. knot.el changes do NOT require a SKILL.md update (that documents the CLI, already done). knot.elc is untracked — nothing to regenerate.
+
+## Notes
+
+**2026-06-18T18:16:01.540263560Z**
+
+knot.el now surfaces the umbrella rollup: always-on CHLD column (knot-list--chld-cell reads children_terminal/children_total scalars, renders terminal/total or -, S sorts) and show heading 'Children (t/total)' on umbrellas via conditional label at the render-relationship call site. Both surfaces use server scalars, no client derivation (ADR 0009). bb lint:elisp clean; batch-verified cell + label across 0/N, N/N, absent-terminal, non-umbrella, and Won't-do-counts-terminal cases against a scratch umbrella.
