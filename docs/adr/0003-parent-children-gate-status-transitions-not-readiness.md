@@ -17,5 +17,5 @@ Open children do, however, gate two status transitions: `active → terminal` (t
 ## Consequences
 
 - Agents listing `ready --mode afk --json` may now hit `ok:false error:"open-children"` on `start`. The protocol is: read the list, recurse into a child (preferably one that's also `ready`), or pass `--force` if the umbrella's own work is what's actionable.
-- `knot show` continues to render `## Children` purely informationally; no listing surface (`list`, `ready`, `blocked`, `closed`) gains an "open children" column.
+- `knot show` continues to render `## Children` purely informationally; no listing surface (`list`, `ready`, `blocked`, `closed`) gains an "open children" column. **[Superseded in part, 2026-06-18 — see [0009](0009-umbrella-progress-rollup-in-listings.md): listings and `show` now surface a `terminal/total` progress rollup (`CHLD` column / `## Children (d/t)`). This is a progress signal, not the gating "open children" marker rejected here — it asserts nothing about readiness, consistent with this ADR's composition-≠-sequencing thesis.]**
 - The `epic` ticket type stays dormant. Strict sum-of-children semantics for `epic` could be revisited if a real workflow ever demands them, but no current ticket needs it.

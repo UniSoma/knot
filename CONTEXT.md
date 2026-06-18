@@ -23,6 +23,10 @@ _Avoid_: "the CI workflow" without qualifier.
 A *composition* relationship — the parent is the umbrella that names a piece of work and carries its narrative; children are the pieces that belong under it. A child has exactly one parent (or none). An umbrella may have its own independent work (integration, docs, closure summary) beyond what any child delivers.
 _Avoid_: "blocks" (that's `deps`), "sub-task" without specifying composition vs sequencing.
 
+**Umbrella progress**:
+The `terminal / total` tally of an umbrella's **direct** children (children-of-children are not counted). Surfaced as the `CHLD` column in listings (`list`/`ready`/`blocked`/`closed`) and as `## Children (d/t)` on `show`; emitted as `children_total`/`children_terminal` in `--json`. "Terminal" counts every closed child including `Won't do:` closures — it measures "off the umbrella's plate," not "successfully completed." Asserts nothing about readiness: an umbrella at `0/5` can still be `ready` (its own work is what's ready, not its children).
+_Avoid_: "completion %", "percent done" (implies success-only and a 0–100 scale we don't render), "open-children column" (that's the gating signal ADR 0003 rejected — this is a pure rollup).
+
 **Deps**:
 A *sequencing* relationship — every id in a ticket's `:deps` must reach a terminal status before the ticket is `ready`. Missing referents count as non-terminal (broken-ref-as-blocker).
 _Avoid_: "parent of", "depends on the umbrella" (umbrella ≠ blocker).
