@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added/Changed/Fixed/Removed
+
+## [0.7.0] - 2026-06-19
+
 ### Added
 
 - **`knot delete <id>` — leaf-only file removal across live + archive.**
@@ -45,8 +49,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `--cascade` on a leaf (zero referrers) is a silent no-op. Pinned by
   ADR-0008; bundled `.claude/skills/knot` and json-protocol reference
   updated in the same release.
+- **`--parent <id>` filter on `list` / `ready` / `blocked` / `closed`.**
+  Surfaces the direct children of a parent ticket from the four listing
+  commands. Repeatable (values OR together), matched on flat `:parent`
+  equality after resolution — no recursion, no orphan sentinel. Each
+  value resolves through the standard partial-id resolution (live +
+  archive) before projection — the only list filter whose values
+  resolve — so `closed --parent` can reach an archived parent. An
+  unresolvable value fails loudly: a stderr die in text mode, or the
+  standard `not_found` / `ambiguous_id` envelope under `--json`. `prime`
+  is out of scope. Bundled `.claude/skills/knot` updated in the same
+  release.
+- **Umbrella progress rollup in listings + `show` (CHLD column).** An
+  umbrella's progress — the terminal/total tally of its direct children
+  — now surfaces across the four listing commands and `show`, per
+  ADR-0009. `query/children-progress` returns `[terminal total]` for
+  direct children (terminal reuses `terminal-statuses`, so Won't-do
+  closures count). A `CHLD` column (`t/total`, `-` for non-umbrellas) is
+  conditionally spliced into the `ls` table only when the result set has
+  at least one umbrella, shared by `list` / `ready` / `blocked` /
+  `closed` over the full live + archive corpus. `show` gains a
+  `## Children (t/total)` heading. `show --json` and `list --json` emit
+  `children_total` / `children_terminal` on umbrella rows only (their
+  absence doubles as the umbrella predicate). Bundled
+  `.claude/skills/knot` and json-protocol reference updated in the same
+  release.
+- **`knot.el`: umbrella rollup, `--parent` filter, and editor
+  ergonomics.** The Emacs client tracks the CLI: an always-on `CHLD`
+  column (read from `children_terminal` / `children_total`, `S`-sortable)
+  and a `Children (t/total)` heading on umbrella `show` buffers; a
+  `--parent` arm in the `knot-list` filter transient (`,P`) that offers
+  umbrella-only candidates and pre-fills the umbrella id at point; a
+  `knot-delete` (`K`) command with bare and `--cascade` flows; a ticket
+  count in the `knot-list` header-line; per-git-worktree buffer names to
+  disambiguate concurrent checkouts; and strikethrough on terminal
+  deps/links in the `show` top-line.
 
-### Changed/Fixed/Removed
+### Fixed
+
+- **Windows: canonicalize cwd in `discover-ctx`; platform separator in
+  delete archive test.** `discover-ctx` fell back to raw `(fs/cwd)` when
+  `.tickets/` was not yet present, while `config/discover` canonicalizes
+  the start-dir once a marker exists — on Windows, `Path.toRealPath()`
+  resolves 8.3 short names (`RUNNER~1`) to long names (`runneradmin`), so
+  `knot create` (no marker → fallback) and `knot delete` (marker →
+  canonical) returned different strings for the same file. The fallback
+  is now canonicalized so both agree. The `delete-end-to-end-test`
+  archive assertion no longer hard-codes the POSIX `archive/` substring
+  — it uses `fs/file-separator` so the check matches `archive\` on
+  Windows.
 
 ## [0.6.0] - 2026-05-19
 

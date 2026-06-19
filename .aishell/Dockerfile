@@ -89,6 +89,6 @@ RUN bbin install https://github.com/bhauman/clojure-mcp-light.git --tag "v${CLOJ
 ARG CLJ_SURGEON_SHA=3fbf21bf5ec1b55e81fbe1a3b6358e70414bef04
 RUN bbin install https://github.com/realgenekim/clj-surgeon.git --git/sha "${CLJ_SURGEON_SHA}"
 
-ARG KNOT_VERSION=0.6.0
+ARG KNOT_VERSION=0.7.0
 RUN bbin install https://github.com/UniSoma/knot.git --tag "v${KNOT_VERSION}"
 # <<< clojure-dev stuff (managed) <<<
