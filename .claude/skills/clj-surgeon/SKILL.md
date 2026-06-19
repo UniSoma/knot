@@ -1,16 +1,16 @@
 ---
 name: clj-surgeon
-description: "Clojure structural ops: outline, extract to new ns, fix-declares, deps tree, topo sort, form move, namespace rename, CLJC merge/split/add-require/analyze — babashka + rewrite-clj"
+description: "Token-efficient structural operations on Clojure/ClojureScript code via babashka + rewrite-clj. Use this skill BEFORE reading any .clj/.cljs/.cljc file over ~200 lines and BEFORE spawning Explore agents for Clojure code — measured 150× more token-efficient than reading whole files (single repo outlined in ~250ms, cross-repo grep across thousands of files in ~3s). Also trigger for: finding functions or usages across one or many repos, extracting or reordering defns, eliminating declares, renaming namespaces, converting CLJ↔CLJS↔CLJC, auditing dependency graphs of a single form. Triggers on phrases like \"find where X is defined\", \"split this file\", \"what depends on Y\", \"extract these functions into a new ns\", \"is this declare needed\", \"rename this namespace\", \"convert these two files to cljc\" — even when the user doesn't explicitly name the tool. Invoke as the `clj-surgeon` command on PATH (never `bb <script>`); every op is `clj-surgeon :op <command> :file <path> [:form <name> …]` with named args — run `clj-surgeon --help` for the full list before guessing syntax. Capabilities: outline (`:ls`), directory tree (`:ls-tree`/`:ls-tree :grep`), extract (`:extract!`), fix-declares, mv, rename-ns, cljc-merge/split/add-require/analyze, ls-deps, topo."
 user-invocable: true
 ---
 
 # clj-surgeon: Structural Operations on Clojure Namespaces
 
-A babashka CLI tool. Available as `clj-surgeon` on PATH (installed via bbin in the dev container). 103 tests, 327 assertions.
-
 ## When to Use
 
+- **Before exploring ANY Clojure codebase** — `:ls-tree` maps an entire directory of repos in seconds. "Which repo does X?" answered in one command instead of spawning Explore agents
 - **Before reading a large .clj/.cljs/.cljc file** — `:ls` first (50 tokens vs 2000+); the outline now surfaces forms inside `#?(:clj …)` / `#?@(:cljs […])` with `:platforms` tags
+- **When searching across multiple repos** — `:ls-tree :grep "pattern"` finds matching projects/files with full API surface, ~3 seconds across thousands of files
 - **When extracting forms to a new namespace** — `:extract!` does it in one command
 - **When you see a `declare`** — `:fix-declares!` eliminates removable ones
 - **When reordering forms** — `:mv` moves a defn above its caller
@@ -42,8 +42,6 @@ One command:
 4. Adds require for new namespace to source
 5. Reports callers that may need updating
 
-**After extraction, run `make runtests-once`.** The compiler catches bare references (`app-state`, `*io-enabled*`). Fix by qualifying (`state/app-state`) or passing as parameter (better architecture). Circular deps mean you need to redesign — pass the atom in, extract the pure core.
-
 ### :fix-declares / :fix-declares! — Eliminate unnecessary declares
 
 ```bash
@@ -62,6 +60,33 @@ clj-surgeon :op :ls :file src/writer/state.clj
 ```
 
 Returns: `{:ns :lines :form-count :forms [{:type :name :line :end-line :args}] :forward-refs [...]}`
+
+### :ls-tree / :tree / :map — Map an entire directory tree of repos
+
+```bash
+# Map a single project
+clj-surgeon :op :ls-tree :dir .
+
+# THE KILLER FEATURE: surgical cross-repo search
+clj-surgeon :op :ls-tree :dir ~/src.local/ :grep "postgres|jdbc|next.jdbc"
+
+# EDN output for machine consumption
+clj-surgeon :op :ls-tree :dir . :format :edn
+```
+
+Discovers projects via `deps.edn`/`project.clj`/`bb.edn`, reads their `:paths`, outlines every `.clj/.cljs/.cljc` file. Returns ns names, requires, and all form signatures.
+
+**With `:grep`:** Uses ripgrep to find matching files first (~0.3s), then only parses those. Turns "search 4,444 files" from 90 seconds into 3 seconds.
+
+**When to reach for this:**
+- "Which of my repos does X?" (cross-repo capability discovery)
+- "What's the API surface of this project?" (onboarding)
+- "What depends on library Y?" (impact analysis)
+- Any time you'd spawn an Explore agent to scan multiple directories
+
+**Performance:** Single repo: 0.25s. 10 repos: 1.3s. `:grep` across 4,444 files: 3.4s.
+
+**Requires ripgrep (rg) for `:grep` fast path.** Falls back to system grep if not installed (much slower). Install: `brew install ripgrep`.
 
 ### :ls-deps — Transitive dependency tree
 
@@ -162,9 +187,6 @@ clj-surgeon :op :extract :file state.clj \
   :forms '[form1 form2 form3]' :to src/writer/state/distillery.clj
 clj-surgeon :op :extract! :file state.clj \
   :forms '[form1 form2 form3]' :to src/writer/state/distillery.clj
-
-# 5. Compiler catches bare refs — fix them, then:
-make runtests-once
 ```
 
 ### Eliminate unnecessary declares
@@ -172,7 +194,6 @@ make runtests-once
 ```bash
 clj-surgeon :op :fix-declares :file state.clj     # plan
 clj-surgeon :op :fix-declares! :file state.clj    # execute
-make runtests-once                                  # verify
 ```
 
 ### Orient before reading a large file
