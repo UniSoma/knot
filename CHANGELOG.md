@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+- **`--closure <id>[,<id>…]` on `list` / `ready` / `blocked` / `closed`.**
+  Filters to the undirected transitive closure of the seed(s) over the
+  `:parent`, `:deps`, and `:links` axes — every ticket reachable by walking
+  those edges in both directions. Multi-seed is a union (comma-separated or
+  repeatable); `--via parent,deps,links` narrows participating axes (default
+  all three). Seeds resolve like `--parent` (partial ids; `not_found` /
+  `ambiguous_id` envelopes under `--json`). The closure is computed over the
+  full corpus (archive included); each command's normal display filter still
+  governs what's shown, and the flag composes with every other filter.
+  Output is plain — no extra columns or JSON fields. See ADR 0010.
+
 ## [0.7.0] - 2026-06-19
 
 ### Added

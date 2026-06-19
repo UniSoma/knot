@@ -228,12 +228,16 @@
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
+                  {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
+                  {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot list --mode afk --tag p0"
                    :note "Show afk-mode tickets tagged p0."}
                   {:cmd "knot list --parent kno-01abc"
                    :note "Show the direct children of kno-01abc."}
+                  {:cmd "knot list --closure kno-01abc --via parent,deps"
+                   :note "Show live tickets related to kno-01abc through parent/deps edges."}
                   {:cmd "knot list --acceptance-complete=false"
                    :note "Show tickets with at least one undone acceptance criterion."}]}
 
@@ -372,6 +376,8 @@
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
+                  {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
+                  {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot ready --mode afk"
@@ -394,6 +400,8 @@
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
+                  {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
+                  {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot blocked"
@@ -418,6 +426,8 @@
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter by priority 0-4 (repeatable)."}
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
+                  {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
+                  {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot closed --limit 10"

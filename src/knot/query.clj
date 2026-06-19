@@ -374,3 +374,46 @@
                         (recur (pop stack) (assoc color node :black) cycles)))))]
             (recur (rest remaining) color* cycles*)))
         cycles))))
+
+(defn closure-set
+  "Return the set of ticket ids in the undirected transitive closure of
+   `seed-ids` over the relationship `axes` (a subset of #{:parent :deps
+   :links}), computed across the full `tickets` corpus.
+
+   Each axis contributes undirected edges: `:parent` links a ticket to its
+   parent (and so, in reverse, to its children), `:deps` links a ticket to
+   each blocker (and to its dependents), `:links` to each linked ticket.
+   The walk is symmetric in all three.
+
+   Membership is graph-faithful regardless of status. A seed that resolves
+   to a known ticket is always included; an isolated seed yields a
+   singleton. Edges to ids absent from the corpus (broken refs) are dropped
+   from membership, and cycles are guarded by the visited set, so the walk
+   terminates on any input shape."
+  [tickets seed-ids axes]
+  (let [known (into #{} (map #(get-in % [:frontmatter :id])) tickets)
+        out   (fn [fm]
+                (cond-> []
+                  (contains? axes :parent) (into (when-let [p (:parent fm)] [p]))
+                  (contains? axes :deps)   (into (:deps fm))
+                  (contains? axes :links)  (into (:links fm))))
+        adj   (reduce (fn [m t]
+                        (let [fm (:frontmatter t)
+                              id (:id fm)]
+                          (reduce (fn [m* nbr]
+                                    (if (contains? known nbr)
+                                      (-> m*
+                                          (update id (fnil conj #{}) nbr)
+                                          (update nbr (fnil conj #{}) id))
+                                      m*))
+                                  m
+                                  (out fm))))
+                      {}
+                      tickets)]
+    (loop [stack (vec (filter known seed-ids))
+           seen  #{}]
+      (if-let [node (peek stack)]
+        (if (contains? seen node)
+          (recur (pop stack) seen)
+          (recur (into (pop stack) (get adj node)) (conj seen node)))
+        seen))))

@@ -3010,3 +3010,180 @@
         (is (zero? exit))
         (is (= [] issues)
             (str "no unknown_id issues attributable to the deleted target; got " issues))))))
+
+(deftest closure-filter-end-to-end-test
+  (testing "list --closure pulls in relatives across parent/deps/links, excludes unrelated"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)
+            {c-out :out} (run-knot tmp "create" "Child" "--parent" umbrella)
+            child        (id-of-create c-out)
+            {d-out :out} (run-knot tmp "create" "Depends on umbrella")
+            dependent    (id-of-create d-out)
+            {l-out :out} (run-knot tmp "create" "Linked to child")
+            linked       (id-of-create l-out)]
+        (run-knot tmp "dep" dependent umbrella)
+        (run-knot tmp "link" linked child)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--closure" umbrella)]
+          (is (zero? exit) (str "list --closure err=" err))
+          (is (str/includes? out "Umbrella"))
+          (is (str/includes? out "Child"))
+          (is (str/includes? out "Depends on umbrella")
+              "a ticket depending on the seed is in the closure")
+          (is (str/includes? out "Linked to child")
+              "a ticket linked to a member is in the closure")
+          (is (not (str/includes? out "Unrelated")))))))
+
+  (testing "list --closure resolves a partial (suffix) seed id"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)
+            suffix       (subs umbrella (inc (str/index-of umbrella "-")))]
+        (run-knot tmp "create" "Child" "--parent" umbrella)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--closure" suffix)]
+          (is (zero? exit) (str "list --closure <suffix> err=" err))
+          (is (str/includes? out "Child"))
+          (is (not (str/includes? out "Unrelated")))))))
+
+  (testing "list --closure multi-seed (comma) is the union of each seed's closure"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Tree A root")
+            a-root       (id-of-create a-out)
+            {b-out :out} (run-knot tmp "create" "Tree B root")
+            b-root       (id-of-create b-out)]
+        (run-knot tmp "create" "A child" "--parent" a-root)
+        (run-knot tmp "create" "B child" "--parent" b-root)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]}
+              (run-knot tmp "list" "--closure" (str a-root "," b-root))]
+          (is (zero? exit) (str "list --closure a,b err=" err))
+          (is (str/includes? out "A child"))
+          (is (str/includes? out "B child"))
+          (is (not (str/includes? out "Unrelated")))))))
+
+  (testing "--via narrows the closure to the listed axes"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)
+            {d-out :out} (run-knot tmp "create" "Depends on umbrella")
+            dependent    (id-of-create d-out)]
+        (run-knot tmp "create" "Child" "--parent" umbrella)
+        (run-knot tmp "dep" dependent umbrella)
+        (let [{:keys [exit out err]}
+              (run-knot tmp "list" "--closure" umbrella "--via" "parent")]
+          (is (zero? exit) (str "list --closure --via parent err=" err))
+          (is (str/includes? out "Child") "parent-axis member retained")
+          (is (not (str/includes? out "Depends on umbrella"))
+              "deps-axis member excluded when --via is parent only")))))
+
+  (testing "--closure composes with --type and the --json shape is unchanged"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)]
+        (run-knot tmp "create" "Bug child" "--parent" umbrella "--type" "bug")
+        (run-knot tmp "create" "Task child" "--parent" umbrella "--type" "task")
+        (testing "text: --type narrows the closure result"
+          (let [{:keys [exit out err]}
+                (run-knot tmp "list" "--closure" umbrella "--type" "bug")]
+            (is (zero? exit) (str "list --closure --type err=" err))
+            (is (str/includes? out "Bug child"))
+            (is (not (str/includes? out "Task child")))))
+        (testing "json: rows carry no extra closure fields"
+          (let [{:keys [exit out]} (run-knot tmp "list" "--closure" umbrella "--json")
+                rows (json/parse-string (str/trim out) true)
+                row  (first (get rows :data))]
+            (is (zero? exit))
+            (is (map? row))
+            (is (nil? (:closure_via row)) "no closure annotation leaks into JSON")
+            (is (nil? (:closure_distance row))))))))
+
+  (testing "--closure traverses the archive: a closed seed reaches its open relatives"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)
+            {g-out :out} (run-knot tmp "create" "Grandchild")
+            grandchild   (id-of-create g-out)]
+        ;; child links umbrella<->grandchild, then child is closed (archived).
+        ;; A live-only walk would halt at the archived child and miss the
+        ;; grandchild; full-corpus traversal must still reach it.
+        (let [{c-out :out} (run-knot tmp "create" "Mid child" "--parent" umbrella)
+              child        (id-of-create c-out)]
+          (run-knot tmp "update" grandchild "--parent" child)
+          (run-knot tmp "close" child "--summary" "shipped"))
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--closure" umbrella)]
+          (is (zero? exit) (str "list --closure (archived hop) err=" err))
+          (is (str/includes? out "Grandchild")
+              "closure reaches a live grandchild through an archived child")))))
+
+  (testing "--closure works on ready, blocked, and closed"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)
+            {bk-out :out} (run-knot tmp "create" "Blocker child" "--parent" umbrella)
+            blocker      (id-of-create bk-out)
+            {bd-out :out} (run-knot tmp "create" "Blocked child" "--parent" umbrella)
+            blocked      (id-of-create bd-out)]
+        (run-knot tmp "dep" blocked blocker)
+        (run-knot tmp "create" "Ready non-member")
+        (let [{:keys [out]} (run-knot tmp "ready" "--closure" umbrella)]
+          (is (str/includes? out "Blocker child") "ready member of the closure")
+          (is (not (str/includes? out "Ready non-member"))))
+        (let [{:keys [out]} (run-knot tmp "blocked" "--closure" umbrella)]
+          (is (str/includes? out "Blocked child"))
+          (is (not (str/includes? out "Blocker child"))))
+        (run-knot tmp "close" blocker "--summary" "shipped")
+        (let [{:keys [out]} (run-knot tmp "closed" "--closure" umbrella)]
+          (is (str/includes? out "Blocker child")
+              "closed --closure surfaces an archived member of the closure")))))
+
+  (testing "--closure on an unknown seed dies in text mode (exit 1, stderr)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "list" "--closure" "kno-ghost")]
+        (is (= 1 exit))
+        (is (str/blank? out) "no rows printed when a seed fails to resolve")
+        (is (str/includes? err "kno-ghost")))))
+
+  (testing "--closure --json on an unknown seed emits a not_found envelope on stdout"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]}
+            (run-knot tmp "list" "--closure" "kno-ghost" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err) "envelope routes to stdout")
+        (is (= false (:ok parsed)))
+        (is (= "not_found" (get-in parsed [:error :code]))))))
+
+  (testing "--closure --json on an ambiguous seed emits an ambiguous_id envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc111111--a.md"))
+            "---\nid: kno-01abc111111\nstatus: open\n---\n\n# A\n")
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--b.md"))
+            "---\nid: kno-01abc222222\nstatus: open\n---\n\n# B\n")
+      (let [{:keys [exit out err]}
+            (run-knot tmp "list" "--closure" "kno-01abc" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (str/blank? err))
+        (is (= false (:ok parsed)))
+        (is (= "ambiguous_id" (get-in parsed [:error :code]))))))
+
+  (testing "an empty --closure seed is rejected at parse (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "list" "--closure" "")]
+        (is (= 1 exit))
+        (is (str/includes? err "--closure")))))
+
+  (testing "an unknown --via axis is rejected at parse (exit 1)"
+    (with-tmp tmp
+      (let [{u-out :out} (run-knot tmp "create" "Umbrella")
+            umbrella     (id-of-create u-out)]
+        (let [{:keys [exit err]}
+              (run-knot tmp "list" "--closure" umbrella "--via" "bogus")]
+          (is (= 1 exit))
+          (is (str/includes? err "--via")))))))

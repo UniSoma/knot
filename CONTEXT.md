@@ -44,6 +44,10 @@ A live ticket with at least one non-terminal `:deps` entry.
 A live or archived ticket that names another ticket's id in any of its relationship fields (`:parent`, `:deps`, `:links`). The inverse of those three fields, viewed from the referenced ticket's side. Surfaced by `knot delete <id>` as the `has_incoming_refs` envelope: a target's referrers either block the bare delete or get rewritten by `--cascade`.
 _Avoid_: "incoming ref" (non-noun, splits the vocabulary), "blocker" (that's a `:deps` semantic specifically), "back-reference" (drifts toward implementation).
 
+**Closure**:
+The undirected transitive closure of one or more seed tickets over the `:parent`, `:deps`, and `:links` axes — every ticket reachable from a seed by walking any of those edges in either direction, plus the seeds themselves. Computed over the full corpus (archive included) so the membership set is graph-faithful regardless of status; per-command display filters then decide which members appear. Surfaced as `--closure <id>[,<id>…]` on `list`/`ready`/`closed`/`blocked`, with `--via parent,deps,links` to narrow the participating axes.
+_Avoid_: "subgraph" (drifts toward implementation), "neighborhood" (suggests 1-hop), "related set" / "connected component" (loses the transitive-from-a-seed framing).
+
 ## Relationships
 
 - **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; **release-tag smoke** runs post-push on tag. All three are independent gates with distinct triggers and consumers — none implies the other.

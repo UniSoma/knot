@@ -411,32 +411,66 @@
           [:status :assignee :tag :type :mode :priority :acceptance-complete
            :parent]))
 
+(defn- resolve-id-list!
+  "Resolve every raw id string in `raws` to its canonical full id via the
+   standard partial-id resolution (live+archive), returning the vector of
+   resolved ids. A value that does not resolve fails loudly: under
+   `--json` it emits the same not_found / ambiguous_id error envelopes as
+   `show` (exit 1); otherwise it dies on stderr (exit 1). Shared by the
+   `--parent` and `--closure` list filters."
+  [ctx raws json?]
+  (mapv (fn [v]
+          (try
+            (get-in (store/resolve-id (:project-root ctx)
+                                      (:tickets-dir ctx) v)
+                    [:frontmatter :id])
+            (catch clojure.lang.ExceptionInfo e
+              (let [data (ex-data e)]
+                (cond
+                  (and json? (= :ambiguous (:kind data)))
+                  (emit-ambiguous-envelope! e data)
+                  (and json? (= :not-found (:kind data)))
+                  (emit-not-found-envelope! v)
+                  :else (die (str "knot: " (.getMessage e))))))))
+        raws))
+
 (defn- resolve-parent-filter!
-  "Resolve every `--parent` value in `opts` to its canonical full id via
-   the standard partial-id resolution (live+archive), returning `opts`
-   with `:parent` replaced by the vector of resolved ids. This is the
-   only list filter whose values resolve, so it happens in the handler
-   before `filter-opts-from-cli` projection. A value that does not
-   resolve fails loudly: under `--json` it emits the same not_found /
-   ambiguous_id error envelopes as `show` (exit 1); otherwise it dies on
-   stderr (exit 1). No-op when no `--parent` was given."
+  "Resolve every `--parent` value in `opts` to its canonical full id,
+   returning `opts` with `:parent` replaced by the vector of resolved ids.
+   This filter's values resolve, so it happens in the handler before
+   `filter-opts-from-cli` projection. No-op when no `--parent` was given."
   [ctx opts json?]
   (if-let [vs (seq (:parent opts))]
-    (assoc opts :parent
-           (mapv (fn [v]
-                   (try
-                     (get-in (store/resolve-id (:project-root ctx)
-                                               (:tickets-dir ctx) v)
-                             [:frontmatter :id])
-                     (catch clojure.lang.ExceptionInfo e
-                       (let [data (ex-data e)]
-                         (cond
-                           (and json? (= :ambiguous (:kind data)))
-                           (emit-ambiguous-envelope! e data)
-                           (and json? (= :not-found (:kind data)))
-                           (emit-not-found-envelope! v)
-                           :else (die (str "knot: " (.getMessage e))))))))
-                 vs))
+    (assoc opts :parent (resolve-id-list! ctx vs json?))
+    opts))
+
+(def ^:private closure-axes
+  "The relationship axes `--closure` can walk; also the legal `--via` values."
+  #{"parent" "deps" "links"})
+
+(defn- resolve-closure-filter!
+  "When `--closure` is present in `opts`, resolve its (comma-split,
+   repeatable) seed ids to canonical full ids and parse `--via` into the
+   axis-keyword set the closure walk uses (default: all three). Returns
+   `opts` with `:closure` replaced by the resolved id vector and `:via`
+   set to the axis-keyword set. Rejects an empty seed list at parse and
+   dies on an unknown `--via` axis. No-op when `--closure` was not given."
+  [ctx opts json?]
+  (if (contains? opts :closure)
+    (let [seeds    (mapcat split-tags (:closure opts))
+          _        (when (empty? seeds)
+                     (die "knot: --closure requires at least one id"))
+          axes-raw (mapcat split-tags (:via opts))
+          bad      (seq (remove closure-axes axes-raw))
+          _        (when bad
+                     (die (str "knot: --via must be any of parent,deps,links; got "
+                               (str/join "," bad))))
+          axes     (if (seq axes-raw)
+                     (into #{} (map keyword) axes-raw)
+                     #{:parent :deps :links})]
+      (assoc opts
+             :closure (resolve-id-list! ctx (vec seeds) json?)
+             :via     axes))
     opts))
 
 (defn- show-handler [argv]
@@ -467,6 +501,7 @@
         json?    (boolean (:json opts))
         ctx      (discover-ctx)
         opts     (resolve-parent-filter! ctx opts json?)
+        opts     (resolve-closure-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -476,8 +511,9 @@
                                 {:json?  json?
                                  :tty?   tty?
                                  :color? color?})
-                   (:limit opts) (assoc :limit (:limit opts))
-                   tty?          (assoc :width (output/terminal-width)))
+                   (:limit opts)   (assoc :limit (:limit opts))
+                   (:closure opts) (assoc :closure (:closure opts) :via (:via opts))
+                   tty?            (assoc :width (output/terminal-width)))
         out      (cli/ls-cmd ctx ls-opts)]
     (println-out out)))
 
@@ -670,6 +706,7 @@
         json?    (boolean (:json opts))
         ctx      (discover-ctx)
         opts     (resolve-parent-filter! ctx opts json?)
+        opts     (resolve-closure-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -679,8 +716,9 @@
                                 {:json?  json?
                                  :tty?   tty?
                                  :color? color?})
-                   (:limit opts) (assoc :limit (:limit opts))
-                   tty?          (assoc :width (output/terminal-width)))
+                   (:limit opts)   (assoc :limit (:limit opts))
+                   (:closure opts) (assoc :closure (:closure opts) :via (:via opts))
+                   tty?            (assoc :width (output/terminal-width)))
         out      (list-fn ctx cmd-opts)]
     (println-out out)))
 

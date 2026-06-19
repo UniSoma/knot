@@ -555,3 +555,87 @@
                 :acceptance [{:title "x" :done true}])]
       (is (true? (query/ready-to-close? t "active")))
       (is (false? (query/ready-to-close? t "in_progress"))))))
+
+(defn- ct
+  "Closure-test ticket fixture: id plus optional :parent / :deps / :links."
+  [id & {:as extras}]
+  {:frontmatter (merge {:id id :status "open"} extras)})
+
+(deftest closure-set-test
+  (testing "undirected parent axis: seed reaches both its parent and its children"
+    (let [tickets [(ct "root")
+                   (ct "mid"  :parent "root")
+                   (ct "leaf" :parent "mid")]]
+      (is (= #{"root" "mid" "leaf"}
+             (query/closure-set tickets ["mid"] #{:parent :deps :links}))))))
+
+(deftest closure-set-deps-axis-test
+  (testing "undirected deps axis: seed reaches both its blockers and its dependents"
+    (let [tickets [(ct "blocker")
+                   (ct "mid" :deps ["blocker"])
+                   (ct "dependent" :deps ["mid"])]]
+      (is (= #{"blocker" "mid" "dependent"}
+             (query/closure-set tickets ["mid"] #{:parent :deps :links}))))))
+
+(deftest closure-set-links-axis-test
+  (testing "links axis is symmetric: only one side declares the link"
+    (let [tickets [(ct "a" :links ["b"])
+                   (ct "b")
+                   (ct "c")]]
+      (is (= #{"a" "b"}
+             (query/closure-set tickets ["b"] #{:parent :deps :links}))
+          "b reaches a even though only a declares the :links edge"))))
+
+(deftest closure-set-transitive-mixed-axes-test
+  (testing "closure walks transitively across a mix of parent/deps/links edges"
+    (let [tickets [(ct "p")
+                   (ct "child" :parent "p")
+                   (ct "dep" :deps ["child"])
+                   (ct "link" :links ["dep"])
+                   (ct "island")]]
+      (is (= #{"p" "child" "dep" "link"}
+             (query/closure-set tickets ["p"] #{:parent :deps :links}))))))
+
+(deftest closure-set-multi-seed-union-test
+  (testing "multi-seed closure is the union of each seed's closure"
+    (let [tickets [(ct "a1") (ct "a2" :parent "a1")
+                   (ct "b1") (ct "b2" :deps ["b1"])
+                   (ct "lonely")]]
+      (is (= #{"a1" "a2" "b1" "b2"}
+             (query/closure-set tickets ["a1" "b2"] #{:parent :deps :links}))))))
+
+(deftest closure-set-cycle-guard-test
+  (testing "a cycle in the deps graph terminates and yields every node once"
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["c"])
+                   (ct "c" :deps ["a"])]]
+      (is (= #{"a" "b" "c"}
+             (query/closure-set tickets ["a"] #{:parent :deps :links}))))))
+
+(deftest closure-set-broken-ref-test
+  (testing "edges to ids absent from the corpus are dropped from membership"
+    (let [tickets [(ct "a" :deps ["ghost"] :parent "phantom" :links ["void"])]]
+      (is (= #{"a"}
+             (query/closure-set tickets ["a"] #{:parent :deps :links}))
+          "broken refs do not appear as members and do not extend the walk"))))
+
+(deftest closure-set-via-narrowing-test
+  (let [tickets [(ct "root")
+                 (ct "child" :parent "root")
+                 (ct "dep" :deps ["root"])
+                 (ct "link" :links ["root"])]]
+    (testing ":via parent only ignores deps and links edges"
+      (is (= #{"root" "child"}
+             (query/closure-set tickets ["root"] #{:parent}))))
+    (testing ":via deps only ignores parent and links edges"
+      (is (= #{"root" "dep"}
+             (query/closure-set tickets ["root"] #{:deps}))))
+    (testing ":via parent,deps still ignores links"
+      (is (= #{"root" "child" "dep"}
+             (query/closure-set tickets ["root"] #{:parent :deps}))))))
+
+(deftest closure-set-isolated-seed-test
+  (testing "an isolated seed yields a singleton of itself"
+    (let [tickets [(ct "lonely") (ct "other" :parent "elsewhere")]]
+      (is (= #{"lonely"}
+             (query/closure-set tickets ["lonely"] #{:parent :deps :links}))))))

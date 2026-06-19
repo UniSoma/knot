@@ -1148,6 +1148,20 @@
         [:status :assignee :tag :type :mode :priority :acceptance-complete
          :parent]))
 
+(defn- closure-filter
+  "When `opts` carries resolved `:closure` seed ids, restrict `tickets` to
+   members of the undirected transitive closure of those seeds over the
+   `:via` axes (default: all three), computed across the full `corpus`.
+   No-op when `:closure` is absent. The corpus, not `tickets`, drives the
+   walk so membership stays graph-faithful regardless of each command's
+   display filter."
+  [tickets corpus opts]
+  (if-let [seeds (seq (:closure opts))]
+    (let [members (query/closure-set corpus seeds
+                                     (or (:via opts) #{:parent :deps :links}))]
+      (filter #(contains? members (get-in % [:frontmatter :id])) tickets))
+    tickets))
+
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
    means no limit — return `xs` unchanged. Any other value (including 0
@@ -1238,7 +1252,7 @@
         base     (if (contains? criteria :status)
                    all
                    (query/non-terminal all terminal-statuses))
-        visible  (query/filter-tickets base criteria)
+        visible  (query/filter-tickets (closure-filter base all opts) criteria)
         result   (annotate-children-progress (apply-limit visible (:limit opts))
                                              all terminal-statuses)]
     (if (:json? opts)
@@ -1368,7 +1382,8 @@
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         ready*   (query/ready all terminal-statuses)
-        filtered (query/filter-tickets ready* (filter-criteria opts))
+        filtered (query/filter-tickets (closure-filter ready* all opts)
+                                       (filter-criteria opts))
         result   (annotate-children-progress (apply-limit filtered (:limit opts))
                                              all terminal-statuses)]
     (if (:json? opts)
@@ -1407,7 +1422,8 @@
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         terminal (filter (partial closed? terminal-statuses) all)
-        filtered (query/filter-tickets terminal (filter-criteria opts))
+        filtered (query/filter-tickets (closure-filter terminal all opts)
+                                       (filter-criteria opts))
         sorted   (sort by-closed-desc filtered)
         result   (annotate-children-progress (apply-limit sorted (:limit opts))
                                              all terminal-statuses)]
@@ -1429,7 +1445,8 @@
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         blocked* (query/blocked all terminal-statuses)
-        filtered (query/filter-tickets blocked* (filter-criteria opts))
+        filtered (query/filter-tickets (closure-filter blocked* all opts)
+                                       (filter-criteria opts))
         result   (annotate-children-progress (apply-limit filtered (:limit opts))
                                              all terminal-statuses)]
     (if (:json? opts)

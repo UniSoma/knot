@@ -133,6 +133,22 @@ It is repeatable (children of any given parent), and its value resolves like
 any partial id (live+archive) — an unresolvable value fails loudly (stderr
 die, or a `not_found` / `ambiguous_id` envelope under `--json`).
 
+`--closure <id>[,<id>…]` filters to the **undirected transitive closure** of
+the seed(s) — every ticket reachable from a seed by walking `:parent`,
+`:deps`, and `:links` edges in *both* directions, recursively (the seed
+itself is included). Use it for "everything related to this ticket," where
+`--parent` (1 hop, children only) and `dep tree` (directed `:deps` only) stop
+short. Available on the same four listing commands. Multi-seed is a **union**
+(comma-separated or repeatable). `--via <axes>` (comma-separated subset of
+`parent,deps,links`, default all three) narrows which edge types the walk
+follows — e.g. `--via parent,deps` to skip the noisier `:links` axis. The
+closure is computed over the full corpus (archive included) so it never halts
+at a closed ticket, but each command's normal display filter still governs
+what's shown (`list` defaults to live, `closed` to terminal). It composes
+with every other filter (`--type`, `--status`, `--limit`, `--json`); output
+is a plain list — no extra columns or JSON fields. Seeds resolve like
+`--parent` (partial ids, loud failure on no/ambiguous match).
+
 **Umbrella progress (`CHLD`).** When a result set contains at least one
 *umbrella* (a ticket with ≥1 direct child), the four listing commands add a
 `CHLD` column showing `terminal/total` of that ticket's direct children
@@ -147,7 +163,8 @@ re-deriving the rollup from `--parent` queries.
 
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
 afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
-`knot closed --type bug --limit 5`, `knot list --parent kno-01abc`.
+`knot closed --type bug --limit 5`, `knot list --parent kno-01abc`,
+`knot list --closure kno-01abc --via parent,deps`.
 On `prime`, filters apply across **all** sections (in_progress + ready +
 recently_closed) — `knot prime --assignee me` shows only your tickets
 everywhere. Visual filtering is error-prone (titles wrap, columns shift,
@@ -627,7 +644,8 @@ remote id like `GH-482`, `ENG-1234`), use the tool they named.
 init / prime / info                    project setup, agent context primer,
                                        runtime config + allowed values
 list (alias ls) / show                 read live; show one
-ready / blocked / closed               backlog views (--limit + full filter set)
+ready / blocked / closed               backlog views (--limit + full filter
+                                       set; --parent, --closure/--via)
 check                                  project-integrity scan (cycles, dangling
                                        refs, schema, archive placement)
 create                                 new ticket (-t -p -a --tags --mode
