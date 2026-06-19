@@ -205,15 +205,25 @@ empty input is a silent no-op.
 
 The `f` transient (`knot-list-filter`) scopes the active view via the
 same flags the CLI accepts: `m` mode, `t` type, `s` status, `T` tag,
-`a` assignee, `p` priority (0..4), `P` parent, `l` limit, `A`
-acceptance-complete, `C` clear all. Empty input on any prompt clears
-the filter for that dimension.
+`a` assignee, `p` priority (0..4), `P` parent, `c` closure, `l` limit,
+`A` acceptance-complete, `R` clear all. Empty input on any prompt
+clears the filter for that dimension. Every filter composes
+(intersects) with the rest and shows in the header-line as
+`<flag>=<value>`.
 
 The `P` parent prompt offers only umbrella tickets (those with
 children, the same signal as the `CHLD` column) and, when point is on
 an umbrella row, pre-fills that row's id so `,P RET` filters to it
 immediately. `C-u ,P` widens the candidates to include
 closed/archived umbrellas.
+
+The `c` closure filter takes no prompt: it scopes the view to the
+undirected transitive closure of seed tickets over parent/deps/links
+— "everything related to these tickets." Seeds are the marked rows in
+display order if any, otherwise the ticket under point (the same
+marks-or-cursor rule the bulk operations use); any ticket is a valid
+seed. It renders as `closure=<seeds>` in the header-line. `C-u c`
+clears only the closure filter, leaving other active filters intact.
 
 ### Doom Emacs
 

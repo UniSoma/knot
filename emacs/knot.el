@@ -703,7 +703,7 @@ the boolean `acceptance-complete' filter).  Filters with nil or
 empty-string values are treated as unset.")
 
 (defconst knot-list--filter-keys
-  '(mode type status tag assignee priority parent limit acceptance-complete)
+  '(mode type status tag assignee priority parent closure limit acceptance-complete)
   "Filter keys accepted by the list views, in display order.")
 
 (defconst knot-list--filter-cli-flags
@@ -714,6 +714,7 @@ empty-string values are treated as unset.")
     (assignee            . "--assignee")
     (priority            . "--priority")
     (parent              . "--parent")
+    (closure             . "--closure")
     (limit               . "--limit")
     (acceptance-complete . "--acceptance-complete"))
   "Map from filter key to the CLI flag string.")
@@ -1448,6 +1449,23 @@ immediately.  Deleting the text and RET clears the filter."
             include-closed nil t))
   (knot-list--render))
 
+(defun knot-list-filter-set-closure (&optional clear)
+  "Scope the active view to the closure of the current marks-or-cursor seeds.
+Seeds are read from buffer context, never typed: the marked
+tickets in display order if any, otherwise the ticket under point
+— the same rule every bulk operation uses (see
+`knot-update--ticket-ids').  The view is filtered to the
+undirected transitive closure of those seeds over
+parent/deps/links; the CLI default of all three axes applies
+\(`--via' is not surfaced).  With a prefix argument,
+\\[universal-argument], clear only the closure filter, leaving
+other active filters intact."
+  (interactive "P")
+  (knot-list--set-filter
+   'closure (and (not clear)
+                 (string-join (knot-update--ticket-ids) ",")))
+  (knot-list--render))
+
 (defun knot-list-clear-filters ()
   "Clear every active filter on the current list buffer and re-render."
   (interactive)
@@ -1458,8 +1476,9 @@ immediately.  Deleting the text and RET clears the filter."
   "Filter the active list view.
 
 Each suffix prompts for the matching CLI filter value, updates
-the buffer-local filter state, and re-renders.  `C' clears every
-filter at once."
+the buffer-local filter state, and re-renders.  `c' scopes the
+view to the closure of the marks-or-cursor seeds (no prompt;
+`C-u c' clears it).  `R' clears every filter at once."
   ["Filter"
    ("m" "mode"                  knot-list-filter-set-mode)
    ("t" "type"                  knot-list-filter-set-type)
@@ -1468,10 +1487,11 @@ filter at once."
    ("a" "assignee"              knot-list-filter-set-assignee)
    ("p" "priority"              knot-list-filter-set-priority)
    ("P" "parent"                knot-list-filter-set-parent)
+   ("c" "closure"               knot-list-filter-set-closure)
    ("l" "limit"                 knot-list-filter-set-limit)
    ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
   ["Other"
-   ("C" "clear all"             knot-list-clear-filters)])
+   ("R" "clear all"             knot-list-clear-filters)])
 
 
 ;;;; Sort transient (knot-list module)
