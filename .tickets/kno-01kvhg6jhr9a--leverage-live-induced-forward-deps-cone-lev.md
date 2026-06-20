@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: afk
 created: '2026-06-20T03:11:44.184346537Z'
-updated: '2026-06-20T03:11:44.184346537Z'
+updated: '2026-06-20T03:54:52.192400745Z'
 tags:
 - leverage
 - graph
@@ -22,6 +22,8 @@ acceptance:
   done: false
 - title: bb test and clj-kondo --lint src test are clean
   done: false
+links:
+- kno-01kvhjnhxcam
 ---
 
 ## Description
