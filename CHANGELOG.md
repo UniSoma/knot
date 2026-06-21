@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+## [0.8.0] - 2026-06-21
+
+### Added
+
+- **`LEV` + `CPL` columns and `leverage` / `coupling` JSON on `list` /
+  `ready` / `blocked`.** Two live-induced graph metrics now surface beside
+  each row. `LEV` (leverage, ADR 0011) is the size of the ticket's
+  transitive reverse-`:deps` cone over live tickets — how many open tickets
+  would be unblocked downstream — computed cycle-guarded, with closed nodes
+  severing the cone, broken refs dropped, and the row itself excluded.
+  `CPL` (coupling, ADR 0012) is the ticket's 1-hop undirected degree: the
+  count of distinct live neighbors reached via `:deps` (both directions) or
+  `:links`, deduped across axes, with `:parent` excluded and closed
+  neighbors still counted. Both render as integer columns between `AC` and
+  `TITLE` in the text tables and as the `leverage` / `coupling` integers
+  under `--json`. New `knot.query` primitives back both metrics.
 - **`--closure <id>[,<id>…]` on `list` / `ready` / `blocked` / `closed`.**
   Filters to the undirected transitive closure of the seed(s) over the
   `:parent`, `:deps`, and `:links` axes — every ticket reachable by walking
@@ -26,6 +42,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   full corpus (archive included); each command's normal display filter still
   governs what's shown, and the flag composes with every other filter.
   Output is plain — no extra columns or JSON fields. See ADR 0010.
+- **`knot.el`: `LEV` / `CPL` columns and a closure filter.** The Emacs
+  client tracks the CLI: `LEV` and `CPL` columns in the `knot-list` buffer
+  (read from `leverage` / `coupling`), and a closure arm in the `knot-list`
+  filter transient that scopes the active view to the undirected closure of
+  the marked tickets (or the ticket at point when none are marked), mapping
+  to `--closure` and composing with every other filter across
+  `list` / `ready` / `blocked`.
 
 ## [0.7.0] - 2026-06-19
 
