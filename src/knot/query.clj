@@ -417,3 +417,66 @@
           (recur (pop stack) seen)
           (recur (into (pop stack) (get adj node)) (conj seen node)))
         seen))))
+
+(defn leverage
+  "Count of LIVE tickets that transitively depend on `id` through `:deps`
+   (the directed reverse-:deps cone), computed over the live-induced deps
+   subgraph. A closed (terminal) intermediary is NON-CONDUCTIVE: it severs
+   the cone, so dependents reachable only through it are not counted, and a
+   closed node is never tallied. The row `id` itself is excluded.
+
+   Cycles are guarded by a visited set and broken refs (deps pointing at
+   ids absent from the corpus) are dropped — same conventions as
+   `closure-set`/`dep-tree`."
+  [tickets id terminal-statuses]
+  (let [index      (index-by-id tickets)
+        ;; reverse-:deps adjacency over known ids only (broken refs dropped):
+        ;; dependents[d] = ids of tickets that list d in their :deps
+        dependents (reduce (fn [m t]
+                             (let [tid (get-in t [:frontmatter :id])]
+                               (reduce (fn [m* d]
+                                         (if (get index d)
+                                           (update m* d (fnil conj #{}) tid)
+                                           m*))
+                                       m
+                                       (deps-of t))))
+                           {}
+                           tickets)]
+    (loop [stack (vec (get dependents id))
+           seen  #{}]
+      (if-let [node (peek stack)]
+        (cond
+          (contains? seen node)
+          (recur (pop stack) seen)
+          ;; closed intermediary severs the cone: mark seen as a cycle guard
+          ;; but do not traverse through it (its own dependents are unreached
+          ;; via this path) and do not tally it (count is live-only).
+          (terminal-status? terminal-statuses (dep-status index node))
+          (recur (pop stack) (conj seen node))
+          :else
+          (recur (into (pop stack) (get dependents node)) (conj seen node)))
+        (count (filter #(and (not= % id)
+                             (live? terminal-statuses (get index %)))
+                       seen))))))
+
+(defn coupling
+  "Count of DISTINCT LIVE tickets `id` is directly connected to at one hop
+   through `:deps` (in EITHER direction) or `:links` — the undirected 1-hop
+   degree over those two axes, computed on the live-induced graph.
+
+   `:parent` is excluded. Both directions of `:deps` count: forward
+   `(:deps fm)` plus reverse (tickets that list `id` in their own `:deps`).
+   Neighbors are deduped across axes, so a pair joined by BOTH a dep and a
+   link counts once. Closed (terminal) neighbors and broken refs (ids absent
+   from the corpus) are dropped, and `id` itself is never counted."
+  [tickets id terminal-statuses]
+  (let [index        (index-by-id tickets)
+        fm           (:frontmatter (get index id))
+        forward      (concat (:deps fm) (:links fm))
+        reverse-deps (map #(get-in % [:frontmatter :id]) (blocking tickets id))
+        neighbors    (disj (into #{} (concat forward reverse-deps)) id)]
+    (->> neighbors
+         (map index)
+         (filter some?)
+         (filter #(live? terminal-statuses %))
+         count)))

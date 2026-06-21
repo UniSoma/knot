@@ -639,3 +639,107 @@
     (let [tickets [(ct "lonely") (ct "other" :parent "elsewhere")]]
       (is (= #{"lonely"}
              (query/closure-set tickets ["lonely"] #{:parent :deps :links}))))))
+
+(deftest leverage-test
+  (testing "keystone cone size: transitive reverse-:deps reach, all live"
+    ;; a -> b -> c (a deps b, b deps c). c's cone is {a b} => 2.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["c"])
+                   (ct "c")]]
+      (is (= 2 (query/leverage tickets "c" #{"closed"})))
+      (is (= 1 (query/leverage tickets "b" #{"closed"})))
+      (is (= 0 (query/leverage tickets "a" #{"closed"}))
+          "a deps-leaf with no dependents has leverage 0")))
+
+  (testing "live-induced severing: a closed intermediary cuts the cone"
+    ;; a -> b(closed) -> c. b severs, so a is unreachable through b and b is
+    ;; not tallied => c's leverage is 0.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :status "closed" :deps ["c"])
+                   (ct "c")]]
+      (is (= 0 (query/leverage tickets "c" #{"closed"})))))
+
+  (testing "closed dependents are not tallied"
+    ;; a(closed) deps c directly. a is reachable but not live => 0.
+    (let [tickets [(ct "a" :status "closed" :deps ["c"])
+                   (ct "c")]]
+      (is (= 0 (query/leverage tickets "c" #{"closed"})))))
+
+  (testing "deps-leaf with a large cone: many tickets depend on one keystone"
+    (let [tickets [(ct "a" :deps ["x"])
+                   (ct "b" :deps ["x"])
+                   (ct "c" :deps ["x"])
+                   (ct "d" :deps ["x"])
+                   (ct "x")]]
+      (is (= 4 (query/leverage tickets "x" #{"closed"})))))
+
+  (testing "broken refs are dropped (no crash, not counted)"
+    (let [tickets [(ct "a" :deps ["ghost"])
+                   (ct "x")]]
+      (is (= 0 (query/leverage tickets "x" #{"closed"}))
+          "a dep on a missing id never reaches x")
+      (is (= 0 (query/leverage tickets "a" #{"closed"}))
+          "a's only dep is broken; a has no live dependents")))
+
+  (testing "cycle guard: a deps b, b deps a terminates and excludes self"
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["a"])]]
+      (is (= 1 (query/leverage tickets "a" #{"closed"}))
+          "a reaches b (live); a itself is excluded from the tally")))
+
+  (testing "diamond: a live path survives even when a parallel path is severed"
+    ;; top depends on both mid-open and mid-closed; both depend on base.
+    ;; base reaches top via the open mid; the closed mid contributes nothing.
+    (let [tickets [(ct "top" :deps ["mid-open" "mid-closed"])
+                   (ct "mid-open" :deps ["base"])
+                   (ct "mid-closed" :status "closed" :deps ["base"])
+                   (ct "base")]]
+      (is (= 2 (query/leverage tickets "base" #{"closed"}))
+          "base's live cone is {mid-open top}; mid-closed severs its own path"))))
+
+(deftest coupling-test
+  (testing "both directions of :deps count"
+    ;; a deps b; c deps a. a's neighbors are {b (forward) c (reverse)} => 2.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b")
+                   (ct "c" :deps ["a"])]]
+      (is (= 2 (query/coupling tickets "a" #{"closed"})))
+      (is (= 1 (query/coupling tickets "b" #{"closed"})))
+      (is (= 1 (query/coupling tickets "c" #{"closed"})))))
+
+  (testing ":links count as undirected edges"
+    (let [tickets [(ct "a" :links ["b"])
+                   (ct "b")]]
+      (is (= 1 (query/coupling tickets "a" #{"closed"})))))
+
+  (testing "deps and links union dedup: a pair joined by both counts once"
+    ;; a deps b AND a links b => b is one distinct neighbor, not two.
+    (let [tickets [(ct "a" :deps ["b"] :links ["b"])
+                   (ct "b")]]
+      (is (= 1 (query/coupling tickets "a" #{"closed"})))))
+
+  (testing ":parent edges are excluded"
+    ;; child has parent p; p has child child. Neither carries a :deps/:links
+    ;; edge to the other, so coupling is 0 on both.
+    (let [tickets [(ct "p")
+                   (ct "child" :parent "p")]]
+      (is (= 0 (query/coupling tickets "p" #{"closed"})))
+      (is (= 0 (query/coupling tickets "child" #{"closed"})))))
+
+  (testing "closed neighbors are excluded (live-induced)"
+    ;; a deps b(closed) and links c(open). Only c counts => 1.
+    (let [tickets [(ct "a" :deps ["b"] :links ["c"])
+                   (ct "b" :status "closed")
+                   (ct "c")]]
+      (is (= 1 (query/coupling tickets "a" #{"closed"})))))
+
+  (testing "broken refs are dropped"
+    (let [tickets [(ct "a" :deps ["ghost"] :links ["b"])
+                   (ct "b")]]
+      (is (= 1 (query/coupling tickets "a" #{"closed"}))
+          "the dep on a missing id is dropped; only b counts")))
+
+  (testing "isolated node has coupling 0"
+    (let [tickets [(ct "a")
+                   (ct "b")]]
+      (is (= 0 (query/coupling tickets "a" #{"closed"}))))))
