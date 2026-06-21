@@ -721,6 +721,82 @@
       (is (not (re-find #"\bCHLD\b" first-line))
           "no CHLD header when no ticket carries :children-progress"))))
 
+(def ^:private sample-ls-tickets-with-leverage
+  "Rows carry a top-level :leverage int, mirroring how the cli annotates
+   list/ready/blocked rows. First row leverage 3, second leverage 0."
+  [(assoc (first sample-ls-tickets) :leverage 3)
+   (assoc (second sample-ls-tickets) :leverage 0)])
+
+(deftest ls-table-lev-column-shown-when-leverage-attached-test
+  (testing "LEV column header appears when at least one ticket carries :leverage"
+    (let [out (output/ls-table sample-ls-tickets-with-leverage {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bLEV\b" first-line)
+          "LEV header surfaces when any input ticket has :leverage attached")))
+
+  (testing "LEV sits before TITLE and after ASSIGNEE"
+    (let [out (output/ls-table sample-ls-tickets-with-leverage {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          assignee-i (str/index-of first-line "ASSIGNEE")
+          lev-i      (str/index-of first-line "LEV")
+          title-i    (str/index-of first-line "TITLE")]
+      (is (every? some? [assignee-i lev-i title-i]))
+      (is (< assignee-i lev-i title-i)
+          "LEV sits between ASSIGNEE and TITLE")))
+
+  (testing "leverage values render as integers, including 0"
+    (let [out   (output/ls-table sample-ls-tickets-with-leverage {:color? false :tty? false})
+          lines (str/split-lines out)
+          line1 (some (fn [l] (when (str/includes? l "kno-01abcd0001") l)) lines)
+          line2 (some (fn [l] (when (str/includes? l "kno-01abcd0002") l)) lines)]
+      (is (re-find #"\b3\b" line1) "row with leverage 3 renders 3")
+      (is (re-find #"\b0\b" line2) "row with leverage 0 renders 0, not a dash"))))
+
+(deftest ls-table-lev-column-omitted-when-no-leverage-test
+  (testing "LEV column header is absent when no input ticket carries :leverage"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bLEV\b" first-line))
+          "no LEV header when no ticket carries :leverage (e.g. closed listing)"))))
+
+(def ^:private sample-ls-tickets-with-coupling
+  "Rows carry top-level :leverage and :coupling ints, mirroring how the cli
+   annotates list/ready/blocked rows. First row coupling 2, second coupling 0."
+  [(assoc (first sample-ls-tickets) :leverage 3 :coupling 2)
+   (assoc (second sample-ls-tickets) :leverage 0 :coupling 0)])
+
+(deftest ls-table-cpl-column-shown-when-coupling-attached-test
+  (testing "CPL column header appears when at least one ticket carries :coupling"
+    (let [out (output/ls-table sample-ls-tickets-with-coupling {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bCPL\b" first-line)
+          "CPL header surfaces when any input ticket has :coupling attached")))
+
+  (testing "CPL sits immediately after LEV and before TITLE"
+    (let [out (output/ls-table sample-ls-tickets-with-coupling {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          lev-i   (str/index-of first-line "LEV")
+          cpl-i   (str/index-of first-line "CPL")
+          title-i (str/index-of first-line "TITLE")]
+      (is (every? some? [lev-i cpl-i title-i]))
+      (is (< lev-i cpl-i title-i)
+          "CPL sits between LEV and TITLE")))
+
+  (testing "coupling values render as integers, including 0"
+    (let [out   (output/ls-table sample-ls-tickets-with-coupling {:color? false :tty? false})
+          lines (str/split-lines out)
+          line1 (some (fn [l] (when (str/includes? l "kno-01abcd0001") l)) lines)
+          line2 (some (fn [l] (when (str/includes? l "kno-01abcd0002") l)) lines)]
+      (is (re-find #"\b2\b" line1) "row with coupling 2 renders 2")
+      (is (re-find #"\b0\b" line2) "row with coupling 0 renders 0, not a dash"))))
+
+(deftest ls-table-cpl-column-omitted-when-no-coupling-test
+  (testing "CPL column header is absent when no input ticket carries :coupling"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bCPL\b" first-line))
+          "no CPL header when no ticket carries :coupling (e.g. closed listing)"))))
+
 (deftest ls-table-age-column-header-test
   (testing "AGE column header appears in ls-table output"
     (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
@@ -920,6 +996,38 @@
       (is (not (contains? leaf :children_total))
           "non-umbrella rows carry no children_total (doubles as the predicate)")
       (is (not (contains? leaf :children_terminal))))))
+
+(deftest ls-json-leverage-test
+  (testing "rows with :leverage attached emit a leverage integer (including 0)"
+    (let [tickets [(assoc {:frontmatter {:id "x" :status "open"} :body ""} :leverage 3)
+                   (assoc {:frontmatter {:id "y" :status "open"} :body ""} :leverage 0)]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a b]   (:data parsed)]
+      (is (= 3 (:leverage a)))
+      (is (= 0 (:leverage b)) "leverage 0 is emitted, not omitted")))
+
+  (testing "rows without :leverage attached carry no leverage key (show/closed parity)"
+    (let [tickets [{:frontmatter {:id "x" :status "open"} :body ""}]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a]     (:data parsed)]
+      (is (not (contains? a :leverage))
+          "absent :leverage means no JSON field — keeps closed/show byte-unchanged"))))
+
+(deftest ls-json-coupling-test
+  (testing "rows with :coupling attached emit a coupling integer (including 0)"
+    (let [tickets [(assoc {:frontmatter {:id "x" :status "open"} :body ""} :coupling 2)
+                   (assoc {:frontmatter {:id "y" :status "open"} :body ""} :coupling 0)]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a b]   (:data parsed)]
+      (is (= 2 (:coupling a)))
+      (is (= 0 (:coupling b)) "coupling 0 is emitted, not omitted")))
+
+  (testing "rows without :coupling attached carry no coupling key (show/closed parity)"
+    (let [tickets [{:frontmatter {:id "x" :status "open"} :body ""}]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a]     (:data parsed)]
+      (is (not (contains? a :coupling))
+          "absent :coupling means no JSON field — keeps closed/show byte-unchanged"))))
 
 (deftest colorize-test
   (testing "with color? false, returns the text unchanged"

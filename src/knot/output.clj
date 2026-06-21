@@ -204,14 +204,21 @@
    `json-vector-default-keys` are appended as `[]` at the end of the map
    (JSON object key order is non-semantic) so consumers can iterate
    without `null[]` errors."
-  [{:keys [frontmatter body children-progress] :as _ticket} {:keys [include-body?]
-                                                             :or {include-body? true}}]
-  (let [[term total] children-progress]
+  [{:keys [frontmatter body children-progress leverage coupling] :as ticket} {:keys [include-body?]
+                                                                              :or {include-body? true}}]
+  (let [[term total] children-progress
+        ;; `:leverage`/`:coupling` are attached top-level only by
+        ;; list/ready/blocked; show, touched-mutators and closed never attach
+        ;; them, so those outputs stay byte-unchanged.
+        has-leverage? (contains? ticket :leverage)
+        has-coupling? (contains? ticket :coupling)]
     (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
                     frontmatter
                     json-vector-default-keys)
       include-body?     (assoc :body body)
-      children-progress (assoc :children_total total :children_terminal term))))
+      children-progress (assoc :children_total total :children_terminal term)
+      has-leverage?     (assoc :leverage leverage)
+      has-coupling?     (assoc :coupling coupling))))
 
 (defn- jsonify-inverse-entry
   "Project an inverse-section entry into the JSON shape: resolved entries
@@ -301,21 +308,33 @@
 (def ^:private ls-chld-column
   {:key :children :header "CHLD" :align :left})
 
+(def ^:private ls-lev-column
+  {:key :leverage :header "LEV" :align :right})
+
+(def ^:private ls-cpl-column
+  {:key :coupling :header "CPL" :align :right})
+
 (defn- ls-columns-for
-  "Return the column list for `tickets`. AGE is always present. The AC and
-   CHLD columns are independently spliced in immediately before TITLE — AC
-   when at least one ticket carries `(seq :acceptance)`, CHLD when at least
-   one ticket is an umbrella (carries `:children-progress`). Layout is
-   `AGE, [AC], [CHLD], TITLE`; either omitted column makes its header and
-   slot disappear, so quiet projects see neither."
+  "Return the column list for `tickets`. AGE is always present. The AC,
+   CHLD, LEV and CPL columns are independently spliced in immediately before
+   TITLE — AC when at least one ticket carries `(seq :acceptance)`, CHLD
+   when at least one ticket is an umbrella (carries `:children-progress`),
+   LEV when at least one ticket carries an attached `:leverage` value, CPL
+   when at least one ticket carries an attached `:coupling` value.
+   Layout is `AGE, [AC], [CHLD], [LEV], [CPL], TITLE`; any omitted column
+   makes its header and slot disappear, so quiet projects see none."
   [tickets]
   (let [ac?       (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
         umbrella? (some :children-progress tickets)
+        lev?      (some #(contains? % :leverage) tickets)
+        cpl?      (some #(contains? % :coupling) tickets)
         head      (vec (butlast ls-columns-base))
         title-col (last ls-columns-base)
         extra     (cond-> []
                     ac?       (conj ls-ac-column)
-                    umbrella? (conj ls-chld-column))]
+                    umbrella? (conj ls-chld-column)
+                    lev?      (conj ls-lev-column)
+                    cpl?      (conj ls-cpl-column))]
     (if (seq extra)
       (conj (into head extra) title-col)
       ls-columns-base)))
@@ -338,6 +357,8 @@
     :children (if-let [[term total] (:children-progress ticket)]
                 (str term "/" total)
                 "-")
+    :leverage (if-let [n (:leverage ticket)] (str n) "-")
+    :coupling (if-let [n (:coupling ticket)] (str n) "-")
     :age (format-age-days (:age-days ticket))
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))

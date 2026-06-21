@@ -274,6 +274,31 @@
               (pos? total) (assoc :children-progress cp))))
         tickets))
 
+(defn- annotate-leverage
+  "Attach `:leverage <int>` to each ticket in `tickets` — the count of live
+   tickets that transitively depend on it through `:deps`, computed over the
+   live-induced deps subgraph of `corpus`. Used by list/ready/blocked only,
+   so the top-level `:leverage` key drives both the LEV column and the
+   `leverage` JSON field while leaving closed/show byte-unchanged."
+  [tickets corpus terminal-statuses]
+  (mapv (fn [t]
+          (assoc t :leverage
+                 (query/leverage corpus (get-in t [:frontmatter :id]) terminal-statuses)))
+        tickets))
+
+(defn- annotate-coupling
+  "Attach `:coupling <int>` to each ticket in `tickets` — the count of
+   distinct live tickets it is directly connected to through `:deps` (either
+   direction) or `:links`, computed over the live-induced graph of `corpus`.
+   Used by list/ready/blocked only, so the top-level `:coupling` key drives
+   both the CPL column and the `coupling` JSON field while leaving
+   closed/show byte-unchanged."
+  [tickets corpus terminal-statuses]
+  (mapv (fn [t]
+          (assoc t :coupling
+                 (query/coupling corpus (get-in t [:frontmatter :id]) terminal-statuses)))
+        tickets))
+
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. `:id` may be partial — `store/resolve-id`
@@ -1253,8 +1278,10 @@
                    all
                    (query/non-terminal all terminal-statuses))
         visible  (query/filter-tickets (closure-filter base all opts) criteria)
-        result   (annotate-children-progress (apply-limit visible (:limit opts))
-                                             all terminal-statuses)]
+        result   (-> (apply-limit visible (:limit opts))
+                     (annotate-children-progress all terminal-statuses)
+                     (annotate-leverage all terminal-statuses)
+                     (annotate-coupling all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1384,8 +1411,10 @@
         ready*   (query/ready all terminal-statuses)
         filtered (query/filter-tickets (closure-filter ready* all opts)
                                        (filter-criteria opts))
-        result   (annotate-children-progress (apply-limit filtered (:limit opts))
-                                             all terminal-statuses)]
+        result   (-> (apply-limit filtered (:limit opts))
+                     (annotate-children-progress all terminal-statuses)
+                     (annotate-leverage all terminal-statuses)
+                     (annotate-coupling all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1447,8 +1476,10 @@
         blocked* (query/blocked all terminal-statuses)
         filtered (query/filter-tickets (closure-filter blocked* all opts)
                                        (filter-criteria opts))
-        result   (annotate-children-progress (apply-limit filtered (:limit opts))
-                                             all terminal-statuses)]
+        result   (-> (apply-limit filtered (:limit opts))
+                     (annotate-children-progress all terminal-statuses)
+                     (annotate-leverage all terminal-statuses)
+                     (annotate-coupling all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)

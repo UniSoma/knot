@@ -1,12 +1,13 @@
 ---
 id: kno-01kvhg6jhr9a
 title: 'Leverage: live-induced forward deps cone (LEV column + JSON) on list/ready/blocked'
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-06-20T03:11:44.184346537Z'
-updated: '2026-06-20T03:54:52.192400745Z'
+updated: '2026-06-20T04:24:24.528634758Z'
+closed: '2026-06-20T04:24:24.528634758Z'
 tags:
 - leverage
 - graph
@@ -38,3 +39,9 @@ Add a structural **leverage** metric per ADR 0011: the count of live tickets tha
 - Sync .claude/skills/knot/SKILL.md (LEV column + leverage JSON field) in the same commit.
 
 Deferred to v2 (out of scope, additive, no ADR revisit): --sort leverage; knot.el row heat-coloring; knot serve node-colored graph.
+
+## Notes
+
+**2026-06-20T04:24:24.528634758Z**
+
+Implemented LEV column + leverage JSON integer on list/ready/blocked per ADR 0011. New query/leverage primitive: live-induced transitive reverse-:deps cone, closed node severs the cone, cycle-guarded, broken refs dropped, row excluded. Presence-gated column (output.clj) + annotate-leverage wired only into list/ready/blocked (cli.clj); closed/show/dep-tree/check byte-unchanged. Tests in query_test/output_test/json_contract_test. SKILL.md synced. bb test (436/5112, 0 fail) + clj-kondo clean.

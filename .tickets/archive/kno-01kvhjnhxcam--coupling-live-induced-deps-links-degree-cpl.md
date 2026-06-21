@@ -1,12 +1,13 @@
 ---
 id: kno-01kvhjnhxcam
 title: 'Coupling: live-induced :deps+:links degree (CPL column + JSON) on list/ready/blocked'
-status: open
+status: closed
 type: task
 priority: 2
 mode: afk
 created: '2026-06-20T03:54:52.192400745Z'
-updated: '2026-06-20T03:54:52.192400745Z'
+updated: '2026-06-20T04:24:24.625438299Z'
+closed: '2026-06-20T04:24:24.625438299Z'
 tags:
 - coupling
 - graph
@@ -38,3 +39,9 @@ Add a structural **coupling** metric per ADR 0012: the count of distinct live ti
 - Sync .claude/skills/knot/SKILL.md (CPL column + coupling JSON field) in the same commit.
 
 Deferred to v2 (out of scope, additive, no ADR revisit): articulation-point flag (prescriptive cut-finder); local-clustering refinement for degree star-blindness; --sort coupling; knot.el row heat-coloring.
+
+## Notes
+
+**2026-06-20T04:24:24.625438299Z**
+
+Implemented CPL column + coupling JSON integer on list/ready/blocked per ADR 0012, beside LEV. New query/coupling primitive: 1-hop undirected :deps(both directions via blocking)∪:links distinct-live-neighbor count, :parent excluded, deduped across axes, closed neighbors + broken refs dropped. Presence-gated column after LEV (output.clj) + annotate-coupling wired only into list/ready/blocked (cli.clj); closed/non-listing byte-unchanged. Tests in query_test/output_test/json_contract_test. SKILL.md synced. bb test (436/5112, 0 fail) + clj-kondo clean.

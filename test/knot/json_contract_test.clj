@@ -830,7 +830,11 @@
         (is (every? map? (:data envelope)))
         (doseq [t (:data envelope)]
           (assert-ticket-payload-shape!
-           t (str "list --json " (:id t)) {:body? false}))))
+           t (str "list --json " (:id t)) {:body? false})
+          (is (integer? (:leverage t))
+              "list rows carry a leverage integer")
+          (is (integer? (:coupling t))
+              "list rows carry a coupling integer"))))
 
     (testing "ready --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "ready" "--json")
@@ -839,7 +843,11 @@
         (is (seq (:data envelope)))
         (doseq [t (:data envelope)]
           (assert-ticket-payload-shape!
-           t (str "ready --json " (:id t)) {:body? false}))))
+           t (str "ready --json " (:id t)) {:body? false})
+          (is (integer? (:leverage t))
+              "ready rows carry a leverage integer")
+          (is (integer? (:coupling t))
+              "ready rows carry a coupling integer"))))
 
     (testing "blocked --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "blocked" "--json")
@@ -848,7 +856,11 @@
         (is (seq (:data envelope)))
         (doseq [t (:data envelope)]
           (assert-ticket-payload-shape!
-           t (str "blocked --json " (:id t)) {:body? false}))))
+           t (str "blocked --json " (:id t)) {:body? false})
+          (is (integer? (:leverage t))
+              "blocked rows carry a leverage integer")
+          (is (integer? (:coupling t))
+              "blocked rows carry a coupling integer"))))
 
     (testing "closed --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "closed" "--json")
@@ -859,7 +871,11 @@
           (assert-ticket-payload-shape!
            t (str "closed --json " (:id t)) {:body? false})
           (is (string? (:closed t))
-              "closed-shape entries additionally carry :closed timestamp"))))))
+              "closed-shape entries additionally carry :closed timestamp")
+          (is (not (contains? t :leverage))
+              "closed rows carry NO leverage field — not on closed in v1")
+          (is (not (contains? t :coupling))
+              "closed rows carry NO coupling field — not on closed in v1"))))))
 
 (deftest data-shape-show-test
   ;; Pin AC#2 for show --json: single object envelope. Body included.

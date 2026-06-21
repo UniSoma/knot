@@ -161,6 +161,31 @@ can still be `ready`. In `--json`, umbrella rows carry
 `jq 'select(has("children_total"))'` selects them); read these instead of
 re-deriving the rollup from `--parent` queries.
 
+**Leverage (`LEV`).** `list`/`ready`/`blocked` (NOT `closed`) carry a `LEV`
+column: the count of *live* tickets that transitively depend on the row
+through `:deps` — its forward unblocking cone, computed over the
+*live-induced* deps subgraph. A closed intermediary is non-conductive and
+**severs** the cone (its dependents are not reached through it, and it is not
+tallied); cycles are guarded and broken refs dropped; the row itself is
+excluded. High `LEV` flags a keystone — closing it unblocks the most work.
+It is independent of readiness: a deps-leaf can be both `ready` and
+highest-leverage. The column is always present on those three listings (`-`
+never appears; a leaf shows `0`). In `--json`, those rows carry a `leverage`
+integer; `closed --json`, `show`, and all non-listing commands omit it.
+
+**Coupling (`CPL`).** `list`/`ready`/`blocked` (NOT `closed`) carry a `CPL`
+column beside `LEV`: the count of *distinct live* tickets the row is directly
+connected to at one hop through `:deps` (in **either** direction) or `:links`
+— its undirected 1-hop degree over those two axes, computed over the
+*live-induced* graph. `:parent` is excluded (that rollup is `CHLD`); neighbors
+are deduped across axes (a pair joined by both a dep and a link counts once);
+closed neighbors and broken refs are dropped; the row itself is never counted.
+High `CPL` flags a tangled, high-context ticket. It is 1-hop only (no
+transitive walk). The column is always present on those three listings (`-`
+never appears; an isolated ticket shows `0`). In `--json`, those rows carry a
+`coupling` integer; `closed --json`, `show`, and all non-listing commands omit
+it.
+
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
 afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
 `knot closed --type bug --limit 5`, `knot list --parent kno-01abc`,
