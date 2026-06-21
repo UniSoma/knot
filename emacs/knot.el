@@ -996,6 +996,8 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
          ("Age"       5 t)
          ("AC"        5 t)
          ("CHLD"      5 t)
+         ("LEV"       4 t :right-align t)
+         ("CPL"       4 t :right-align t)
          ("Title"     0 t)])
   (setq tabulated-list-padding 1)
   ;; `tabulated-list-sort-key' is set per-render from
@@ -1232,6 +1234,8 @@ is conceptually different across views."
                   age-cell
                   ac-cell
                   chld-cell
+                  (knot-list--metric-cell row 'leverage)
+                  (knot-list--metric-cell row 'coupling)
                   title))))
 
 (defun knot-list--ac-cell (row)
@@ -1243,6 +1247,14 @@ Empty acceptance lists render as \"-\"."
               (done  (cl-count-if (lambda (a) (alist-get 'done a)) ac)))
           (format "%d/%d" done total))
       "-")))
+
+(defun knot-list--metric-cell (row field)
+  "Return ROW's integer FIELD (`leverage'/`coupling') as text, else \"-\".
+The CLI emits these scalars only on list/ready/blocked rows; closed
+rows omit them, so an absent field renders \"-\".  A present value
+(including 0) renders as its integer."
+  (let ((v (alist-get field row)))
+    (if (numberp v) (number-to-string v) "-")))
 
 (defun knot-list--chld-cell (row)
   "Return the CHLD column text for ROW.
