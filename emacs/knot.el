@@ -703,7 +703,7 @@ the boolean `acceptance-complete' filter).  Filters with nil or
 empty-string values are treated as unset.")
 
 (defconst knot-list--filter-keys
-  '(mode type status tag assignee priority parent closure limit acceptance-complete)
+  '(mode type status tag assignee priority parent closure component limit acceptance-complete)
   "Filter keys accepted by the list views, in display order.")
 
 (defconst knot-list--filter-cli-flags
@@ -715,19 +715,22 @@ empty-string values are treated as unset.")
     (priority            . "--priority")
     (parent              . "--parent")
     (closure             . "--closure")
+    (component           . "--component")
     (limit               . "--limit")
     (acceptance-complete . "--acceptance-complete"))
   "Map from filter key to the CLI flag string.")
 
-(defun knot-list--view-accepts-p (_view _key)
+(defun knot-list--view-accepts-p (view key)
   "Return non-nil when VIEW accepts filter KEY.
-For slice 2 every view accepts every filter; the hook stays to
-let later slices degrade gracefully when CLI flag surfaces
-diverge (see kno-01kreh3g266x AC #4).  `parent' does not exercise
-this hook: --parent is accepted by all four list views (list,
-ready, blocked, closed); only `prime' lacks it, and `prime' is
-not a list view this transient drives."
-  t)
+Every view accepts every filter except `component', which the CLI
+exposes only on list/ready/blocked (the closed command has no
+--component; ADR 0014).  So a `component' filter carried into the
+closed view is pruned by `knot-list--effective-filters' here and
+silently restored on return to a live view.  `parent' does not
+exercise this divergence: --parent is accepted by all four list
+views; only `prime' lacks it, and `prime' is not a list view this
+transient drives."
+  (not (and (eq view 'closed) (eq key 'component))))
 
 (defun knot-list--filter-string-value (value)
   "Return VALUE as a non-empty filter string, or nil when unset."
@@ -987,7 +990,8 @@ clears active filters; `o' opens the sort transient; `g' re-fetches.
 
 \\{knot-list-mode-map}"
   (setq tabulated-list-format
-        [("ID"       17 t)
+        [("CC"        4 t)
+         ("ID"       17 t)
          ("Status"   13 t)
          ("Pri"       4 t :right-align t)
          ("Mode"      5 t)
@@ -1225,7 +1229,8 @@ is conceptually different across views."
          (ac-cell   (knot-list--ac-cell row))
          (chld-cell (knot-list--chld-cell row)))
     (list id
-          (vector (knot-format-propertize id 'knot-id)
+          (vector (knot-list--metric-cell row 'cc)
+                  (knot-format-propertize id 'knot-id)
                   (knot-format-status status)
                   (knot-format-priority priority)
                   (knot-format-mode mode)
@@ -1249,10 +1254,12 @@ Empty acceptance lists render as \"-\"."
       "-")))
 
 (defun knot-list--metric-cell (row field)
-  "Return ROW's integer FIELD (`leverage'/`coupling') as text, else \"-\".
+  "Return ROW's integer FIELD (`leverage'/`coupling'/`cc') as text, else \"-\".
 The CLI emits these scalars only on list/ready/blocked rows; closed
 rows omit them, so an absent field renders \"-\".  A present value
-(including 0) renders as its integer."
+(including 0) renders as its integer.  `cc' additionally carries an
+explicit null for singleton components, which renders \"-\" the same
+way an absent field does."
   (let ((v (alist-get field row)))
     (if (numberp v) (number-to-string v) "-")))
 
@@ -1469,14 +1476,45 @@ tickets in display order if any, otherwise the ticket under point
 `knot-update--ticket-ids').  The view is filtered to the
 undirected transitive closure of those seeds over
 parent/deps/links; the CLI default of all three axes applies
-\(`--via' is not surfaced).  With a prefix argument,
-\\[universal-argument], clear only the closure filter, leaving
-other active filters intact."
+\(`--via' is not surfaced).  Setting closure clears any active
+component filter (the two are mutually exclusive in the CLI).
+With a prefix argument, \\[universal-argument], clear only the
+closure filter, leaving other active filters intact."
   (interactive "P")
+  (unless clear
+    (knot-list--set-filter 'component nil))
   (knot-list--set-filter
    'closure (and (not clear)
                  (string-join (knot-update--ticket-ids) ",")))
   (knot-list--render))
+
+(defun knot-list-filter-set-component (&optional clear)
+  "Scope the active view to the live-induced component of one seed.
+The seed is read from buffer context, never typed: the ticket
+under point, or the single marked ticket.  Unlike `--closure',
+`--component' takes exactly one id, so more than one mark is
+ambiguous and refuses with a message (unmark to a single seed
+first).  The view is filtered to the seed's live-induced
+connected component over parent/deps/links (closed
+non-conductive; ADR 0014).  `--component' is unavailable in the
+closed view (the CLI rejects it there) — pressing this there is a
+no-op with a message.  Setting component clears any active
+closure filter (the two are mutually exclusive in the CLI).  With
+a prefix argument, \\[universal-argument], clear only the
+component filter, leaving other active filters intact."
+  (interactive "P")
+  (cond
+   (clear
+    (knot-list--set-filter 'component nil)
+    (knot-list--render))
+   ((eq knot-list--view 'closed)
+    (message "knot: --component is not available in the closed view"))
+   ((> (length knot-list--marks) 1)
+    (message "knot: --component takes a single seed; unmark to one row"))
+   (t
+    (knot-list--set-filter 'closure nil)
+    (knot-list--set-filter 'component (car (knot-update--ticket-ids)))
+    (knot-list--render))))
 
 (defun knot-list-clear-filters ()
   "Clear every active filter on the current list buffer and re-render."
@@ -1489,8 +1527,10 @@ other active filters intact."
 
 Each suffix prompts for the matching CLI filter value, updates
 the buffer-local filter state, and re-renders.  `c' scopes the
-view to the closure of the marks-or-cursor seeds (no prompt;
-`C-u c' clears it).  `R' clears every filter at once."
+view to the component of the single marks-or-cursor seed and `C'
+to the closure of the marks-or-cursor seeds (both no-prompt;
+`C-u c'/`C-u C' clear them; the two are mutually exclusive, so
+setting one clears the other).  `R' clears every filter at once."
   ["Filter"
    ("m" "mode"                  knot-list-filter-set-mode)
    ("t" "type"                  knot-list-filter-set-type)
@@ -1499,7 +1539,8 @@ view to the closure of the marks-or-cursor seeds (no prompt;
    ("a" "assignee"              knot-list-filter-set-assignee)
    ("p" "priority"              knot-list-filter-set-priority)
    ("P" "parent"                knot-list-filter-set-parent)
-   ("c" "closure"               knot-list-filter-set-closure)
+   ("c" "component"             knot-list-filter-set-component)
+   ("C" "closure"               knot-list-filter-set-closure)
    ("l" "limit"                 knot-list-filter-set-limit)
    ("A" "acceptance-complete"   knot-list-filter-set-acceptance-complete)]
   ["Other"
