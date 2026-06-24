@@ -16,6 +16,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+## [0.9.0] - 2026-06-24
+
+### Added
+
+- **`CC` column and `cc` JSON on `list` / `ready` / `blocked`.** A new
+  leading left-aligned column marks which connected component each ticket
+  belongs to in the **live-induced** graph (`:parent` ∪ `:deps` ∪ `:links`,
+  undirected, closed tickets non-conductive — same scope as `LEV`/`CPL`,
+  ADRs 0011/0012). Ordinals are size-descending over all live multi-member
+  components (largest = 1), ties broken by min member id, numbered globally
+  and filter-independently; singletons render `-`. The column appears only
+  when ≥1 visible row is in a multi-member component and vanishes when every
+  visible row is a singleton. `--json` emits `cc` on every `list` / `ready`
+  / `blocked` row (integer ordinal, `null` for singletons); `show`,
+  `closed`, and touched-mutator outputs stay byte-unchanged. A new
+  `knot.query` connected-components primitive backs it. See ADR 0013.
+- **`--component <id>` on `list` / `ready` / `blocked`.** The action
+  companion to the `CC` column: isolates the single live-induced connected
+  component containing the seed (all axes, undirected, closed
+  non-conductive). Single id only — never an ordinal — and the seed must be
+  live (closed seed fails fast). No `--via` (all axes always), and mutually
+  exclusive with `--closure` (fail-fast guard). Composes with
+  `--tag` / `--type` / `--mode` / `--limit`; membership is computed over the
+  full live corpus and is filter-independent. Not available on `closed`
+  (the archive has no live components). Distinct from the corpus-wide,
+  closed-conducting, `--via`-tunable, multi-seed `--closure` — see ADR 0014.
+- **`knot.el`: `CC` column and a `--component` filter.** The Emacs client
+  tracks the CLI: a leading always-on `CC` column in the `knot-list` buffer
+  (read from `cc`, `null`/singleton renders `-`), and a prompt-less
+  single-seed component filter (cursor or lone mark; >1 mark refuses). The
+  filter transient rebinds `c` → component and `C` → closure, with the two
+  arms auto-clearing each other; `C-u` clears, and `c` is a no-op with a
+  message in the closed view.
+
 ## [0.8.0] - 2026-06-21
 
 ### Added
