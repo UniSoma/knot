@@ -5320,3 +5320,53 @@ Restart the daemon.
       (let [result (cli/migrate-ac-cmd (ctx tmp) {})]
         (is (= 2 (:migrated result))
             "both live and archived tickets get migrated")))))
+
+(deftest component-filter-cli-test
+  (testing "--component on list isolates the seed's live component, excludes the rest"
+    (with-tmp tmp
+      (let [c        (ctx tmp)
+            a        (cli/create-cmd c {:title "Island A"})
+            b        (cli/create-cmd c {:title "Island B"})
+            _solo    (cli/create-cmd c {:title "Lonely solo"})
+            a-id     (id-of-created a "island-a")
+            b-id     (id-of-created b "island-b")
+            _ (cli/dep-cmd c {:from a-id :to b-id})
+            out (cli/ls-cmd c {:component a-id :tty? false :color? false})]
+        (is (str/includes? out "Island A"))
+        (is (str/includes? out "Island B") "the dep neighbor is in the component")
+        (is (not (str/includes? out "Lonely solo"))
+            "an unrelated ticket is excluded"))))
+
+  (testing "--component on a singleton seed returns just the seed"
+    (with-tmp tmp
+      (let [c     (ctx tmp)
+            solo  (cli/create-cmd c {:title "All alone"})
+            _othr (cli/create-cmd c {:title "Someone else"})
+            solo-id (id-of-created solo "all-alone")
+            out   (cli/ls-cmd c {:component solo-id :tty? false :color? false})]
+        (is (str/includes? out "All alone"))
+        (is (not (str/includes? out "Someone else"))))))
+
+  (testing "--component composes with --tag (component ∩ tag)"
+    (with-tmp tmp
+      (let [c    (ctx tmp)
+            a    (cli/create-cmd c {:title "Tagged member" :tags ["p0"]})
+            b    (cli/create-cmd c {:title "Untagged member"})
+            a-id (id-of-created a "tagged-member")
+            b-id (id-of-created b "untagged-member")
+            _ (cli/dep-cmd c {:from a-id :to b-id})
+            out (cli/ls-cmd c {:component a-id :tag #{"p0"}
+                               :tty? false :color? false})]
+        (is (str/includes? out "Tagged member"))
+        (is (not (str/includes? out "Untagged member"))
+            "the tag filter narrows the component set"))))
+
+  (testing "--component with a closed seed is a fail-fast error"
+    (with-tmp tmp
+      (let [c    (ctx tmp)
+            x    (cli/create-cmd c {:title "Will close"})
+            x-id (id-of-created x "will-close")
+            _ (cli/close-cmd c {:id x-id :summary "done"})]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"closed"
+             (cli/ls-cmd c {:component x-id :tty? false :color? false})))))))

@@ -230,6 +230,7 @@
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
                   {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
+                  {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot list --mode afk --tag p0"
@@ -238,6 +239,8 @@
                    :note "Show the direct children of kno-01abc."}
                   {:cmd "knot list --closure kno-01abc --via parent,deps"
                    :note "Show live tickets related to kno-01abc through parent/deps edges."}
+                  {:cmd "knot list --component kno-01abc"
+                   :note "Show the live cluster (same CC island) that kno-01abc sits on."}
                   {:cmd "knot list --acceptance-complete=false"
                    :note "Show tickets with at least one undone acceptance criterion."}]}
 
@@ -378,12 +381,15 @@
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
                   {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
+                  {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot ready --mode afk"
                    :note "Show afk-mode tickets ready to start."}
                   {:cmd "knot ready --parent kno-01abc"
-                   :note "Show ready direct children of kno-01abc."}]}
+                   :note "Show ready direct children of kno-01abc."}
+                  {:cmd "knot ready --component kno-01abc"
+                   :note "Show what in kno-01abc's live cluster is ready to start now."}]}
 
    :blocked
    {:group       :listing
@@ -402,6 +408,7 @@
                   {:name :parent   :coerce [] :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}
                   {:name :closure  :coerce [] :desc "Filter to tickets in the undirected transitive closure of the seed id(s) over parent, deps, and links (resolves partial ids; comma-separated or repeatable)."}
                   {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
+                  {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
     :examples    [{:cmd "knot blocked"
@@ -409,7 +416,9 @@
                   {:cmd "knot blocked --mode afk"
                    :note "Show afk-mode blocked tickets."}
                   {:cmd "knot blocked --parent kno-01abc"
-                   :note "Show blocked direct children of kno-01abc."}]}
+                   :note "Show blocked direct children of kno-01abc."}
+                  {:cmd "knot blocked --component kno-01abc"
+                   :note "Show what in kno-01abc's live cluster is currently blocked."}]}
 
    :closed
    {:group       :listing

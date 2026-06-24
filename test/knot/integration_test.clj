@@ -3187,3 +3187,155 @@
               (run-knot tmp "list" "--closure" umbrella "--via" "bogus")]
           (is (= 1 exit))
           (is (str/includes? err "--via")))))))
+
+(deftest component-filter-end-to-end-test
+  (testing "list --component isolates the seed's live component, excludes the rest"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Island anchor")
+            anchor       (id-of-create a-out)
+            {d-out :out} (run-knot tmp "create" "Depends on anchor")
+            dependent    (id-of-create d-out)
+            {l-out :out} (run-knot tmp "create" "Linked to anchor")
+            linked       (id-of-create l-out)]
+        (run-knot tmp "dep" dependent anchor)
+        (run-knot tmp "link" linked anchor)
+        (run-knot tmp "create" "Unrelated island")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--component" anchor)]
+          (is (zero? exit) (str "list --component err=" err))
+          (is (str/includes? out "Island anchor"))
+          (is (str/includes? out "Depends on anchor") "deps neighbor is in the component")
+          (is (str/includes? out "Linked to anchor") "links neighbor is in the component")
+          (is (not (str/includes? out "Unrelated island"))
+              "a ticket on a different island is excluded")))))
+
+  (testing "list --component on a singleton seed returns just the seed"
+    (with-tmp tmp
+      (let [{s-out :out} (run-knot tmp "create" "All alone")
+            solo         (id-of-create s-out)]
+        (run-knot tmp "create" "Someone else")
+        (let [{:keys [exit out]} (run-knot tmp "list" "--component" solo)]
+          (is (zero? exit))
+          (is (str/includes? out "All alone"))
+          (is (not (str/includes? out "Someone else")))))))
+
+  (testing "list --component resolves a partial (suffix) seed id"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)
+            suffix       (subs anchor (inc (str/index-of anchor "-")))
+            {d-out :out} (run-knot tmp "create" "Dependent")
+            dependent    (id-of-create d-out)]
+        (run-knot tmp "dep" dependent anchor)
+        (run-knot tmp "create" "Unrelated")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--component" suffix)]
+          (is (zero? exit) (str "list --component <suffix> err=" err))
+          (is (str/includes? out "Dependent"))
+          (is (not (str/includes? out "Unrelated")))))))
+
+  (testing "live-induced: a closed bridge severs the cluster (closed non-conductive)"
+    (with-tmp tmp
+      ;; anchor -links- mid, mid -links- far; close mid. anchor's live
+      ;; component is {anchor} only — far is unreachable through the closed mid.
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)
+            {m-out :out} (run-knot tmp "create" "Mid bridge")
+            mid          (id-of-create m-out)
+            {f-out :out} (run-knot tmp "create" "Far side")
+            far          (id-of-create f-out)]
+        (run-knot tmp "link" anchor mid)
+        (run-knot tmp "link" mid far)
+        (run-knot tmp "close" mid "--summary" "shipped")
+        (let [{:keys [exit out]} (run-knot tmp "list" "--component" anchor)]
+          (is (zero? exit))
+          (is (str/includes? out "Anchor"))
+          (is (not (str/includes? out "Far side"))
+              "the far side is in a different live component once the bridge closes")))))
+
+  (testing "--component composes with --type, and the --json cc shape is unchanged"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)
+            {b-out :out} (run-knot tmp "create" "Bug member" "--type" "bug")
+            bug          (id-of-create b-out)
+            {t-out :out} (run-knot tmp "create" "Task member" "--type" "task")
+            task         (id-of-create t-out)]
+        (run-knot tmp "dep" bug anchor)
+        (run-knot tmp "dep" task anchor)
+        (testing "text: --type narrows the component result"
+          (let [{:keys [exit out err]}
+                (run-knot tmp "list" "--component" anchor "--type" "bug")]
+            (is (zero? exit) (str "list --component --type err=" err))
+            (is (str/includes? out "Bug member"))
+            (is (not (str/includes? out "Task member")))))
+        (testing "json: rows carry the cc integer (filter does not alter output shape)"
+          (let [{:keys [exit out]} (run-knot tmp "list" "--component" anchor "--json")
+                rows (json/parse-string (str/trim out) true)
+                row  (first (get rows :data))]
+            (is (zero? exit))
+            (is (map? row))
+            (is (integer? (:cc row))
+                "the seed's component is multi-member, so cc is a global ordinal")
+            (is (nil? (:component row)) "no --component annotation leaks into JSON"))))))
+
+  (testing "--component works on ready and blocked"
+    (with-tmp tmp
+      (let [{bk-out :out} (run-knot tmp "create" "Blocker")
+            blocker       (id-of-create bk-out)
+            {bd-out :out} (run-knot tmp "create" "Blocked dependent")
+            blocked       (id-of-create bd-out)]
+        (run-knot tmp "dep" blocked blocker)
+        (run-knot tmp "create" "Ready non-member")
+        (run-knot tmp "create" "Blocked non-member")
+        (let [{:keys [out]} (run-knot tmp "ready" "--component" blocker)]
+          (is (str/includes? out "Blocker") "ready member of the component")
+          (is (not (str/includes? out "Ready non-member"))))
+        (let [{:keys [out]} (run-knot tmp "blocked" "--component" blocker)]
+          (is (str/includes? out "Blocked dependent"))
+          (is (not (str/includes? out "Blocker")) "blocker is ready, not blocked")
+          (is (not (str/includes? out "Blocked non-member")))))))
+
+  (testing "--component on a closed seed is a fail-fast error (exit 1, stderr)"
+    (with-tmp tmp
+      (let [{x-out :out} (run-knot tmp "create" "Will close")
+            x-id         (id-of-create x-out)]
+        (run-knot tmp "close" x-id "--summary" "done")
+        (let [{:keys [exit out err]} (run-knot tmp "list" "--component" x-id)]
+          (is (= 1 exit))
+          (is (str/blank? out) "no rows printed for a closed seed")
+          (is (str/includes? err "closed"))))))
+
+  (testing "--component together with --closure is a fail-fast error (exit 1)"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)]
+        (let [{:keys [exit err]}
+              (run-knot tmp "list" "--component" anchor "--closure" anchor)]
+          (is (= 1 exit))
+          (is (str/includes? err "--component"))
+          (is (str/includes? err "--closure"))))))
+
+  (testing "an ordinal is not accepted as a seed (a bare integer fails to resolve)"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)
+            {d-out :out} (run-knot tmp "create" "Dependent")
+            dependent    (id-of-create d-out)]
+        (run-knot tmp "dep" dependent anchor)
+        (let [{:keys [exit out]} (run-knot tmp "list" "--component" "1")]
+          (is (= 1 exit) "a bare ordinal does not resolve to a ticket id")
+          (is (str/blank? out))))))
+
+  (testing "--component is rejected on closed (no live components in the archive)"
+    (with-tmp tmp
+      (let [{a-out :out} (run-knot tmp "create" "Anchor")
+            anchor       (id-of-create a-out)]
+        (let [{:keys [exit err]} (run-knot tmp "closed" "--component" anchor)]
+          (is (= 1 exit) "closed has no --component flag")
+          (is (not (str/blank? err)))))))
+
+  (testing "an empty --component seed is rejected at parse (exit 1)"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "list" "--component" "")]
+        (is (= 1 exit))
+        (is (str/includes? err "--component"))))))

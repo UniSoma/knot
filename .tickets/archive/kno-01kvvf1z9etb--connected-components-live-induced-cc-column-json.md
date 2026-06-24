@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: afk
 created: '2026-06-24T00:04:09.133908513Z'
-updated: '2026-06-24T00:29:45.639733516Z'
+updated: '2026-06-24T01:11:18.627124878Z'
 closed: '2026-06-24T00:29:45.639733516Z'
 acceptance:
 - title: knot list shows a leading left-aligned CC column when ≥1 visible row is in a multi-member live component; column vanishes when all visible rows are singletons
@@ -25,6 +25,8 @@ acceptance:
   done: true
 - title: bb test green and clj-kondo --lint src test clean
   done: true
+links:
+- kno-01kvvjwybf58
 ---
 
 ## Description

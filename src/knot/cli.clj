@@ -1201,6 +1201,33 @@
       (filter #(contains? members (get-in % [:frontmatter :id])) tickets))
     tickets))
 
+(defn- component-filter
+  "When `opts` carries a resolved `:component` seed id, restrict `tickets`
+   to members of the seed's LIVE-INDUCED connected component (over
+   `:parent` ∪ `:deps` ∪ `:links`, closed non-conductive), computed across
+   the full `corpus`. No-op when `:component` is absent. Like
+   `closure-filter`, the corpus drives membership so the set stays the
+   partition the `CC` column promises, independent of each command's
+   display filter.
+
+   A closed (terminal-status) seed is a fail-fast error: it is not a node
+   in the live-induced graph, so its component is undefined. Returning an
+   empty list silently would leave the user's 'show me this cluster' model
+   broken with no explanation (ADR 0014)."
+  [tickets corpus terminal-statuses opts]
+  (if-let [seed (:component opts)]
+    (do
+      (when (some #(and (= seed (get-in % [:frontmatter :id]))
+                        (contains? (or terminal-statuses #{})
+                                   (get-in % [:frontmatter :status])))
+                  corpus)
+        (throw (ex-info (str "--component seed " seed
+                             " is closed; it has no live component")
+                        {:component seed})))
+      (let [members (query/live-component corpus seed terminal-statuses)]
+        (filter #(contains? members (get-in % [:frontmatter :id])) tickets)))
+    tickets))
+
 (defn- apply-limit
   "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
    means no limit — return `xs` unchanged. Any other value (including 0
@@ -1291,7 +1318,9 @@
         base     (if (contains? criteria :status)
                    all
                    (query/non-terminal all terminal-statuses))
-        visible  (query/filter-tickets (closure-filter base all opts) criteria)
+        scoped   (component-filter (closure-filter base all opts)
+                                   all terminal-statuses opts)
+        visible  (query/filter-tickets scoped criteria)
         result   (-> (apply-limit visible (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)
@@ -1424,8 +1453,9 @@
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         ready*   (query/ready all terminal-statuses)
-        filtered (query/filter-tickets (closure-filter ready* all opts)
-                                       (filter-criteria opts))
+        scoped   (component-filter (closure-filter ready* all opts)
+                                   all terminal-statuses opts)
+        filtered (query/filter-tickets scoped (filter-criteria opts))
         result   (-> (apply-limit filtered (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)
@@ -1490,8 +1520,9 @@
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
         all      (store/load-all project-root tickets-dir)
         blocked* (query/blocked all terminal-statuses)
-        filtered (query/filter-tickets (closure-filter blocked* all opts)
-                                       (filter-criteria opts))
+        scoped   (component-filter (closure-filter blocked* all opts)
+                                   all terminal-statuses opts)
+        filtered (query/filter-tickets scoped (filter-criteria opts))
         result   (-> (apply-limit filtered (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)

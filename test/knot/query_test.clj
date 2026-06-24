@@ -803,3 +803,46 @@
                    (ct "link")]
           cc      (query/connected-components tickets #{"closed"})]
       (is (= 1 (get cc "p") (get cc "child") (get cc "dep") (get cc "link"))))))
+
+(deftest live-component-test
+  (testing "seed in a 2-member component returns both members"
+    ;; a -deps-> b; c is unrelated.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b")
+                   (ct "c")]]
+      (is (= #{"a" "b"} (query/live-component tickets "a" #{"closed"})))
+      (is (= #{"a" "b"} (query/live-component tickets "b" #{"closed"}))
+          "any member names the whole island")))
+
+  (testing "an isolated live seed returns the singleton {seed}"
+    (let [tickets [(ct "a")
+                   (ct "b")]]
+      (is (= #{"a"} (query/live-component tickets "a" #{"closed"})))))
+
+  (testing "a closed bridge is non-conductive: the seed's side only"
+    ;; a -links- mid(closed) -links- b. mid severs ⇒ component of a is {a}.
+    (let [tickets [(ct "a" :links ["mid"])
+                   (ct "mid" :status "closed" :links ["b"])
+                   (ct "b")]]
+      (is (= #{"a"} (query/live-component tickets "a" #{"closed"})))
+      (is (= #{"b"} (query/live-component tickets "b" #{"closed"})))))
+
+  (testing "broken refs are dropped: seed stays a singleton"
+    (let [tickets [(ct "a" :deps ["ghost"])
+                   (ct "b")]]
+      (is (= #{"a"} (query/live-component tickets "a" #{"closed"})))))
+
+  (testing "all three axes union into the seed's component"
+    ;; p -parent- child -deps- dep -links- link → one 4-member component.
+    (let [tickets [(ct "p")
+                   (ct "child" :parent "p" :deps ["dep"])
+                   (ct "dep" :links ["link"])
+                   (ct "link")]]
+      (is (= #{"p" "child" "dep" "link"}
+             (query/live-component tickets "child" #{"closed"})))))
+
+  (testing "a closed seed is non-conductive: yields {seed}, never the corpus cluster"
+    ;; seed itself closed but its neighbor b is live; seed is not a node.
+    (let [tickets [(ct "seed" :status "closed" :deps ["b"])
+                   (ct "b")]]
+      (is (= #{"seed"} (query/live-component tickets "seed" #{"closed"}))))))

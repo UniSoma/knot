@@ -473,6 +473,25 @@
              :via     axes))
     opts))
 
+(defn- resolve-component-filter!
+  "When `--component` is present, resolve its single (partial) seed id to
+   its canonical full id, returning `opts` with `:component` replaced by
+   the resolved id (mirrors `resolve-closure-filter!`'s id resolution, but
+   single-seed). Rejects `--component` together with `--closure` — they
+   compute over different graphs (ADR 0014), so their intersection answers
+   nothing coherent — and rejects a blank seed at parse. An ordinal is not
+   special-cased: a bare integer fails the normal partial-id resolution.
+   No-op when `--component` was not given."
+  [ctx opts json?]
+  (if (contains? opts :component)
+    (let [seed (:component opts)]
+      (when (contains? opts :closure)
+        (die "knot: --component and --closure cannot be combined"))
+      (when (or (nil? seed) (str/blank? seed))
+        (die "knot: --component requires an id"))
+      (assoc opts :component (first (resolve-id-list! ctx [seed] json?))))
+    opts))
+
 (defn- show-handler [argv]
   (let [{:keys [opts args]} (bcli/parse-args argv (spec :show))
         id (first args)
@@ -502,6 +521,7 @@
         ctx      (discover-ctx)
         opts     (resolve-parent-filter! ctx opts json?)
         opts     (resolve-closure-filter! ctx opts json?)
+        opts     (resolve-component-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -511,9 +531,10 @@
                                 {:json?  json?
                                  :tty?   tty?
                                  :color? color?})
-                   (:limit opts)   (assoc :limit (:limit opts))
-                   (:closure opts) (assoc :closure (:closure opts) :via (:via opts))
-                   tty?            (assoc :width (output/terminal-width)))
+                   (:limit opts)     (assoc :limit (:limit opts))
+                   (:closure opts)   (assoc :closure (:closure opts) :via (:via opts))
+                   (:component opts) (assoc :component (:component opts))
+                   tty?              (assoc :width (output/terminal-width)))
         out      (cli/ls-cmd ctx ls-opts)]
     (println-out out)))
 
@@ -707,6 +728,7 @@
         ctx      (discover-ctx)
         opts     (resolve-parent-filter! ctx opts json?)
         opts     (resolve-closure-filter! ctx opts json?)
+        opts     (resolve-component-filter! ctx opts json?)
         tty?     (output/tty?)
         color?   (output/color-enabled?
                   {:tty?         tty?
@@ -716,9 +738,10 @@
                                 {:json?  json?
                                  :tty?   tty?
                                  :color? color?})
-                   (:limit opts)   (assoc :limit (:limit opts))
-                   (:closure opts) (assoc :closure (:closure opts) :via (:via opts))
-                   tty?            (assoc :width (output/terminal-width)))
+                   (:limit opts)     (assoc :limit (:limit opts))
+                   (:closure opts)   (assoc :closure (:closure opts) :via (:via opts))
+                   (:component opts) (assoc :component (:component opts))
+                   tty?              (assoc :width (output/terminal-width)))
         out      (list-fn ctx cmd-opts)]
     (println-out out)))
 

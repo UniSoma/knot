@@ -543,3 +543,45 @@
                     (map (fn [id] [id ordinal]) comp))
                   (iterate inc 1)
                   ranked))))
+
+(defn live-component
+  "Return the id-set of the connected component containing `seed` in the
+   LIVE-INDUCED undirected graph of `tickets` over `:parent` ∪ `:deps` ∪
+   `:links`. This is the per-seed member-set `connected-components` floods
+   internally but does not expose; here it INCLUDES a singleton `{seed}`.
+
+   Only live (non-terminal) tickets are nodes: closed tickets are
+   NON-CONDUCTIVE (not nodes, incident edges dropped), so a cluster joined
+   only through a closed ticket splits — `--component` and the `CC` column
+   see the same partition. Broken refs (ids absent from the live corpus)
+   are dropped and the flood is visited-guarded, so it terminates on any
+   input. A live seed with no live neighbors yields `{seed}`; a closed or
+   unknown seed (the cli liveness gate forbids the former) yields `{seed}`
+   too, since it is not a node and floods nowhere."
+  [tickets seed terminal-statuses]
+  (let [live  (filter #(live? terminal-statuses %) tickets)
+        known (into #{} (map #(get-in % [:frontmatter :id])) live)
+        out   (fn [fm]
+                (cond-> []
+                  (:parent fm) (conj (:parent fm))
+                  true         (into (:deps fm))
+                  true         (into (:links fm))))
+        adj   (reduce (fn [m t]
+                        (let [fm (:frontmatter t)
+                              id (:id fm)]
+                          (reduce (fn [m* nbr]
+                                    (if (contains? known nbr)
+                                      (-> m*
+                                          (update id (fnil conj #{}) nbr)
+                                          (update nbr (fnil conj #{}) id))
+                                      m*))
+                                  m
+                                  (out fm))))
+                      {}
+                      live)]
+    (loop [stack [seed] members #{}]
+      (if-let [node (peek stack)]
+        (if (contains? members node)
+          (recur (pop stack) members)
+          (recur (into (pop stack) (get adj node)) (conj members node)))
+        members))))

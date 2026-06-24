@@ -94,6 +94,7 @@ fresher state run `knot list`, `knot ready`, or `knot show <id>` directly.
 | "what's tagged <x>?"                                    | `knot list --tag <x>`                                        |
 | "what's open for <user>?" / "my tickets"                | `knot list --assignee <user>`                                |
 | "what are the children of <id>?" / "what's under <id>?" | `knot list --parent <id>`                                    |
+| "what's the live cluster around <id>?" / "the island <id> sits on" | `knot list --component <id>`                      |
 | "what's blocked?"                                       | `knot blocked`                                               |
 | "what did I close recently?"                            | `knot closed --limit 10`                                     |
 | "what's ready to close?" / "what's done?"               | `knot prime` (Ready to close section) — active tickets whose AC are all checked |
@@ -148,6 +149,28 @@ what's shown (`list` defaults to live, `closed` to terminal). It composes
 with every other filter (`--type`, `--status`, `--limit`, `--json`); output
 is a plain list — no extra columns or JSON fields. Seeds resolve like
 `--parent` (partial ids, loud failure on no/ambiguous match).
+
+`--component <id>` filters to the seed's **live-induced connected component**
+(the `CC` column's action-companion: the column reveals the live islands,
+`--component` isolates one to work on it). Available on `list`/`ready`/`blocked`
+(NOT `closed` — the archive has no live components). It restricts the
+*traversal* to live tickets (closed = non-conductive), so it matches the `CC`
+column exactly — and is therefore **distinct from `--closure`**, not a live mode
+of it: `--closure` is corpus-wide where a closed ticket still conducts, so a
+live `A`—closed `C`—live `B` chain is one closure but two live components. Fixed
+shape (ADR 0014): a **single** id resolved by partial match like `--parent`
+(**never** an ordinal — `--component 1` fails to resolve; an unresolvable or
+ambiguous seed dies on stderr, or returns a `not_found` / `ambiguous_id`
+envelope under `--json`), **all** axes (no `--via`), the seed **must be live**
+(a closed seed is a fail-fast error, not a silent empty — note this one dies on
+stderr with exit 1 even under `--json`, it is *not* an error envelope), and
+**mutually exclusive with `--closure`** (passing both → fail-fast). Membership is
+computed over the full live corpus and intersected before display filters, so
+`--component X --tag p0` is `(X's live component) ∩ (p0-tagged)`; `--limit`
+applies last. Output shape is unchanged (the `CC` column still renders the
+cluster's constant ordinal; `--json` rows still carry `cc`) — it is a filter,
+not a visualization. Any cluster member names the whole island, so feed a `CC`
+member id straight back in.
 
 **Umbrella progress (`CHLD`).** When a result set contains at least one
 *umbrella* (a ticket with ≥1 direct child), the four listing commands add a
@@ -207,7 +230,8 @@ scope deliberately differs from `--closure` (corpus-wide, single-seed). Full lay
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
 afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
 `knot closed --type bug --limit 5`, `knot list --parent kno-01abc`,
-`knot list --closure kno-01abc --via parent,deps`.
+`knot list --closure kno-01abc --via parent,deps`,
+`knot list --component kno-01abc`.
 On `prime`, filters apply across **all** sections (in_progress + ready +
 recently_closed) — `knot prime --assignee me` shows only your tickets
 everywhere. Visual filtering is error-prone (titles wrap, columns shift,
@@ -688,7 +712,8 @@ init / prime / info                    project setup, agent context primer,
                                        runtime config + allowed values
 list (alias ls) / show                 read live; show one
 ready / blocked / closed               backlog views (--limit + full filter
-                                       set; --parent, --closure/--via)
+                                       set; --parent, --closure/--via,
+                                       --component on list/ready/blocked)
 check                                  project-integrity scan (cycles, dangling
                                        refs, schema, archive placement)
 create                                 new ticket (-t -p -a --tags --mode
