@@ -4819,9 +4819,51 @@ Restart the daemon.
             _ (cli/dep-cmd (ctx tmp) {:from b-id :to dep-id})
             _ (cli/dep-cmd (ctx tmp) {:from c-id :to dep-id})
             out  (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :limit 2})
+            ;; these blocked tickets share a live dep → a multi-member live
+            ;; component → the leading CC column appears, so rows no longer
+            ;; START with the id; match on its presence instead.
             rows (->> (str/split-lines out)
-                      (filter #(str/starts-with? % "kno-")))]
+                      (filter #(str/includes? % "kno-")))]
         (is (= 2 (count rows)) ":limit 2 returns exactly 2 blocked tickets")))))
+
+(deftest cc-column-ready-blocked-parity-test
+  ;; blocker (ready) <-deps- dependent (blocked) form one 2-member live
+  ;; component. The same component must surface on BOTH listings with the
+  ;; same ordinal, and on --json as a cc integer; a solo ticket stays nil.
+  (testing "CC renders identically on ready and blocked, and emits cc in --json"
+    (with-tmp tmp
+      (let [c          (ctx tmp)
+            blocker    (cli/create-cmd c {:title "Keystone"})
+            dependent  (cli/create-cmd c {:title "Waiter"})
+            solo       (cli/create-cmd c {:title "Lonely"})
+            blocker-id   (id-of-created blocker   "keystone")
+            dependent-id (id-of-created dependent "waiter")
+            _ (cli/dep-cmd c {:from dependent-id :to blocker-id})
+            ready-out   (cli/ready-cmd   c {:tty? false :color? false})
+            blocked-out (cli/blocked-cmd c {:tty? false :color? false})
+            ready-hdr   (first (str/split-lines ready-out))
+            blocked-hdr (first (str/split-lines blocked-out))
+            cc-cell     (fn [out id]
+                          (-> (some (fn [l] (when (str/includes? l id) l))
+                                    (str/split-lines out))
+                              str/triml
+                              (str/split #"\s+")
+                              first))]
+        (is (re-find #"\bCC\b" ready-hdr)   "ready shows the CC column (blocker is in a component)")
+        (is (re-find #"\bCC\b" blocked-hdr) "blocked shows the CC column (dependent is in a component)")
+        (is (= "1" (cc-cell ready-out blocker-id))
+            "blocker's row leads with ordinal 1 on ready")
+        (is (= "1" (cc-cell blocked-out dependent-id))
+            "dependent's row leads with the SAME ordinal 1 on blocked")
+
+        (let [solo-id (id-of-created solo "lonely")
+              data    (-> (cli/ready-cmd c {:json? true})
+                          (cheshire/parse-string true)
+                          :data)
+              by-id   (into {} (map (juxt :id identity)) data)]
+          (is (= 1 (get-in by-id [blocker-id :cc])) "ready --json: blocker cc = 1")
+          (is (contains? (get by-id solo-id) :cc)   "ready --json: solo carries the cc key")
+          (is (nil? (get-in by-id [solo-id :cc]))   "ready --json: solo cc is null"))))))
 
 (deftest closed-cmd-filter-test
   (testing "closed-cmd with :mode filters by mode"

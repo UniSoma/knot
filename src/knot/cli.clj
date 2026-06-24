@@ -299,6 +299,20 @@
                  (query/coupling corpus (get-in t [:frontmatter :id]) terminal-statuses)))
         tickets))
 
+(defn- annotate-cc
+  "Attach `:cc <ordinal-or-nil>` to each ticket in `tickets` — the global
+   connected-component ordinal of its live-induced component in `corpus`
+   (`nil` for singletons). The partition is computed ONCE over the full live
+   corpus, so a ticket's component and ordinal are filter-independent: the
+   `--tag`/`--type`/`--limit` view never changes them. Used by
+   list/ready/blocked only, so the top-level `:cc` key drives both the CC
+   column and the `cc` JSON field while leaving closed/show byte-unchanged."
+  [tickets corpus terminal-statuses]
+  (let [cc-map (query/connected-components corpus terminal-statuses)]
+    (mapv (fn [t]
+            (assoc t :cc (get cc-map (get-in t [:frontmatter :id]))))
+          tickets)))
+
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. `:id` may be partial — `store/resolve-id`
@@ -1281,7 +1295,8 @@
         result   (-> (apply-limit visible (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses))]
+                     (annotate-coupling all terminal-statuses)
+                     (annotate-cc all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1414,7 +1429,8 @@
         result   (-> (apply-limit filtered (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses))]
+                     (annotate-coupling all terminal-statuses)
+                     (annotate-cc all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1479,7 +1495,8 @@
         result   (-> (apply-limit filtered (:limit opts))
                      (annotate-children-progress all terminal-statuses)
                      (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses))]
+                     (annotate-coupling all terminal-statuses)
+                     (annotate-cc all terminal-statuses))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)

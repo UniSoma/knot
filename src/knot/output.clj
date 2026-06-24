@@ -204,21 +204,24 @@
    `json-vector-default-keys` are appended as `[]` at the end of the map
    (JSON object key order is non-semantic) so consumers can iterate
    without `null[]` errors."
-  [{:keys [frontmatter body children-progress leverage coupling] :as ticket} {:keys [include-body?]
-                                                                              :or {include-body? true}}]
+  [{:keys [frontmatter body children-progress leverage coupling cc] :as ticket} {:keys [include-body?]
+                                                                                 :or {include-body? true}}]
   (let [[term total] children-progress
-        ;; `:leverage`/`:coupling` are attached top-level only by
+        ;; `:leverage`/`:coupling`/`:cc` are attached top-level only by
         ;; list/ready/blocked; show, touched-mutators and closed never attach
-        ;; them, so those outputs stay byte-unchanged.
+        ;; them, so those outputs stay byte-unchanged. `:cc` may be nil
+        ;; (singleton) — it still emits `cc: null` for a uniform JSON shape.
         has-leverage? (contains? ticket :leverage)
-        has-coupling? (contains? ticket :coupling)]
+        has-coupling? (contains? ticket :coupling)
+        has-cc?       (contains? ticket :cc)]
     (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
                     frontmatter
                     json-vector-default-keys)
       include-body?     (assoc :body body)
       children-progress (assoc :children_total total :children_terminal term)
       has-leverage?     (assoc :leverage leverage)
-      has-coupling?     (assoc :coupling coupling))))
+      has-coupling?     (assoc :coupling coupling)
+      has-cc?           (assoc :cc cc))))
 
 (defn- jsonify-inverse-entry
   "Project an inverse-section entry into the JSON shape: resolved entries
@@ -314,6 +317,9 @@
 (def ^:private ls-cpl-column
   {:key :coupling :header "CPL" :align :right})
 
+(def ^:private ls-cc-column
+  {:key :cc :header "CC" :align :left})
+
 (defn- ls-columns-for
   "Return the column list for `tickets`. AGE is always present. The AC,
    CHLD, LEV and CPL columns are independently spliced in immediately before
@@ -321,23 +327,34 @@
    when at least one ticket is an umbrella (carries `:children-progress`),
    LEV when at least one ticket carries an attached `:leverage` value, CPL
    when at least one ticket carries an attached `:coupling` value.
-   Layout is `AGE, [AC], [CHLD], [LEV], [CPL], TITLE`; any omitted column
-   makes its header and slot disappear, so quiet projects see none."
+
+   CC is prepended as the LEADING column (before ID) on a stricter gate:
+   present only when at least one visible row carries a NON-NIL `:cc`
+   ordinal. Unlike LEV/CPL, key-presence is not enough — every
+   list/ready/blocked row carries `:cc` (often nil for singletons), so an
+   all-singleton view would otherwise show an all-dash column.
+
+   Layout is `[CC], ID, …, AGE, [AC], [CHLD], [LEV], [CPL], TITLE`; any
+   omitted column makes its header and slot disappear, so quiet projects
+   see none."
   [tickets]
   (let [ac?       (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
         umbrella? (some :children-progress tickets)
         lev?      (some #(contains? % :leverage) tickets)
         cpl?      (some #(contains? % :coupling) tickets)
+        cc?       (some #(some? (:cc %)) tickets)
         head      (vec (butlast ls-columns-base))
         title-col (last ls-columns-base)
         extra     (cond-> []
                     ac?       (conj ls-ac-column)
                     umbrella? (conj ls-chld-column)
                     lev?      (conj ls-lev-column)
-                    cpl?      (conj ls-cpl-column))]
-    (if (seq extra)
-      (conj (into head extra) title-col)
-      ls-columns-base)))
+                    cpl?      (conj ls-cpl-column))
+        cols      (if (seq extra)
+                    (conj (into head extra) title-col)
+                    ls-columns-base)]
+    (cond->> cols
+      cc? (into [ls-cc-column]))))
 
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
@@ -359,6 +376,7 @@
                 "-")
     :leverage (if-let [n (:leverage ticket)] (str n) "-")
     :coupling (if-let [n (:coupling ticket)] (str n) "-")
+    :cc (if-let [n (:cc ticket)] (str n) "-")
     :age (format-age-days (:age-days ticket))
     (let [v (get (:frontmatter ticket) k)]
       (if (some? v) (str v) ""))))

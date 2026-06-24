@@ -480,3 +480,66 @@
          (filter some?)
          (filter #(live? terminal-statuses %))
          count)))
+
+(defn connected-components
+  "Partition the LIVE-INDUCED undirected graph of `tickets` into connected
+   components over `:parent` ∪ `:deps` ∪ `:links`, and return a map from
+   ticket id to a global ordinal for members of MULTI-member components.
+
+   Only live (non-terminal) tickets are nodes; closed tickets are
+   NON-CONDUCTIVE — they are not nodes and edges incident to them are
+   dropped, so a cluster joined only through a closed ticket splits.
+   Broken refs (ids absent from the live corpus) are likewise dropped.
+   This deliberately diverges from `closure-set`, which is corpus-wide.
+
+   Ordinals are assigned globally and filter-independently: components with
+   ≥2 members are sorted size-descending (largest = 1), ties broken by the
+   minimum member id, and numbered 1, 2, 3, …. Singleton live tickets get
+   NO entry (lookup → nil), as do closed tickets. The map is intended to be
+   looked up per row: present ⇒ multi-member ordinal, absent ⇒ render `-`
+   (text) / `null` (JSON)."
+  [tickets terminal-statuses]
+  (let [live  (filter #(live? terminal-statuses %) tickets)
+        known (into #{} (map #(get-in % [:frontmatter :id])) live)
+        out   (fn [fm]
+                (cond-> []
+                  (:parent fm) (conj (:parent fm))
+                  true         (into (:deps fm))
+                  true         (into (:links fm))))
+        adj   (reduce (fn [m t]
+                        (let [fm (:frontmatter t)
+                              id (:id fm)]
+                          (reduce (fn [m* nbr]
+                                    (if (contains? known nbr)
+                                      (-> m*
+                                          (update id (fnil conj #{}) nbr)
+                                          (update nbr (fnil conj #{}) id))
+                                      m*))
+                                  m
+                                  (out fm))))
+                      {}
+                      live)
+        ;; flood each unseen node to collect its full component as a set
+        comps (loop [ids (map #(get-in % [:frontmatter :id]) live)
+                     seen #{}
+                     acc  []]
+                (if-let [id (first ids)]
+                  (if (contains? seen id)
+                    (recur (rest ids) seen acc)
+                    (let [comp (loop [stack [id] members #{}]
+                                 (if-let [node (peek stack)]
+                                   (if (contains? members node)
+                                     (recur (pop stack) members)
+                                     (recur (into (pop stack) (get adj node))
+                                            (conj members node)))
+                                   members))]
+                      (recur (rest ids) (into seen comp) (conj acc comp))))
+                  acc))
+        ranked (->> comps
+                    (filter #(>= (count %) 2))
+                    (sort-by (juxt #(- (count %)) #(first (sort %)))))]
+    (into {}
+          (mapcat (fn [ordinal comp]
+                    (map (fn [id] [id ordinal]) comp))
+                  (iterate inc 1)
+                  ranked))))

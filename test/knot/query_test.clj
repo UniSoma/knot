@@ -743,3 +743,63 @@
     (let [tickets [(ct "a")
                    (ct "b")]]
       (is (= 0 (query/coupling tickets "a" #{"closed"}))))))
+
+(deftest connected-components-test
+  (testing "two members joined by a deps edge share an ordinal; a singleton is absent"
+    ;; a -deps-> b form one 2-member component; c is isolated.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b")
+                   (ct "c")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (= (get cc "a") (get cc "b")) "a and b land in the same component")
+      (is (some? (get cc "a")) "the 2-member component carries an ordinal")
+      (is (nil? (get cc "c")) "an isolated live ticket is a singleton: no ordinal"))))
+
+(deftest connected-components-ordinal-test
+  (testing "size-descending: the largest multi-member component is 1"
+    ;; big: {a b c} via deps chain; small: {x y} via a link. big -> 1, small -> 2.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["c"])
+                   (ct "c")
+                   (ct "x" :links ["y"])
+                   (ct "y")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (= 1 (get cc "a") (get cc "b") (get cc "c")))
+      (is (= 2 (get cc "x") (get cc "y")))))
+
+  (testing "size ties broken by minimum member id (ascending)"
+    ;; two 2-member components: {a b} and {m n}. {a b} has the smaller min id
+    ;; ⇒ ordinal 1; {m n} ⇒ ordinal 2.
+    (let [tickets [(ct "a" :links ["b"])
+                   (ct "b")
+                   (ct "m" :links ["n"])
+                   (ct "n")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (= 1 (get cc "a") (get cc "b")))
+      (is (= 2 (get cc "m") (get cc "n")))))
+
+  (testing "live-induced severing: a closed bridge splits the cluster into singletons"
+    ;; a -links-> mid(closed) -links-> b. mid is non-conductive ⇒ a and b are
+    ;; each isolated ⇒ no ordinals; mid itself is never a node.
+    (let [tickets [(ct "a" :links ["mid"])
+                   (ct "mid" :status "closed" :links ["b"])
+                   (ct "b")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (nil? (get cc "a")))
+      (is (nil? (get cc "b")))
+      (is (nil? (get cc "mid")))))
+
+  (testing "broken refs are dropped without crashing"
+    (let [tickets [(ct "a" :deps ["ghost"])
+                   (ct "b")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (= {} cc) "no multi-member component forms; both stay singletons")))
+
+  (testing "all three axes union into one component"
+    ;; p -parent- child, child -deps- dep, dep -links- link → one 4-member comp.
+    (let [tickets [(ct "p")
+                   (ct "child" :parent "p" :deps ["dep"])
+                   (ct "dep" :links ["link"])
+                   (ct "link")]
+          cc      (query/connected-components tickets #{"closed"})]
+      (is (= 1 (get cc "p") (get cc "child") (get cc "dep") (get cc "link"))))))

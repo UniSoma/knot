@@ -186,6 +186,24 @@ never appears; an isolated ticket shows `0`). In `--json`, those rows carry a
 `coupling` integer; `closed --json`, `show`, and all non-listing commands omit
 it.
 
+**Connected components (`CC`).** `list`/`ready`/`blocked` (NOT `closed`) carry a
+leading `CC` column (before `ID`) marking which connected component of the
+*live-induced* graph the row sits in, over all three axes (`:parent` ∪ `:deps` ∪
+`:links`, undirected) — closed tickets are non-conductive, so a cluster joined
+only through a closed bridge splits. Membership and size are **filter-independent**
+(computed over all live tickets; `--tag`/`--type`/`--limit` never change a row's
+component). The label is a **throwaway global ordinal**: only components with **≥2
+live members** are numbered, **size-descending** (largest = `1`), ties by min
+member id; **singletons render `-`**. Numbering is global, so a filtered view may
+show non-contiguous numbers (`1, 3, 4`) — it is a within-snapshot grouping aid, not
+a stable id. The text column is present **iff at least one visible row carries a
+real ordinal** (stricter than `LEV`/`CPL`: an all-singleton view shows no column).
+In `--json`, **every** list/ready/blocked row carries a `cc` field — integer
+ordinal or **`null`** for singletons (uniform shape; don't branch on key-presence);
+`closed --json`, `show`, and all non-listing commands omit it. NB the live-induced
+scope deliberately differs from `--closure` (corpus-wide, single-seed). Full layout:
+`CC ID STATUS PRI MODE TYPE ASSIGNEE AGE [AC] [CHLD] [LEV] [CPL] TITLE`.
+
 Combine freely: `knot list --type bug --type chore`, `knot ready --mode
 afk --tag p0`, `knot ready --priority 0`, `knot blocked --mode afk`,
 `knot closed --type bug --limit 5`, `knot list --parent kno-01abc`,

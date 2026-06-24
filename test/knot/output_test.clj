@@ -797,6 +797,71 @@
       (is (not (re-find #"\bCPL\b" first-line))
           "no CPL header when no ticket carries :coupling (e.g. closed listing)"))))
 
+(def ^:private sample-ls-tickets-with-cc
+  "Rows carry a top-level :cc ordinal (nil for singletons), mirroring how the
+   cli annotates list/ready/blocked rows. First row in component 1, second a
+   singleton (nil)."
+  [(assoc (first sample-ls-tickets) :cc 1)
+   (assoc (second sample-ls-tickets) :cc nil)])
+
+(def ^:private sample-ls-tickets-all-singletons
+  "Every row a singleton: :cc present but nil on all rows."
+  [(assoc (first sample-ls-tickets) :cc nil)
+   (assoc (second sample-ls-tickets) :cc nil)])
+
+(deftest ls-table-cc-column-shown-when-ordinal-present-test
+  (testing "CC column header appears when at least one visible row carries a real ordinal"
+    (let [out (output/ls-table sample-ls-tickets-with-cc {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bCC\b" first-line)
+          "CC header surfaces when any visible row has a non-nil :cc")))
+
+  (testing "CC is the leading column, before ID"
+    (let [out (output/ls-table sample-ls-tickets-with-cc {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          cc-i (str/index-of first-line "CC")
+          id-i (str/index-of first-line "ID")]
+      (is (every? some? [cc-i id-i]))
+      (is (< cc-i id-i) "CC precedes ID as the first column")
+      (is (zero? cc-i) "CC starts at column 0 — nothing before it")))
+
+  (testing "ordinal renders as its integer; singleton renders a dash"
+    (let [out   (output/ls-table sample-ls-tickets-with-cc {:color? false :tty? false})
+          lines (str/split-lines out)
+          line1 (some (fn [l] (when (str/includes? l "kno-01abcd0001") l)) lines)
+          line2 (some (fn [l] (when (str/includes? l "kno-01abcd0002") l)) lines)]
+      (is (str/starts-with? (str/triml line1) "1") "ordinal 1 renders as 1")
+      (is (str/starts-with? line2 "-") "singleton row leads with a dash"))))
+
+(deftest ls-table-cc-column-omitted-when-all-singletons-test
+  (testing "CC column vanishes when every visible row is a singleton (stricter than LEV/CPL)"
+    (let [out (output/ls-table sample-ls-tickets-all-singletons {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bCC\b" first-line))
+          "all-nil :cc ⇒ no CC column, avoiding an all-dash column")))
+
+  (testing "CC column absent when no row carries :cc at all (closed listing parity)"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bCC\b" first-line))))))
+
+(deftest ls-json-cc-test
+  (testing "rows with :cc attached emit a cc field: integer ordinal or null"
+    (let [tickets [(assoc {:frontmatter {:id "x" :status "open"} :body ""} :cc 1)
+                   (assoc {:frontmatter {:id "y" :status "open"} :body ""} :cc nil)]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a b]   (:data parsed)]
+      (is (= 1 (:cc a)) "multi-member row emits its ordinal")
+      (is (contains? b :cc) "singleton row still emits the cc key (uniform shape)")
+      (is (nil? (:cc b)) "singleton row emits cc null, not omitted")))
+
+  (testing "rows without :cc attached carry no cc key (show/closed parity)"
+    (let [tickets [{:frontmatter {:id "x" :status "open"} :body ""}]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a]     (:data parsed)]
+      (is (not (contains? a :cc))
+          "absent :cc means no JSON field — keeps closed/show byte-unchanged"))))
+
 (deftest ls-table-age-column-header-test
   (testing "AGE column header appears in ls-table output"
     (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
