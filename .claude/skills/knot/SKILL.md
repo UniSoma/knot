@@ -98,7 +98,7 @@ list`, `knot ready`, or `knot show <id>` directly.
 | "give me a summary of project state"                    | `knot prime`                                                 |
 | "what project is this?" / "what statuses are valid?"    | `knot info`                                                  |
 | "what does `knot create` default to?"                   | `knot info --json`                                           |
-| "give me the frontmatter JSON Schema"                   | `knot schema` (writes to stdout; `bb gen:schema` updates the checked-in file) |
+| "give me the frontmatter JSON Schema"                   | `knot schema` (writes to stdout)                             |
 
 ### Filter, don't eyeball
 
@@ -222,49 +222,23 @@ on refusal.
 For projects with custom `:statuses` (e.g. adding `"review"` between `in_progress` and `closed`), prefer explicit `knot
 status <id> <new>` over `knot start` / `knot close` so you don't accidentally skip a non-terminal stage.
 
-#### Acceptance gate on terminal transitions
+#### Transition gates (acceptance + open-children)
 
-`knot close`, `knot status <id> <terminal>`, and `knot update <id> --status <terminal>` all enforce the v0.3 acceptance
-gate: when the ticket is in `:active-status` (default `in_progress`) and any frontmatter `:acceptance` entry has `done:
-false`, the transition is blocked (JSON `error.code = "acceptance_incomplete"`, exit 1).
+Two gates can block a transition, both with exit 1 and a JSON `error.code`:
 
-The gate skips on:
+- **Acceptance gate** (`acceptance_incomplete`) — fires on a terminal transition (`close`, `status <terminal>`, `update
+  --status <terminal>`) when the ticket is in `:active-status` and any frontmatter `:acceptance` entry is still `done:
+  false`. Clear it by marking the AC done — `knot update <id> --ac "<title>" --done` (composes with `--status`, so `knot
+  update <id> --ac "last AC" --done --status closed` checks then closes) — or override with `--force --summary
+  "<reason>"`.
+- **Open-children gate** (`open_children`) — fires on **close** *and* **start** when the ticket has ≥1 child (any ticket
+  whose `:parent` is this id) in a non-terminal status. Clear it by finishing/closing the children, or override with
+  `--force`.
 
-- Empty / nil `:acceptance`.
-- Intake → terminal transitions (no work was started).
-- Terminal → terminal reclassifications (e.g. `closed → wontfix`).
-
-Two ways to clear it:
-
-1. Mark the AC done — `knot update <id> --ac "<title>" --done`. Composes with `--status` in one call: `knot update <id> --ac "last AC" --done --status closed` checks then closes.
-2. `--force --summary "<reason>"`. Required pair: `--force` without a non-blank `--summary` exits `invalid_argument`. The summary is appended as a Notes entry and serves as the override record.
-
-#### Open-children gate on start and close transitions
-
-The open-children gate fires on two transitions:
-
-- **Close** (`active → terminal`): `knot close`, `knot status <id> <terminal>`, `knot update <id> --status <terminal>`.
-- **Start** (`* → active`): `knot start`, `knot status <id> <active>`, `knot update <id> --status <active>`.
-
-The gate fires when the ticket has at least one child (any ticket whose `:parent` is this id) whose status is
-non-terminal (JSON `error.code = "open_children"`, exit 1 — same envelope shape for both transitions).
-
-The gate skips on:
-
-- Tickets with no children.
-- Parents whose children are all in a terminal status.
-- `active → active` no-op transitions and intake → terminal transitions (no meaningful start or close).
-- Terminal → terminal reclassifications.
-
-Override is `--force`, with asymmetric `--summary` semantics:
-
-- **Close**: `--force --summary "<reason>"` is the required pair — `--force` without a non-blank `--summary` exits
-  `invalid_argument`. The summary is appended as a Notes entry and serves as the override record. When both AC and
-  open-children gates would fire on the same close, a single `--force` bypasses both and stderr emits one warning per
-  gate.
-- **Start**: `--force` alone is enough (no `--summary` required, and passing `--summary` to a non-terminal target is
-  rejected up front). Start is provisional — you can `update --status` back to intake at zero cost — so the bypass
-  leaves only the stderr enumeration as a trace, not a Notes entry.
+Override `--summary` is asymmetric: **close** requires the `--force --summary "<reason>"` pair (a bare `--force` exits
+`invalid_argument`; one `--force` bypasses both gates at once), while **start** takes `--force` alone (passing
+`--summary` to a non-terminal target is rejected). The full skip-condition matrix and the rationale for the asymmetry
+live in [`references/lifecycle-gates.md`](references/lifecycle-gates.md).
 
 ### Notes and editing
 
@@ -366,8 +340,8 @@ Don't autonomously pick up `hitl` tickets unless the user explicitly authorizes 
 
 Every read AND mutating command accepts `--json` and emits a tagged envelope on stdout with snake_case keys. Warnings
 and errors go to stderr. The canonical contract lives in [`references/json-protocol.md`](references/json-protocol.md) —
-per-command `data` shapes, the full error-code catalogue, the `knot check` issue-code catalogue, and the partial-id
-contract are pinned there (and in the knot repo, exercised by `test/knot/json_contract_test.clj`).
+per-command `data` shapes, the full error-code catalogue, the `knot check` issue-code catalogue, the partial-id
+contract, and `prime`'s `stale` / `ready_to_close` fields are pinned there.
 
 ```json
 {"schema_version": 1, "ok": true, "data": <payload>}
@@ -382,9 +356,6 @@ health verdict, not a request outcome.
 `knot show <id>` after a write.** `close --json` (and any terminal `status`) additionally carries `meta.archived_to`
 (POSIX-normalized path). Vector-default keys (`tags`, `deps`, `links`, `external_refs`) are always arrays in `--json`,
 so `jq -r '.data[].tags[]'` is safe even on tickets that declare no tags.
-
-Per-command `data` shapes, the full error-code catalogue, the partial-id contract, and `prime`'s `stale` /
-`ready_to_close` fields are all pinned in [`references/json-protocol.md`](references/json-protocol.md).
 
 ```sh
 knot list --json           | jq '.data[] | select(.priority <= 1)'
@@ -427,56 +398,25 @@ working tree as markdown; hosted trackers do not. If the user names one of those
 
 ## Quick reference
 
+A command → purpose index. For flags and semantics, follow the named section in parentheses — that's the source of truth.
+
 ```
-init / prime / info / schema           project setup, agent context primer,
-                                       runtime config + allowed values,
-                                       frontmatter JSON Schema to stdout
-list (alias ls) / show                 read live; show one
-ready / blocked / closed               backlog views (--limit + full filter
-                                       set; --parent, --closure/--via,
-                                       --component on list/ready/blocked)
-check                                  project-integrity scan (cycles, dangling
-                                       refs, schema, archive placement)
-create                                 new ticket (-t -p -a --tags --mode
-                                       -d --design --acceptance --parent
-                                       --external-ref --dep --link)
-                                       --acceptance / --dep / --link are
-                                       repeatable; --dep is lenient on
-                                       missing, --link is strict
-start / status / close / reopen        lifecycle (--summary on close;
-                                       --force to bypass the
-                                       open-children gate at start;
-                                       --force --summary to bypass the
-                                       acceptance and open-children
-                                       gates at close)
-delete                                 remove a ticket file. Leaf-only
-                                       by default (refuses on incoming
-                                       :parent / :deps / :links refs);
-                                       --cascade rewrites every referrer
-                                       first (live + archive) and then
-                                       deletes the file
-add-note / edit / update               annotation (edit is interactive,
-                                       update is non-interactive set/replace
-                                       with --title --type --priority --mode
-                                       --assignee --parent --tags
-                                       --external-ref --description --design
-                                       --body; flip one acceptance entry
-                                       with --ac "<title>" --done|--undone)
-dep / undep / dep tree                 directional graph; cycle-checked on add
-link / unlink                          symmetric graph
-migrate-ac                             one-shot: lift legacy body checklists
-                                       into frontmatter :acceptance
-serve                                  read-only browser panel on loopback
-                                       (--port, --open / --no-open, --dev)
+init / prime / info / schema     setup; agent primer; runtime config + allowed values; frontmatter JSON Schema
+list (alias ls) / show           read live; show one (filters + graph filters/columns: "Filter, don't eyeball")
+ready / blocked / closed         backlog views (--limit + filters)
+check                            integrity scan: cycles, dangling refs, schema, archive placement ("Project integrity")
+create                           new ticket ("Create" for the flag set)
+start / status / close / reopen  lifecycle; gates fire on start/close ("Transition gates")
+delete                           remove a file; leaf-only, --cascade rewrites referrers ("Lifecycle")
+add-note / edit / update         annotate; edit interactive, update non-interactive set/replace ("Notes and editing")
+dep / undep / dep tree           directional graph; cycle-checked on add ("Graph operations")
+link / unlink                    symmetric graph
+migrate-ac                       one-shot: lift legacy body checklists into frontmatter :acceptance
+serve                            read-only browser panel on loopback (--port, --open / --no-open, --dev)
 ```
 
-Most commands return `0` on success and `1` on error. `knot check` adds `2` for unable-to-scan (no project root or
-invalid `.knot.edn`). Every read command supports `--json` and the filter flags `--type`, `--mode`, `--tag`, `--status`,
-`--assignee` (each repeatable). Every mutating command (`create`, `start`, `status`, `close`, `reopen`, `delete`, `dep`,
-`undep`, `link`, `unlink`, `add-note`, `update`) also supports `--json` — the envelope's `data` is the touched ticket(s)
-(or `{deleted, cleaned}` for `delete`); `close --json` and terminal `status --json` add `meta.archived_to`. `knot check`
-uses its own filters: `--severity` (error|warning, closed enum) and `--code` (open enum), both repeatable; OR within a
-flag, AND across flags.
+Exit codes: `0` success, `1` error, plus `2` on `knot check` for unable-to-scan (no project root or invalid
+`.knot.edn`). Every read and mutating command takes `--json` (envelope shapes: *JSON for parsing*).
 
 Every command rejects unknown flags: `knot <cmd> --bogus` exits 1 with `Unknown option: :bogus` on stderr rather than
 silently absorbing the typo. If a flag you expect to work errors this way, consult `knot <cmd> --help` for the canonical

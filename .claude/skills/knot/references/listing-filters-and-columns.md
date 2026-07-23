@@ -55,7 +55,7 @@ column's action-companion: the column reveals the live islands,
 column exactly — and is therefore **distinct from `--closure`**, not a live mode
 of it: `--closure` is corpus-wide where a closed ticket still conducts, so a
 live `A`—closed `C`—live `B` chain is one closure but two live components. Fixed
-shape (ADR 0014): a **single** id resolved by partial match like `--parent`
+shape: a **single** id resolved by partial match like `--parent`
 (**never** an ordinal — `--component 1` fails to resolve; an unresolvable or
 ambiguous seed dies on stderr, or returns a `not_found` / `ambiguous_id`
 envelope under `--json`), **all** axes (no `--via`), the seed **must be live**

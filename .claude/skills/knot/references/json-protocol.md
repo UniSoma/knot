@@ -5,11 +5,8 @@ envelope on stdout. This document is the canonical reference for the
 shape of that envelope, the per-command `data` payloads, the error
 codes, and the partial-id contract.
 
-The runtime is the source of truth: drift between this document and
-the binary is caught by `test/knot/json_contract_test.clj` in the knot
-repository, which spawns a real subprocess for every `--json` command
-and pins the shape, the error envelopes, and the documented
-asymmetries.
+The runtime is the source of truth: if this document and a live
+`--json` envelope ever disagree, trust the CLI and surface the drift.
 
 ## Envelope shape
 
