@@ -2039,6 +2039,42 @@ unannotated so RET there falls through to the no-op user-error."
                   (t (format "%s" value))))
     (add-text-properties p (point) (list 'knot-field field))))
 
+(defconst knot-show--note-header-re
+  "^\\*\\*\\([0-9]\\{4\\}-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9][^*[:space:]]*\\)\\*\\*$"
+  "Regexp matching a `knot add-note' header line in a ticket body.
+Deliberately strict — a whole line, bold-delimited, nothing else —
+so instants quoted in prose or inside code fences are left alone.")
+
+(defun knot-show--format-instant (iso)
+  "Return ISO (a UTC instant string) rendered in the local timezone.
+Formatted as `2026-06-23 22:53 -0300': minute precision, offset
+always shown.  Returns ISO unchanged when it is not a string or
+does not parse, so unexpected values are displayed verbatim
+rather than blanked or guessed at.
+
+Display only.  Tickets store UTC and the CLI emits UTC; nothing
+parses the rendered form back."
+  (or (and (stringp iso)
+           ;; `parse-iso8601-time-string' clobbers the match data, which
+           ;; `knot-show--localize-body-notes' relies on to advance.
+           (save-match-data
+             (let ((time (ignore-errors (parse-iso8601-time-string iso))))
+               (and time (format-time-string "%Y-%m-%d %H:%M %z" time)))))
+      iso))
+
+(defun knot-show--localize-body-notes (body)
+  "Return BODY with every note header line rendered in the local timezone.
+Matches `knot-show--note-header-re'; all other text is untouched."
+  (if (stringp body)
+      (replace-regexp-in-string
+       knot-show--note-header-re
+       (lambda (m)
+         (format "**%s**"
+                 (knot-show--format-instant
+                  (substring m 2 (- (length m) 2)))))
+       body t t)
+    body))
+
 (defun knot-show--render (data)
   "Render DATA (the parsed `show' envelope) into the current buffer."
   (let ((inhibit-read-only t))
@@ -2092,8 +2128,10 @@ unannotated so RET there falls through to the no-op user-error."
       (knot-show--render-relationship-ids "deps" deps blockers)
       (knot-show--render-relationship-ids "links" links linked)
       (knot-show--render-scalar-list "external" external)
-      (when created (insert (format "**created:** %s\n" created)))
-      (when updated (insert (format "**updated:** %s\n" updated)))
+      (when created
+        (insert (format "**created:** %s\n" (knot-show--format-instant created))))
+      (when updated
+        (insert (format "**updated:** %s\n" (knot-show--format-instant updated))))
       (insert "\n")
       (let ((ac-section-start (point)))
         (insert "## Acceptance Criteria\n\n")
@@ -2113,9 +2151,10 @@ unannotated so RET there falls through to the no-op user-error."
         (add-text-properties ac-section-start (point)
                              (list 'knot-section 'acceptance)))
       (when (and body (stringp body) (not (string-empty-p body)))
-        (insert body)
-        (unless (string-suffix-p "\n" body)
-          (insert "\n"))
+        (let ((body (knot-show--localize-body-notes body)))
+          (insert body)
+          (unless (string-suffix-p "\n" body)
+            (insert "\n")))
         (insert "\n"))
       (knot-show--render-relationship
        "Blockers" blockers 'knot-dep-id 'blockers "_(no blockers)_")
@@ -2356,7 +2395,12 @@ CALLBACK is a thunk called after a successful commit."
   "Return the prefill content for FIELD from the show buffer's data.
 For `body', the entire body field is returned verbatim; for
 `description' and `design', the corresponding `## Section'
-subtree is extracted."
+subtree is extracted.
+
+Prefill comes from the stored data, so note headers appear as the
+UTC instants they are — unlike the show buffer, which renders
+them in the local timezone.  Capture buffers commit their text
+back verbatim and must show what will be written."
   (let ((body (alist-get 'body knot-show--data)))
     (pcase field
       ('body        (or body ""))

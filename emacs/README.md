@@ -40,6 +40,14 @@ Suggested global bind:
 (keymap-global-set "C-c k v" #'knot-find-id-at-point)
 ```
 
+## Timestamps
+
+The show buffer renders the `created` and `updated` fields and the
+`## Notes` headers in your local timezone (`2026-06-23 22:53 -0300`).
+This is display only — tickets store UTC and the CLI emits UTC, so
+the capture buffers opened by `b` (edit-body) and `n` (add-note) show
+the stored UTC instants, since their text is committed back verbatim.
+
 ## Smooth scrolling
 
 `knot-list-mode` and `knot-deps-mode` enable `pixel-scroll-precision-mode`
