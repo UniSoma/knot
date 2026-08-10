@@ -763,17 +763,26 @@ accept."
 ;;;; Sort state (knot-list module)
 
 (defconst knot-list--sort-keys
-  '(id title priority status type mode created updated)
-  "Keys accepted by the sort transient and persisted in `knot-list--sort'.")
+  '(id title priority status type mode created updated closed)
+  "Keys accepted by the sort transient and persisted in `knot-list--sort'.
+`closed' reads the close-time stamp the CLI emits on terminal rows —
+distinct from the `closed' status value and the `closed' view.  Live
+rows carry no such stamp, so the key is only offered in the closed
+view (see `knot-list-sort').")
 
 (defconst knot-list--view-default-sort
   '((list    priority . t)
     (ready   priority . t)
     (blocked priority . t)
-    (closed  updated  . nil))
+    (closed  closed   . nil))
   "Initial sort applied per view when the buffer-local sort is unset.
 Each entry is (VIEW KEY . ASCENDING-P).  Used by
-`knot-list--effective-sort' to resolve a nil `knot-list--sort'.")
+`knot-list--effective-sort' to resolve a nil `knot-list--sort'.
+The closed view defaults to close-time descending so the rendered
+order reproduces the one `knot closed' already emits (the CLI sorts
+by `:closed' descending); sorting those rows by `updated' instead
+would let a post-close note float a ticket above tickets closed
+after it.")
 
 (defconst knot-list--column->sort-key
   '(("ID"     . id)
@@ -789,7 +798,15 @@ Used to hydrate `knot-list--sort' after the built-in `S' binding mutates
 columns but absent from the sort key set; `S' on those columns reorders
 the buffer without updating `knot-list--sort'.  \"Age\" aliases to
 `updated' so column-header sort uses the underlying ISO timestamp
-rather than the rendered string (which would order `1m < 1w < 2w`).")
+rather than the rendered string (which would order `1m < 1w < 2w`).
+
+The map is view-independent by design.  In the closed view the Age
+cell renders from `closed' (`knot-list--age-cell') while `S' on that
+column still sorts by `updated', so the rows land in an order the
+cells do not explain — the header chip reads `sort=updated↓' to say
+so.  The alternative, a per-view map, would give one column two sort
+keys; the closed view's default sort already reaches close-time
+order without touching a column header.")
 
 (defvar-local knot-list--rows nil
   "Cached raw rows from the most recent CLI fetch.
@@ -827,13 +844,20 @@ repaint; never managed incrementally.")
 
 (defun knot-list--sort-natural-direction (key)
   "Return the natural ASCENDING-P when KEY is first picked from the transient.
-Time-valued keys (`created', `updated') default to descending so recent
-tickets surface first; everything else defaults to ascending."
-  (if (memq key '(created updated)) nil t))
+Time-valued keys (`created', `updated', `closed') default to descending
+so recent tickets surface first; everything else defaults to ascending."
+  (if (memq key '(created updated closed)) nil t))
 
 (defun knot-list--cmp-values (a b)
   "Return -1, 0, or 1 comparing A and B (strings, numbers, or nil).
-nil sorts before non-nil; numbers before strings when types differ."
+nil sorts before non-nil; numbers before strings when types differ.
+
+This is direction-symmetric: nil leads when ascending and trails when
+descending, uniformly across every sort key.  Under `closed' that
+diverges from the CLI, which sinks stamp-less tickets last regardless
+of direction — but only after \\[knot-list-sort] `d' flips the closed
+view off its descending default, where the two agree.  Kept uniform
+deliberately rather than special-cased per key."
   (cond
    ((equal a b) 0)
    ((null a) -1)
@@ -870,7 +894,8 @@ used by `knot ready' / `knot list'."
 (defun knot-list--sort->table-key (sort)
   "Return the `tabulated-list-sort-key' equivalent for SORT, or nil.
 Returns nil when SORT's key has no matching column (`created' /
-`updated'), so the column-header sort indicator stays blank for those."
+`updated' / `closed'), so the column-header sort indicator stays blank
+for those — including the closed view's `closed' default."
   (let* ((key (car sort))
          (asc-p (cdr sort))
          (col (car (rassq key knot-list--column->sort-key))))
@@ -1311,9 +1336,17 @@ Nil DAYS renders as \"-\" so columns stay aligned."
    (t (format "%dm" (/ days 30)))))
 
 (defun knot-list--age-cell (row)
-  "Return the Age column text for ROW, computed client-side from `updated'."
+  "Return the Age column text for ROW, computed client-side.
+Ages from ROW's `closed' stamp when it carries one, else from
+`updated'.  The choice is row-driven, not view-driven, so a closed
+ticket reads the same wherever it surfaces — the closed view and a
+live view narrowed by `--status closed' agree.  For an archived
+ticket, time-since-close is the meaningful age; its `updated' clock
+keeps ticking on post-close notes and edits that say nothing about
+when the work ended."
   (knot-list--format-age-days
-   (knot-list--age-days (alist-get 'updated row))))
+   (knot-list--age-days (or (alist-get 'closed row)
+                            (alist-get 'updated row)))))
 
 
 ;;;; Filter transient (knot-list module)
@@ -1597,6 +1630,16 @@ does not run a fresh CLI subprocess."
   (interactive)
   (knot-list--set-sort-key 'updated))
 
+(defun knot-list-sort-by-closed ()
+  "Sort the active list view by close timestamp (descending by default)."
+  (interactive)
+  (knot-list--set-sort-key 'closed))
+
+(defun knot-list--closed-view-p ()
+  "Return non-nil when the current buffer renders the `closed' view."
+  (and (derived-mode-p 'knot-list-mode)
+       (eq knot-list--view 'closed)))
+
 (defun knot-list-sort-toggle-direction ()
   "Flip the current sort direction without re-picking the key."
   (interactive)
@@ -1617,7 +1660,11 @@ Each \"Sort by\" suffix pins the buffer's sort key (using a natural
 direction: descending for time-valued keys, ascending for the rest)
 and re-renders the cached rows without a fresh CLI call.  `d' flips
 direction without re-picking the key; `R' clears the buffer-local
-sort so the active view's default applies."
+sort so the active view's default applies.
+
+`x' (closed) appears only in the closed view: the CLI stamps
+`closed' on terminal rows only, so the key would collapse every
+live row to nil and degenerate into the id tiebreak elsewhere."
   ["Sort by"
    ("i" "id"        knot-list-sort-by-id)
    ("t" "title"     knot-list-sort-by-title)
@@ -1626,7 +1673,8 @@ sort so the active view's default applies."
    ("T" "type"      knot-list-sort-by-type)
    ("m" "mode"      knot-list-sort-by-mode)
    ("c" "created"   knot-list-sort-by-created)
-   ("u" "updated"   knot-list-sort-by-updated)]
+   ("u" "updated"   knot-list-sort-by-updated)
+   ("x" "closed"    knot-list-sort-by-closed :if knot-list--closed-view-p)]
   ["Order"
    ("d" "toggle direction"      knot-list-sort-toggle-direction)
    ("R" "reset to view default" knot-list-sort-reset)])

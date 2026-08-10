@@ -48,6 +48,46 @@ This is display only — tickets store UTC and the CLI emits UTC, so
 the capture buffers opened by `b` (edit-body) and `n` (add-note) show
 the stored UTC instants, since their text is committed back verbatim.
 
+## Sorting
+
+`o` opens the sort transient. Picking a key applies it client-side
+over the cached rows — no fresh subprocess — using a natural
+direction: descending for the time-valued keys (`created`, `updated`,
+`closed`), ascending for the rest. `d` flips direction; `R` clears the
+buffer-local sort so the view default applies again.
+
+View defaults: `list`, `ready`, and `blocked` sort by priority
+ascending; `closed` sorts by **close time descending**, reproducing
+the order `knot closed` itself emits. Sorting the archive by `updated`
+instead would let a post-close note or retag float a ticket above
+tickets that were actually closed after it.
+
+The `x` (closed) sort key appears only in the closed view — the CLI
+stamps `closed` on terminal rows only, so elsewhere the key would
+collapse every row to nil.
+
+`created`, `updated`, and `closed` have no matching column, so the
+column-header sort indicator stays blank while one of them is active;
+the header-line `sort=` chip is the readout. `S` on a column header
+still works and updates the chip.
+
+## Age column
+
+`Age` renders time since a row's `closed` stamp when it has one, and
+time since `updated` otherwise. The choice follows the *row*, not the
+view, so a closed ticket reads the same in the closed view and in a
+live view narrowed by `--status closed`. For an archived ticket,
+time-since-close is the meaningful age; its `updated` clock keeps
+ticking on post-close edits that say nothing about when the work
+ended.
+
+One consequence worth knowing: `S` on the `Age` header sorts by
+`updated` in every view, including `closed`. In the closed view that
+reorders rows into a sequence the rendered cells no longer explain —
+the header chip reads `sort=updated↓` to say so. The closed view's
+default sort already gives you close-time order without touching the
+header.
+
 ## Smooth scrolling
 
 `knot-list-mode` and `knot-deps-mode` enable `pixel-scroll-precision-mode`
