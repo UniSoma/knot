@@ -2141,6 +2141,7 @@ Matches `knot-show--note-header-re'; all other text is untouched."
            (external  (alist-get 'external_refs data))
            (created   (alist-get 'created data))
            (updated   (alist-get 'updated data))
+           (closed    (alist-get 'closed data))
            (acceptance (alist-get 'acceptance data))
            (body      (alist-get 'body data))
            (blockers  (alist-get 'blockers data))
@@ -2180,6 +2181,11 @@ Matches `knot-show--note-header-re'; all other text is untouched."
         (insert (format "**created:** %s\n" (knot-show--format-instant created))))
       (when updated
         (insert (format "**updated:** %s\n" (knot-show--format-instant updated))))
+      ;; Only terminal tickets carry a close time, and it is the archive's
+      ;; ordering key (`knot-list--view-default-sort'), so the closed view
+      ;; sorts by a field that would otherwise appear nowhere in the UI.
+      (when closed
+        (insert (format "**closed:** %s\n" (knot-show--format-instant closed))))
       (insert "\n")
       (let ((ac-section-start (point)))
         (insert "## Acceptance Criteria\n\n")

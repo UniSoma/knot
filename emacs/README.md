@@ -42,8 +42,12 @@ Suggested global bind:
 
 ## Timestamps
 
-The show buffer renders the `created` and `updated` fields and the
-`## Notes` headers in your local timezone (`2026-06-23 22:53 -0300`).
+The show buffer renders the `created`, `updated`, and `closed` fields
+and the `## Notes` headers in your local timezone
+(`2026-06-23 22:53 -0300`). Only a ticket in a terminal status carries
+`closed`, so the line is absent on live tickets. It is the archive's
+ordering key — see [Sorting](#sorting) — and the show buffer is where
+you read it at full precision; the `Age` column only buckets it.
 This is display only — tickets store UTC and the CLI emits UTC, so
 the capture buffers opened by `b` (edit-body) and `n` (add-note) show
 the stored UTC instants, since their text is committed back verbatim.
