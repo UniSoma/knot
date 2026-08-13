@@ -79,10 +79,17 @@ Emitted by:
   the project's `:terminal-statuses` set, the same archive routing
   fires and `meta.archived_to` lands on the envelope.
 
-Non-terminal mutations (`start`, non-terminal `status`, `update`,
-`dep`, `undep`, `link`, `unlink`, `add-note`, `create`, `reopen`,
-`migrate-ac`) do not emit `meta`. Treat its absence as a hard signal
-that no archive routing happened.
+Every other mutation (`start`, non-terminal `status`, `update`, `dep`,
+`undep`, `link`, `unlink`, `add-note`, `create`, `reopen`,
+`migrate-ac`) omits `meta`.
+
+**`update --status <terminal>` is the exception to read carefully**: it
+*does* archive the file — same routing as `close` — but emits no
+`meta.archived_to`. So absent `meta` is a hard signal only for
+`close` and `status`; when the mutation is an `update`, read
+`data.status` against the project's `:terminal-statuses` to know
+whether the file moved, or reach for `close` when you want the path
+back.
 
 ## Schema versioning
 
@@ -214,7 +221,17 @@ Optional keys that may be present:
   umbrella rows** (tickets with ≥1 child) of `list`/`ready`/`blocked`/
   `closed` and `show`. Absence doubles as the predicate — `jq 'select(has("children_total"))'`
   selects umbrellas. Not frontmatter; never written to disk.
+- `cc` (integer or `null`) — connected-component ordinal over the
+  live-induced graph. Present on **every** `list`/`ready`/`blocked` row
+  (`null` for singletons — uniform shape, so don't branch on key presence).
+- `leverage` / `coupling` (integer) — the `LEV` and `CPL` metrics, present on
+  every `list`/`ready`/`blocked` row.
 - `body` (string) — included in *single-ticket-shape* envelopes; omitted in *ls-shape*.
+
+The three computed graph fields (`cc`, `leverage`, `coupling`) are emitted by
+`list`/`ready`/`blocked` only — `closed --json`, `show`, and every non-listing
+command omit them. Their scope rules live in
+[`listing-filters-and-columns.md`](listing-filters-and-columns.md).
 
 ### Read commands
 
@@ -244,7 +261,7 @@ Optional keys that may be present:
 | `link <a> <b> [<c>...]`     | `ticket[]`   | no    | —       | One entry per touched ticket; `data` is body-less.             |
 | `unlink <from> <to>`        | `ticket[]`   | no    | —       | Both touched tickets returned.                                 |
 | `add-note <id> "<text>"`    | `ticket`     | yes   | —       | `data.body` includes the new note.                             |
-| `update <id> [flags...]`    | `ticket`     | yes   | —       | `update` never archives, so `meta` is never present.           |
+| `update <id> [flags...]`    | `ticket`     | yes   | never   | A terminal `--status` archives the file like `close`, but `update` never emits `meta` — see *`meta` slot*. |
 | `delete <id>` (+`--cascade`)| `{deleted: {id, path}, cleaned: [{id, fields:[...]}]}` | n/a | — | Target is gone; envelope carries the removed id + posix path. Without `--cascade`, `cleaned` is `[]` and a non-leaf delete emits the `has_incoming_refs` error envelope instead. With `--cascade`, `cleaned` lists every rewritten referrer (alphabetical by id, fields as string vector). |
 | `migrate-ac`                | `{migrated, unchanged, total}` | n/a | — | Counts triple. `total == migrated + unchanged` invariant.   |
 
