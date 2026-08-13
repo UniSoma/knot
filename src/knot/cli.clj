@@ -341,6 +341,21 @@
   [statuses terminal-statuses]
   (first (filter (set terminal-statuses) statuses)))
 
+(defn- archive-meta
+  "Return the `--json` envelope's `:meta` opts reporting where the ticket
+   file now lives, or nil when there is nothing to report.
+
+   `meta.archived_to` is a *location report*, not a movement event: it
+   asserts \"this ticket is in the archive at this path\" and so is
+   emitted whenever `status` is in `terminal-statuses` — including a
+   terminal → terminal transition that moves no file. A non-terminal
+   `status` means the ticket is in the live directory and yields nil
+   (see ADR 0015). Shared by every transition path so the reporting
+   cannot drift from the routing `knot.store/save!` already performs."
+  [terminal-statuses status saved]
+  (when (contains? (or terminal-statuses #{}) status)
+    {:meta {:archived_to (fs/unixify saved)}}))
+
 (defn- gate-acceptance!
   "Evaluate the v0.3 acceptance gate for a status transition. Fires when
    `source` equals `active-status`, `target` is in `terminal-statuses`,
@@ -463,9 +478,10 @@
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the post-mutation ticket under `:data` instead of the saved
    path. When the new status is in `:terminal-statuses`, the envelope
-   adds `:meta {:archived_to <path>}` so callers do not have to infer
-   archive routing. Returns nil when no ticket matches (json mode does
-   not change the not-found contract; the handler emits the envelope)."
+   adds `:meta {:archived_to <path>}` via `archive-meta` so callers do
+   not have to infer archive routing. Returns nil when no ticket
+   matches (json mode does not change the not-found contract; the
+   handler emits the envelope)."
   [ctx {:keys [id status summary json? force?]}]
   (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
         (resolve-ctx ctx)]
@@ -516,11 +532,9 @@
             saved    (store/save! project-root tickets-dir full-id nil ticket
                                   {:now now :terminal-statuses terminal-statuses})]
         (if json?
-          (let [post             (store/load-one project-root tickets-dir full-id)
-                terminal-target? (contains? (or terminal-statuses #{}) status)
-                meta-opt         (when terminal-target?
-                                   {:meta {:archived_to (fs/unixify saved)}})]
-            (output/touched-ticket-json post meta-opt))
+          (output/touched-ticket-json
+           (store/load-one project-root tickets-dir full-id)
+           (archive-meta terminal-statuses status saved))
           saved)))))
 
 (defn start-cmd
@@ -1097,7 +1111,11 @@
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the post-mutation ticket under `:data` instead of the
    saved path. The `:updated` timestamp inside `:data` reflects the
-   bump."
+   bump. When the resulting status is in `:terminal-statuses` the
+   envelope adds `:meta {:archived_to <path>}` via `archive-meta`, the
+   same contract `status-cmd` emits — a terminal `--status` here
+   performs the identical archive routing, so it owes the identical
+   report (ADR 0015)."
   [ctx opts]
   (when (and (contains? opts :body)
              (some #(contains? opts %) [:description :design]))
@@ -1172,7 +1190,8 @@
                                   {:now now :terminal-statuses terminal-statuses})]
         (if (:json? opts)
           (output/touched-ticket-json
-           (store/load-one project-root tickets-dir full-id))
+           (store/load-one project-root tickets-dir full-id)
+           (archive-meta terminal-statuses target saved))
           saved)))))
 
 (defn- filter-criteria

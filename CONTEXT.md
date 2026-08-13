@@ -70,6 +70,12 @@ _Avoid_: conflating it with **Closure** ("live closure", "`--closure --live`" �
 The instant a ticket reached a terminal status, stamped once at close and emitted as the `closed` field on terminal rows (`knot closed --json`, `knot show --json`). Distinct from two other things the bare word "closed" names in this codebase: the **status value** `closed`, and the **`closed` view / command** that lists terminal tickets. Close time is the archive's natural ordering key — `knot closed` sorts by it descending (stamp-less tickets last), and it is what "how long ago was this finished?" means. Not to be read off `updated`: `updated` keeps moving on post-close notes, retags, and edits, so the two diverge on any ticket touched after it closed (in this repo, roughly a third of the archive).
 _Avoid_: "closed date" when the status or the view is meant — say "terminal status" or "the closed view"; "last touched" as a synonym (that's `updated`).
 
+### Ticket storage
+
+**Archive routing**:
+A ticket's status *determines* which directory holds its file: terminal statuses live under the archive, everything else in the live directory. Status and location are one fact, not two — every write re-derives the location from the status, so a ticket cannot be closed-but-live or open-but-archived, and no command "archives a ticket" as a separate act from setting a terminal status. This is why a ticket's location is always readable off its status, and why reporting a path back to a caller (`meta.archived_to`, ADR 0015) is a convenience rather than a channel carrying information the status doesn't already have. The corollary runs both ways: any command that can set a non-terminal status on an archived ticket un-archives it, whether or not that was the caller's intent.
+_Avoid_: "archiving" / "un-archiving" as actions a command performs (they are consequences of a status change — say "closing" or "reopening"); "archived" as a status value (the status is terminal, e.g. `closed`; archived describes where the file sits); treating the archive as immutable history (it is an ordinary directory — `reopen`, `add-note`, `update`, and `delete --cascade` all write into it).
+
 ## Relationships
 
 - **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; **release-tag smoke** runs post-push on tag. All three are independent gates with distinct triggers and consumers — none implies the other.

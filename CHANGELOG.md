@@ -16,6 +16,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added/Changed/Fixed/Removed
 
+### Fixed
+
+- **`update <id> --status <terminal> --json` now emits `meta.archived_to`.**
+  It performed the same live → archive routing as `close` and
+  `status <id> <terminal>` but reported nothing, so a JSON consumer
+  tracking ticket file locations off `meta` silently lost the file on
+  exactly that call. The slot's meaning is now specified rather than
+  incidental: `meta.archived_to` is a **location report** — "this ticket is
+  in the archive, here" — emitted by `close`, `status`, and `update`
+  whenever the *resulting* status is terminal, whether or not the call
+  moved a file. An absent `meta` therefore means the live directory; the
+  un-archiving direction (`reopen`, `status`/`update` to a non-terminal
+  status) stays deliberately silent, since `data.status` already carries
+  that fact and there is no `restored_to` counterpart. Because the rule is
+  keyed on resulting status rather than on which flags were passed, a
+  field-only `update` on an already-archived ticket reports too. Purely
+  additive — `schema_version` stays at `1`. A shared `archive-meta` helper
+  in `knot.cli` now computes the slot for every transition path, so the
+  reporting cannot drift from the routing again; the routing itself was
+  always shared in `knot.store/save!`. See ADR 0015; the contract surface
+  is pinned end-to-end in `json_contract_test.clj`, un-archive negative
+  included.
+
 ## [0.9.0] - 2026-06-24
 
 ### Added

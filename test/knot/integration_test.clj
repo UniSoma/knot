@@ -2292,7 +2292,7 @@
         (is (= "New" (get-in parsed [:data :title])))
         (is (= 1 (get-in parsed [:data :priority])))
         (is (not (contains? parsed :meta))
-            "update never archives — no :meta slot"))))
+            "resulting status is non-terminal — no :meta slot"))))
 
   (testing "update --json on a missing id emits not_found envelope (exit 1)"
     (with-tmp tmp

@@ -21,7 +21,7 @@ The runtime is the source of truth: if this document and a live
 | `ok`             | boolean  | Success discriminator. See *The `ok` discriminator* below for the one carve-out (`knot check`).    |
 | `data`           | varies   | Present on success. Shape depends on the command — see *Per-command `data`*.                       |
 | `error`          | object   | Present on failure. Always carries `code` and `message`; some codes carry extra fields.            |
-| `meta`           | object   | Optional. Currently only `meta.archived_to` on terminal-status mutations (`close`, terminal `status`). Path is POSIX-normalized (forward slashes) on every platform. |
+| `meta`           | object   | Optional. Currently only `meta.archived_to`, emitted by `close`, `status`, and `update` when the resulting status is terminal. Path is POSIX-normalized (forward slashes) on every platform. |
 
 ### Stable invariants
 
@@ -61,7 +61,7 @@ finds integrity errors, it emits:
 
 ### `meta` slot
 
-Currently used by exactly two commands:
+Carries one key, `archived_to`, on the three transition commands:
 
 ```json
 {
@@ -72,24 +72,35 @@ Currently used by exactly two commands:
 }
 ```
 
-Emitted by:
+`meta.archived_to` is a **location report, not a movement event**
+(ADR 0015). It asserts *"this ticket is in the archive, here"* — so it
+is emitted whenever the resulting `data.status` is in the project's
+`:terminal-statuses`, whether or not the call moved a file. Emitted by:
 
-- `close --json` (always — close routes the ticket into archive).
-- `status <id> <terminal-status> --json` — when the new status is in
-  the project's `:terminal-statuses` set, the same archive routing
-  fires and `meta.archived_to` lands on the envelope.
+- `close --json` — always; close targets a terminal status by
+  definition.
+- `status <id> <terminal-status> --json`.
+- `update <id> --status <terminal-status> --json` — same archive
+  routing as `close`, same report.
 
-Every other mutation (`start`, non-terminal `status`, `update`, `dep`,
-`undep`, `link`, `unlink`, `add-note`, `create`, `reopen`,
-`migrate-ac`) omits `meta`.
+Two consequences of *location* rather than *movement*:
 
-**`update --status <terminal>` is the exception to read carefully**: it
-*does* archive the file — same routing as `close` — but emits no
-`meta.archived_to`. So absent `meta` is a hard signal only for
-`close` and `status`; when the mutation is an `update`, read
-`data.status` against the project's `:terminal-statuses` to know
-whether the file moved, or reach for `close` when you want the path
-back.
+- A call that lands on a terminal status without moving anything still
+  reports — re-closing an already-closed ticket, or
+  `update <archived-id> --priority 1 --json`. The path is the ticket's
+  current location, which is what a consumer tracking files needs.
+- The key is keyed on the resulting status, not on which flags were
+  passed, so two calls that leave the ticket in the same state emit the
+  same envelope.
+
+**An absent `meta` means the ticket is in the live directory.** The
+un-archiving direction is deliberately silent — `reopen`,
+`status <id> <non-terminal>`, and `update <id> --status <non-terminal>`
+all move the file back out of the archive and report nothing, because a
+non-terminal `data.status` already carries that fact. There is no
+`restored_to` counterpart. Every non-transition mutation (`dep`,
+`undep`, `link`, `unlink`, `add-note`, `create`, `migrate-ac`) omits
+`meta` regardless of status.
 
 ## Schema versioning
 
@@ -255,13 +266,13 @@ command omit them. Their scope rules live in
 | `start <id>`                | `ticket`     | yes   | —       | `data.status` flipped to the project's active status.          |
 | `status <id> <new>`         | `ticket`     | yes   | conditional | `meta.archived_to` present iff `<new>` is in `:terminal-statuses`. |
 | `close <id>`                | `ticket`     | yes   | yes     | Always emits `meta.archived_to`; `data.closed` populated.      |
-| `reopen <id>`               | `ticket`     | yes   | —       | Restores from archive; `data.closed` cleared.                  |
+| `reopen <id>`               | `ticket`     | yes   | —       | Restores from archive; `data.closed` cleared. Reports no path — a non-terminal `data.status` means the live directory. |
 | `dep <from> <to>`           | `ticket` (the `from`) | yes | — | `data.deps` reflects the post-add list.                       |
 | `undep <from> <to>`         | `ticket` (the `from`) | yes | — | `data.deps` reflects the post-remove list.                    |
 | `link <a> <b> [<c>...]`     | `ticket[]`   | no    | —       | One entry per touched ticket; `data` is body-less.             |
 | `unlink <from> <to>`        | `ticket[]`   | no    | —       | Both touched tickets returned.                                 |
 | `add-note <id> "<text>"`    | `ticket`     | yes   | —       | `data.body` includes the new note.                             |
-| `update <id> [flags...]`    | `ticket`     | yes   | never   | A terminal `--status` archives the file like `close`, but `update` never emits `meta` — see *`meta` slot*. |
+| `update <id> [flags...]`    | `ticket`     | yes   | conditional | `meta.archived_to` present iff the resulting `data.status` is in `:terminal-statuses` — including a field-only update to an already-archived ticket. Same contract as `status`. |
 | `delete <id>` (+`--cascade`)| `{deleted: {id, path}, cleaned: [{id, fields:[...]}]}` | n/a | — | Target is gone; envelope carries the removed id + posix path. Without `--cascade`, `cleaned` is `[]` and a non-leaf delete emits the `has_incoming_refs` error envelope instead. With `--cascade`, `cleaned` lists every rewritten referrer (alphabetical by id, fields as string vector). |
 | `migrate-ac`                | `{migrated, unchanged, total}` | n/a | — | Counts triple. `total == migrated + unchanged` invariant.   |
 

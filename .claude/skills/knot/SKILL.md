@@ -259,9 +259,10 @@ warnings and human-readable context go to stderr.
 
 `.data` is an array for the list-shaped commands (`list`, `ready`, `blocked`, `closed`, `link`, `unlink`) and an object
 otherwise. Failures flip to `{"ok": false, "error": {"code", "message", …}}` with no `data` slot — except `knot check`,
-whose `ok` reports the project's health rather than the request's outcome and so can carry both. `close` (and any
-terminal `status`) adds `meta.archived_to`. The vector-default keys `tags`, `deps`, `links`, and `external_refs` are
-always arrays, so `jq -r '.data[].tags[]'` is safe on every ticket.
+whose `ok` reports the project's health rather than the request's outcome and so can carry both. `close`, `status`, and
+`update` add `meta.archived_to` when the resulting status is terminal — it reports where the ticket file *is*, so an
+absent `meta` means the live directory, not "nothing moved". The vector-default keys `tags`, `deps`, `links`, and
+`external_refs` are always arrays, so `jq -r '.data[].tags[]'` is safe on every ticket.
 
 ```sh
 knot list --json              | jq '.data[] | select(.priority <= 1)'

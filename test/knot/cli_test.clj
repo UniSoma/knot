@@ -3870,7 +3870,7 @@ Restart the daemon.
         (is (contains? (:data parsed) :body)
             "single-ticket envelope includes the body")
         (is (not (contains? parsed :meta))
-            "update never archives — no :meta slot"))))
+            "resulting status is non-terminal — no :meta slot"))))
 
   (testing "update --json with sectional body update reflects the new body"
     (with-tmp tmp

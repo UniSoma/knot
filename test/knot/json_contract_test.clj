@@ -330,11 +330,15 @@
            t (str "unlink --json ticket " (:id t))))))))
 
 (deftest meta-archived-to-contract-test
-  ;; Pin AC#4: close --json and any status --json transition to a
-  ;; terminal status emit a top-level :meta slot carrying the new
-  ;; archive path. Non-terminal transitions (start, status to a
-  ;; non-terminal status, update, dep, link, etc.) MUST NOT emit
-  ;; :meta — pinned in the negative cases below.
+  ;; Pin AC#4: :meta.archived_to is a *location report* — it asserts
+  ;; "this ticket is in the archive at this path", not "the file just
+  ;; moved" (ADR 0015). So every transition path whose RESULTING status
+  ;; is terminal emits it: close, status <terminal>, and update
+  ;; --status <terminal> (which performs the identical archive
+  ;; routing). A non-terminal result means the ticket is in the live
+  ;; directory and :meta is omitted — start, status to a non-terminal
+  ;; status, update back out of the archive, and plain field updates on
+  ;; a live ticket, all pinned in the negative cases below.
   (testing "close --json carries :meta with :archived_to"
     (with-tmp tmp
       (let [{:keys [out]} (run-knot tmp "create" "Hello")
@@ -386,10 +390,62 @@
         (is (not (contains? envelope :meta))
             "start is non-terminal — no :meta slot"))))
 
-  (testing "update --json DOES NOT carry :meta"
-    ;; Sentinel: update never archives, so :meta absence is part of
-    ;; the contract — already pinned in update-end-to-end-test, mirrored
-    ;; here so the meta contract surface is centrally readable.
+  (testing "update --json --status <terminal> carries :meta with :archived_to"
+    ;; The defect this replaced: update --status <terminal> performs
+    ;; the same live -> archive routing as close but used to report
+    ;; nothing, so a consumer tracking file locations off :meta lost
+    ;; the file on exactly this call.
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            id (id-of out "hello")
+            {:keys [out]} (run-knot tmp "update" id "--status" "closed" "--json")
+            envelope (parse-envelope out)
+            archived-to (get-in envelope [:meta :archived_to])]
+        (is (= "closed" (get-in envelope [:data :status])))
+        (is (string? archived-to)
+            "update --status closed must report where the file landed")
+        (is (str/includes? archived-to ".tickets/archive/")
+            (str "archived path must point under .tickets/archive/, got "
+                 (pr-str archived-to)))
+        (is (fs/exists? archived-to)
+            "the archive path must point to an extant file"))))
+
+  (testing "update --json on an already-archived ticket carries :meta"
+    ;; Location report, not movement event: the resulting status is
+    ;; terminal, so the ticket IS in the archive and the envelope says
+    ;; where — even though this call moves no file and passes no
+    ;; --status. Same principle as re-closing an already-closed ticket.
+    ;; Pinned so the rule stays keyed on resulting status rather than
+    ;; on which flags happened to be passed.
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            id (id-of out "hello")
+            _ (run-knot tmp "close" id "--summary" "x")
+            {:keys [out]} (run-knot tmp "update" id "--priority" "1" "--json")
+            envelope (parse-envelope out)
+            archived-to (get-in envelope [:meta :archived_to])]
+        (is (str/includes? archived-to ".tickets/archive/"))
+        (is (fs/exists? archived-to)))))
+
+  (testing "update --json --status <non-terminal> out of the archive DOES NOT carry :meta"
+    ;; The un-archiving direction. (a) is deliberately half-duplex:
+    ;; there is no restored_to counterpart, because a non-terminal
+    ;; status already tells the consumer the ticket is live. Pinned so
+    ;; a later "let's restore symmetry" pass has to be a deliberate
+    ;; contract change.
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            id (id-of out "hello")
+            _ (run-knot tmp "close" id "--summary" "x")
+            {:keys [out]} (run-knot tmp "update" id "--status" "open" "--json")
+            envelope (parse-envelope out)]
+        (is (= "open" (get-in envelope [:data :status])))
+        (is (not (contains? envelope :meta))
+            "un-archiving reports nothing — data.status carries the fact"))))
+
+  (testing "update --json on a live ticket DOES NOT carry :meta"
+    ;; The conditional half: a field-only update whose resulting status
+    ;; is non-terminal stays silent.
     (with-tmp tmp
       (let [{:keys [out]} (run-knot tmp "create" "Hello")
             id (id-of out "hello")
