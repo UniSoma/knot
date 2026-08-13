@@ -19,24 +19,27 @@
              [clojure.test :as t])
 
   test
-  {:doc "Run all tests under test/"
+  {:doc "Run all tests under test/ (parallel; KNOT_TEST_THREADS overrides worker count)"
    :task
    (do
      (cp/add-classpath "test")
+     (cp/add-classpath "script")
      (let [nses (->> (fs/glob "test" "**/*_test.clj")
-                     (map (fn [p] (str (fs/relativize "test" p))))
-                     (map (fn [p] (-> p
-                                      (str/replace ".clj" "")
-                                      (str/replace "/" ".")
-                                      (str/replace "\\" ".")
-                                      (str/replace "_" "-"))))
-                     (map symbol)
+                     (map (fn [p]
+                            {:file (str p)
+                             :ns   (-> (str (fs/relativize "test" p))
+                                       (str/replace ".clj" "")
+                                       (str/replace "/" ".")
+                                       (str/replace "\\" ".")
+                                       (str/replace "_" "-")
+                                       symbol)}))
                      vec)]
        (if (empty? nses)
          (println "No tests found.")
          (do
-           (apply require nses)
-           (let [{:keys [fail error]} (apply t/run-tests nses)]
+           (apply require (map :ns nses))
+           (require '[knot.test-runner])
+           (let [{:keys [fail error]} ((resolve 'knot.test-runner/run-tests) nses)]
              (when (pos? (+ fail error))
                (System/exit 1)))))))}
 

@@ -8,6 +8,16 @@ bb test
 
 The task globs `test/**/*_test.clj` and runs every namespace it finds. There is no scoped subset — the suite is fast enough that every change runs the full set.
 
+## The runner is parallel
+
+`bb test` hands the namespaces to `script/knot/test_runner.clj`, which fans the individual test vars out over one worker per CPU. The suite is dominated by end-to-end tests that spawn a fresh `bb` per command — roughly 890 subprocesses at ~90ms each — so running them one at a time wasted almost all of the wall clock. Set `KNOT_TEST_THREADS` to override the worker count.
+
+Fixtures, counters, and failure output behave exactly as `clojure.test/run-tests`: `:once` fixtures still wrap their whole namespace (and force that namespace to run its vars in order), `:each` fixtures still wrap every var, each var reports into its own counters ref, and failures are captured per var and replayed grouped by namespace.
+
+**`with-redefs` rebinds a var process-wide, so it cannot run next to anything else.** The runner scans each test source for `with-redefs`, `alter-var-root`, and `System/setProperty`, and runs any namespace that uses one alone, in a serial phase that starts only once the parallel phase has fully drained. Introducing a different form of global mutation into a test means teaching `unsafe-ns?` about it — otherwise that test corrupts, or is corrupted by, whatever runs beside it.
+
+Two blind spots in that scan are worth knowing. It reads only `*_test.clj` files, so a shared helper under `test/` that uses `with-redefs` is never seen. And it detects in-process mutation only: a test that shells out to a *mutating* command from the repo root (`help_test`'s `run-knot` passes no `:dir`, so it inherits the repo as cwd) would be classified safe while racing `schema_test`, which reads the real `.tickets/`. Today every such invocation is read-only. Drive mutating commands from a temp dir, as `integration_test` does.
+
 ## When the suite applies
 
 `bb test` and `clj-kondo` gate commits that touch executable code: `src/`, `test/`, `bb.edn`, or CI workflows.
