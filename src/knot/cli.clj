@@ -1386,13 +1386,16 @@
 
 (defn- jsonify-issue
   "Project an issue map into the JSON-friendly shape: stringify
-   `:severity`, `:code`, `:field`; pass through everything else verbatim
-   (so future closed-set additions remain forward-compat)."
+   `:severity`, `:code`, `:field`; unixify `:path` so it matches the
+   absolute POSIX-separated form every other JSON path field ships; pass
+   through everything else verbatim (so future closed-set additions
+   remain forward-compat)."
   [issue]
   (cond-> issue
     (:severity issue) (update :severity name)
     (:code     issue) (update :code     name)
-    (:field    issue) (update :field    name)))
+    (:field    issue) (update :field    name)
+    (:path     issue) (update :path     fs/unixify)))
 
 (defn- jsonify-result
   "Build the `data` body of the check envelope: sorted issues + scanned counts."

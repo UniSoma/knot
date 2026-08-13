@@ -21,7 +21,7 @@ The runtime is the source of truth: if this document and a live
 | `ok`             | boolean  | Success discriminator. See *The `ok` discriminator* below for the one carve-out (`knot check`).    |
 | `data`           | varies   | Present on success. Shape depends on the command — see *Per-command `data`*.                       |
 | `error`          | object   | Present on failure. Always carries `code` and `message`; some codes carry extra fields.            |
-| `meta`           | object   | Optional. Currently only `meta.archived_to`, emitted by `close`, `status`, and `update` when the resulting status is terminal. Path is POSIX-normalized (forward slashes) on every platform. |
+| `meta`           | object   | Optional. Currently only `meta.archived_to`, emitted by `close`, `status`, and `update` when the resulting status is terminal. The path is absolute and POSIX-separated — see *Path fields*. |
 
 ### Stable invariants
 
@@ -68,9 +68,11 @@ Carries one key, `archived_to`, on the three transition commands:
   "schema_version": 1,
   "ok": true,
   "data": { ...ticket... },
-  "meta": { "archived_to": ".tickets/archive/kno-01abc--shipped.md" }
+  "meta": { "archived_to": "/home/you/projects/acme/.tickets/archive/kno-01abc--shipped.md" }
 }
 ```
+
+The value is absolute and POSIX-separated (see *Path fields*).
 
 `meta.archived_to` is a **location report, not a movement event**
 (ADR 0015). It asserts *"this ticket is in the archive, here"* — so it
@@ -101,6 +103,50 @@ non-terminal `data.status` already carries that fact. There is no
 `restored_to` counterpart. Every non-transition mutation (`dep`,
 `undep`, `link`, `unlink`, `add-note`, `create`, `migrate-ac`) omits
 `meta` regardless of status.
+
+## Path fields
+
+Knot addresses tickets by **id** and locates files by **path**, and
+never uses one for the other job (ADR 0016).
+
+- The **id** is the portable identifier. It is stable across retitles,
+  closes, machines, and clones, and it is the only thing any knot
+  command accepts — no command takes a path argument.
+- A **path** is a machine-local *locator*, emitted so a consumer can
+  open the file now. Every path in the envelope is therefore
+  **absolute** and **POSIX-separated** (forward slashes on every
+  platform, Windows included) — with one exception, `info`'s
+  `paths.tickets_dir`, which echoes the configured directory name
+  (`.tickets`) and stays relative because it names a config value
+  rather than locating a file.
+
+A consumer that wants portability stores the id, not the path.
+
+Paths are absolute rather than repo-relative because the project root
+is discovered by walking up from cwd: a root-relative path is not
+openable from a subdirectory, and both terminal hyperlinking and agent
+file-read tools resolve against cwd, so a relative form would break
+silently. Absolute also means an agent never has to join against
+`project_root` with a second `knot info --json` call.
+
+The four sites:
+
+| Site                                          | Emitted by                                                    | Form                                                                 |
+|-----------------------------------------------|---------------------------------------------------------------|----------------------------------------------------------------------|
+| `meta.archived_to`                            | `close`, terminal `status`, terminal `update --status`        | Absolute, POSIX-separated.                                           |
+| `data.deleted.path`                           | `delete`                                                      | Absolute, POSIX-separated. Where the file *was* — it is gone.        |
+| `data.paths.*`                                | `info`                                                        | Absolute, POSIX-separated — except `tickets_dir`, which is the config value (`.tickets`) and is legitimately relative. |
+| `data.issues[].path`                          | `check`, on file-level codes only                             | Absolute, POSIX-separated.                                           |
+
+The form is a contract promise, pinned per site in
+`test/knot/json_contract_test.clj`, not an incidental of the
+implementation.
+
+**Known boundary:** an absolute path is wrong across a container
+boundary where the repo is mounted at a different path than the host
+sees. Knot does not work around this — it is the same limitation every
+path-reporting tool carries. Consumers crossing such a boundary should
+key off ids and rebuild paths themselves.
 
 ## Schema versioning
 
@@ -273,7 +319,7 @@ command omit them. Their scope rules live in
 | `unlink <from> <to>`        | `ticket[]`   | no    | —       | Both touched tickets returned.                                 |
 | `add-note <id> "<text>"`    | `ticket`     | yes   | —       | `data.body` includes the new note.                             |
 | `update <id> [flags...]`    | `ticket`     | yes   | conditional | `meta.archived_to` present iff the resulting `data.status` is in `:terminal-statuses` — including a field-only update to an already-archived ticket. Same contract as `status`. |
-| `delete <id>` (+`--cascade`)| `{deleted: {id, path}, cleaned: [{id, fields:[...]}]}` | n/a | — | Target is gone; envelope carries the removed id + posix path. Without `--cascade`, `cleaned` is `[]` and a non-leaf delete emits the `has_incoming_refs` error envelope instead. With `--cascade`, `cleaned` lists every rewritten referrer (alphabetical by id, fields as string vector). |
+| `delete <id>` (+`--cascade`)| `{deleted: {id, path}, cleaned: [{id, fields:[...]}]}` | n/a | — | Target is gone; envelope carries the removed id + the absolute, POSIX-separated path it occupied. Without `--cascade`, `cleaned` is `[]` and a non-leaf delete emits the `has_incoming_refs` error envelope instead. With `--cascade`, `cleaned` lists every rewritten referrer (alphabetical by id, fields as string vector). |
 | `migrate-ac`                | `{migrated, unchanged, total}` | n/a | — | Counts triple. `total == migrated + unchanged` invariant.   |
 
 ### `info` shape
@@ -281,7 +327,7 @@ command omit them. Their scope rules live in
 ```json
 {
   "project":        { "knot_version": "0.3.0", "name": "...", "prefix": "kno", "config_present": true },
-  "paths":          { "cwd": "...", "project_root": "...", "config_path": "...", "tickets_dir": ".tickets", "tickets_path": "...", "archive_path": "..." },
+  "paths":          { "cwd": "/home/you/projects/acme", "project_root": "/home/you/projects/acme", "config_path": "/home/you/projects/acme/.knot.edn", "tickets_dir": ".tickets", "tickets_path": "/home/you/projects/acme/.tickets", "archive_path": "/home/you/projects/acme/.tickets/archive" },
   "defaults":       { "default_assignee": "...", "effective_create_assignee": "...", "default_type": "task", "default_priority": 2, "default_mode": "hitl" },
   "allowed_values": { "statuses": [...], "active_status": "in_progress", "terminal_statuses": [...], "types": [...], "modes": [...], "afk_mode": "afk", "priority_range": { "min": 0, "max": 4 } },
   "counts":         { "live_count": N, "archive_count": M, "total_count": N + M }
@@ -292,9 +338,12 @@ command omit them. Their scope rules live in
 no parsing). For health verdicts and integrity validation, use
 `knot check`.
 
-All path strings under `paths` are POSIX-normalized (forward slashes)
-on every platform — Windows callers don't have to branch on
-`os.name`. Same rule as `meta.archived_to`.
+Every string under `paths` is absolute and POSIX-normalized (forward
+slashes on every platform, so Windows callers don't have to branch on
+`os.name`) — with one deliberate exception: `tickets_dir` echoes the
+configured directory name (`.tickets`) and stays relative. It is a
+config value, not a locator; `tickets_path` is the absolute form. Same
+rule as `meta.archived_to` — see *Path fields*.
 
 ### `check` shape
 
@@ -317,6 +366,21 @@ diffs over time are stable.
 `severity`, `code`, `ids`, `message` at minimum; some codes (e.g.
 `invalid_priority`, the enum-validators) additionally carry `field`
 and `value`.
+
+**File-level codes additionally carry `path`** — the absolute,
+POSIX-separated location of the offending file (see *Path fields*).
+Exactly three codes emit it:
+
+- `terminal_outside_archive`
+- `frontmatter_parse_error` (which also interpolates the path into its
+  human-readable `message`; parse it out of `path`, not `message`)
+- `missing_required_field`, but *only* when the missing field is `id` —
+  every other missing field is reported against a ticket knot can still
+  name by id.
+
+Graph-level codes (`dep_cycle`, `unknown_id`) and the enum validators
+carry ids alone: the issue is about the graph or the value, not about a
+file on disk. Treat `path` as optional and branch on its presence.
 
 Issue codes (`error.code` is open enum — knot may add codes without
 bumping `schema_version`):
@@ -432,7 +496,7 @@ $ knot close kno-01abc --summary "shipped" --json
     "body": "...full body..."
   },
   "meta": {
-    "archived_to": ".tickets/archive/kno-01abc111111--shipped.md"
+    "archived_to": "/home/you/projects/acme/.tickets/archive/kno-01abc111111--shipped.md"
   }
 }
 ```

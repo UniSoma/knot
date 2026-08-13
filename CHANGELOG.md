@@ -18,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`check --json` issue paths now use forward slashes on Windows.**
+  `data.issues[].path` was the last `--json` path field still emitting
+  native separators — it was missed by the sweep that unixified
+  `meta.archived_to`, `delete`'s `deleted.path`, and `info`'s `paths.*`.
+  On Windows a `C:\proj\.tickets\a.md` becomes `C:/proj/.tickets/a.md`;
+  no value changes on POSIX. Alongside it, the *form* of every JSON path
+  is now a stated contract rather than an accident of the
+  implementation: paths are **absolute** and POSIX-separated at all four
+  sites, because knot addresses tickets by **id** and only ever locates
+  files by path (ADR 0016). The docs had shown three of those examples
+  repo-relative, which no test contradicted; `json-protocol.md` gains a
+  *Path fields* section, `data.issues[].path` is documented for the
+  first time (including that only file-level codes carry it), and
+  `json_contract_test.clj` pins `fs/absolute?` at every site — plus
+  `info`'s `paths.tickets_dir` as deliberately *relative*, since it
+  echoes the config value rather than locating anything. Not a shape
+  change and no POSIX consumer observes it, so `schema_version` stays at
+  `1`.
+
 - **`update <id> --status <terminal> --json` now emits `meta.archived_to`.**
   It performed the same live → archive routing as `close` and
   `status <id> <terminal>` but reported nothing, so a JSON consumer

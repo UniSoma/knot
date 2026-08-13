@@ -350,6 +350,9 @@
             "close --json envelope must contain :meta")
         (is (string? archived-to)
             "meta.archived_to must be a string path")
+        (is (fs/absolute? archived-to)
+            (str "archived path must be absolute (ADR 0016), got "
+                 (pr-str archived-to)))
         (is (str/includes? archived-to ".tickets/archive/")
             (str "archived path must point under .tickets/archive/, got "
                  (pr-str archived-to)))
@@ -370,6 +373,7 @@
             envelope (parse-envelope out)
             archived-to (get-in envelope [:meta :archived_to])]
         (is (string? archived-to))
+        (is (fs/absolute? archived-to))
         (is (str/includes? archived-to ".tickets/archive/")))))
 
   (testing "status --json to a non-terminal status DOES NOT carry :meta"
@@ -404,6 +408,9 @@
         (is (= "closed" (get-in envelope [:data :status])))
         (is (string? archived-to)
             "update --status closed must report where the file landed")
+        (is (fs/absolute? archived-to)
+            (str "archived path must be absolute (ADR 0016), got "
+                 (pr-str archived-to)))
         (is (str/includes? archived-to ".tickets/archive/")
             (str "archived path must point under .tickets/archive/, got "
                  (pr-str archived-to)))
@@ -1046,7 +1053,51 @@
           (is (integer? live_count))
           (is (integer? archive_count))
           (is (integer? total_count))
-          (is (= total_count (+ live_count archive_count))))))))
+          (is (= total_count (+ live_count archive_count)))))
+
+      (testing "info --json — :paths are absolute, except :tickets_dir"
+        ;; ADR 0016: a path in the envelope is a machine-local locator,
+        ;; emitted absolute and POSIX-separated so it opens from any
+        ;; cwd. :tickets_dir is the exception on purpose — it is the
+        ;; *config value* (`.tickets`), not a locator, and stays
+        ;; relative. Asserted explicitly so the next reader does not
+        ;; "fix" it into an absolute path and break the config echo.
+        (let [{:keys [cwd project_root config_path tickets_dir
+                      tickets_path archive_path]} (:paths data)]
+          (is (fs/absolute? project_root)
+              (str "info paths.project_root must be absolute, got "
+                   (pr-str project_root)))
+          (doseq [[k v] [[:cwd cwd] [:config_path config_path]
+                         [:tickets_path tickets_path]
+                         [:archive_path archive_path]]]
+            (is (fs/absolute? v)
+                (str "info paths." (name k) " must be absolute, got "
+                     (pr-str v))))
+          (is (not (fs/absolute? tickets_dir))
+              (str "info paths.tickets_dir echoes the config value and "
+                   "stays relative, got " (pr-str tickets_dir))))))))
+
+(deftest data-shape-delete-test
+  ;; Pin AC#2 for delete --json: object envelope with :deleted
+  ;; {:id :path} and a :cleaned array. The path is the removed file's
+  ;; locator — absolute and POSIX-separated (ADR 0016).
+  (testing "delete --json — :deleted carries the id and an absolute path"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "Hello")
+            id (id-of out "hello")
+            {:keys [out]} (run-knot tmp "delete" id "--json")
+            envelope (parse-envelope out)
+            {:keys [deleted cleaned]} (:data envelope)]
+        (is (= id (:id deleted)))
+        (is (string? (:path deleted)))
+        (is (fs/absolute? (:path deleted))
+            (str "delete data.deleted.path must be absolute, got "
+                 (pr-str (:path deleted))))
+        (is (str/includes? (:path deleted) ".tickets/")
+            "the deleted path must point under the tickets directory")
+        (is (not (fs/exists? (:path deleted)))
+            "the reported path is where the file *was* — it is gone now")
+        (is (vector? cleaned))))))
 
 (deftest data-shape-check-test
   ;; Pin AC#2 for check --json: object envelope with `:issues` (array)
@@ -1082,7 +1133,36 @@
             "severities serialize as snake_case strings, not keywords")
         (is (= "invalid_status" (:code issue)))
         (is (vector? (:ids issue)))
-        (is (string? (:message issue)))))))
+        (is (string? (:message issue))))))
+
+  (testing "check --json — file-level issues carry an absolute :path"
+    ;; Only file-level codes carry :path (terminal_outside_archive,
+    ;; frontmatter_parse_error, and missing_required_field when the
+    ;; missing field is :id); graph-level codes carry ids alone. The
+    ;; fixture is a closed ticket left in the live directory, which is
+    ;; exactly terminal_outside_archive. ADR 0016: the path is a
+    ;; locator, so absolute and POSIX-separated — check was the last
+    ;; site emitting native separators.
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01abc222222--stray.md"))
+            (str "---\nid: kno-01abc222222\ntitle: Stray\n"
+                 "status: closed\ntype: task\npriority: 2\n"
+                 "mode: hitl\ncreated: 2026-01-01T00:00:00Z\n"
+                 "updated: 2026-01-01T00:00:00Z\n---\n\n# Stray\n"))
+      (let [{:keys [out]} (run-knot tmp "check" "--json")
+            issues (get-in (parse-envelope out) [:data :issues])
+            issue  (first (filter #(= "terminal_outside_archive" (:code %))
+                                  issues))]
+        (is (some? issue) "terminal_outside_archive issue must appear")
+        (is (string? (:path issue)) "file-level issues carry :path")
+        (is (fs/absolute? (:path issue))
+            (str "check issues[].path must be absolute, got "
+                 (pr-str (:path issue))))
+        (is (not (str/includes? (:path issue) "\\"))
+            "check issues[].path must be POSIX-separated (fs/unixify)")
+        (is (fs/exists? (:path issue))
+            "the reported path must point at the offending file")))))
 
 (deftest data-shape-dep-tree-test
   ;; Pin AC#2 for dep tree --json: object envelope with a recursive
