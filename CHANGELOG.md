@@ -14,6 +14,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added/Changed/Fixed/Removed
 
+## [0.10.0] - 2026-08-13
+
+### Added
+
+- **`knot <cmd> --help` gains a `NOTES` section** for the per-command caveats a flag description can't hold.
+  `knot help edit` is the first entry: it needs a TTY, so a CI job or an agent run reaches for `knot update` or `knot add-note` instead.
+  This is where any gotcha currently cached in prose belongs.
+
+- **`knot.el`: the show buffer renders timestamps in the local timezone.**
+  `created`, `updated`, and every note header printed the stored UTC instant verbatim.
+  They now render through `knot-show--format-instant` — local zone, minute precision, explicit offset — with unparseable input returned as-is.
+  The body rewrite is a strict whole-line bold-delimited match, so instants quoted in prose or inside code fences are left alone.
+  Display only: tickets store UTC, the CLI emits UTC, and capture buffers still show the stored value because their text is committed back verbatim.
+
+- **`knot.el`: the show buffer renders the close time.**
+  `**closed:**` now sits beside `created` and `updated`, through the same local-timezone formatter, and is absent on live tickets.
+  The closed view had started ordering the whole archive by a field the user could not read.
+  The `Age` column keeps its rough day-bucketed scanning job; the precise stamp is one `RET` away.
+
 ### Changed
 
 - **Agent-facing material is now placed by surface: pull, push, pointer (ADR 0017).**
@@ -23,13 +42,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `knot prime`'s hitl preamble drops to the three intents that are irrecoverable (`ready`, `show`, `close --summary`) and points at `--help` for the rest; `## Recently Closed` renders `id  title` only.
   `--json` still carries full summaries — JSON consumers are not a context surface.
 
-### Added
-
-- **`knot <cmd> --help` gains a `NOTES` section** for the per-command caveats a flag description can't hold.
-  `knot help edit` is the first entry: it needs a TTY, so a CI job or an agent run reaches for `knot update` or `knot add-note` instead.
-  This is where any gotcha currently cached in prose belongs.
+- **`bb test` runs the suite in parallel: 79s down to 10s.**
+  The end-to-end namespaces spawn a fresh `bb` per command, and at ~90ms a spawn those ~890 subprocesses were 77s of the run, one at a time.
+  `script/knot/test_runner.clj` now fans the test vars out over one worker per CPU (`KNOT_TEST_THREADS` overrides).
+  No test changed — 446 tests and 5228 assertions before and after — and reporting is preserved: fixtures keep their scope, and failure output is captured per var and replayed grouped by namespace in source order.
+  Namespaces using `with-redefs`, `alter-var-root`, or `System/setProperty` rebind process-wide state, so the runner detects them by scanning the source and runs them alone in a serial phase that starts only once the parallel phase has drained.
 
 ### Fixed
+
+- **`knot.el`: the closed view sorts by close time, not last-update.**
+  It pinned the view to `updated` descending and re-sorted the CLI's rows client-side, discarding the `:closed` descending order `knot closed` already guarantees.
+  Any post-close note, retag, or edit floated a ticket above tickets closed after it — 36 of 117 archived tickets in this repo.
+  `closed` joins the sort key set as the closed view's default, offered under `x` in the sort transient and gated to that view, and the `Age` column now ages from a row's `closed` stamp when it has one.
 
 - **`check --json` issue paths now use forward slashes on Windows.**
   `data.issues[].path` was the last `--json` path field emitting native separators.
