@@ -159,6 +159,26 @@
           out      (help/command-help-text "dep" stripped {:color? false})]
       (is (not (str/includes? out "EXAMPLES"))))))
 
+(deftest command-help-text-notes-test
+  ;; NOTES is where a per-command caveat lives, so no prose document has to
+  ;; cache it — ADR 0017.
+  (testing "NOTES renders one line per entry, above EXAMPLES"
+    (let [entry (assoc dep-entry :notes ["Cycles are rejected before any write."])
+          out   (help/command-help-text "dep" entry {:color? false})]
+      (is (str/includes? out "NOTES"))
+      (is (str/includes? out "Cycles are rejected before any write."))
+      (is (< (str/index-of out "NOTES") (str/index-of out "EXAMPLES")))))
+
+  (testing "NOTES is omitted when the entry carries none"
+    (let [out (help/command-help-text "dep" dep-entry {:color? false})]
+      (is (not (str/includes? out "NOTES")))))
+
+  (testing "`knot edit` carries its no-TTY caveat, so prose doesn't have to"
+    (let [out (help/command-help-text "edit" (get help/registry :edit) {:color? false})]
+      (is (str/includes? out "TTY"))
+      (is (str/includes? out "knot update"))
+      (is (str/includes? out "knot add-note")))))
+
 (deftest command-help-text-exit-codes-test
   (testing "explicit :exit-codes render under EXIT CODES with code and reason"
     (let [out (help/command-help-text "dep" dep-entry {:color? false})]

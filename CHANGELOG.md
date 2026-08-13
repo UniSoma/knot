@@ -14,6 +14,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added/Changed/Fixed/Removed
 
+### Changed
+
+- **Agent-facing material is now placed by surface: pull, push, pointer (ADR 0017).**
+  Knot reaches an agent through `knot --help` (pull — generated, cannot drift), `knot prime` (push — always loaded, every turn), and the bundled skill (pointer — loaded when its description fires).
+  Material had accumulated on whichever surface it was written for first: the intent table lived on both push and pointer, the skill cached a command index and a filter inventory `--help` already generates, and `## Recently Closed` spent 38% of push's words on mid-sentence-truncated summaries.
+  Each piece now lives on exactly one surface, placed by which failure it prevents — corpus corruption first, wrong-flag last, because unknown flags are rejected loudly and self-correct.
+  `knot prime`'s hitl preamble drops to the three intents that are irrecoverable (`ready`, `show`, `close --summary`) and points at `--help` for the rest; `## Recently Closed` renders `id  title` only.
+  `--json` still carries full summaries — JSON consumers are not a context surface.
+
+### Added
+
+- **`knot <cmd> --help` gains a `NOTES` section** for the per-command caveats a flag description can't hold.
+  `knot help edit` is the first entry: it needs a TTY, so a CI job or an agent run reaches for `knot update` or `knot add-note` instead.
+  This is where any gotcha currently cached in prose belongs.
+
 ### Fixed
 
 - **`check --json` issue paths now use forward slashes on Windows.**

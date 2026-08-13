@@ -4425,7 +4425,7 @@ Restart the daemon.
             "13d 23h is NOT stale — locks the boundary against future drift")))))
 
 (deftest prime-cmd-recently-closed-test
-  (testing "closing a ticket with --summary surfaces both title and summary in Recently Closed"
+  (testing "closing a ticket surfaces its title in Recently Closed, but not its summary"
     (with-tmp tmp
       (let [c (ctx tmp)
             a (cli/create-cmd c {:title "Shipped feature X"})
@@ -4438,8 +4438,10 @@ Restart the daemon.
         (let [section (subs out rc-start cm-start)]
           (is (str/includes? section "Shipped feature X")
               "title surfaces under Recently Closed")
-          (is (str/includes? section "shipped in #482")
-              "close --summary surfaces under the title")))))
+          ;; The section orients — "this was just done" — and the title
+          ;; carries that; `knot show` carries the rest. ADR 0017.
+          (is (not (str/includes? section "shipped in #482"))
+              "the close summary stays off the push surface")))))
 
   (testing "section is suppressed when no tickets have been closed"
     (with-tmp tmp
@@ -4480,7 +4482,9 @@ Restart the daemon.
         (is (str/includes? out "\"summary\":\"wrapped up\""))
         (is (str/includes? out "\"title\":\"Done\"")))))
 
-  (testing "Recently Closed surfaces the close --summary, not earlier progress notes"
+  ;; Summaries reach JSON consumers only, so the "which note is the
+  ;; summary?" contract is pinned there rather than on the text surface.
+  (testing "the recently-closed summary is the close --summary, not an earlier progress note"
     (with-tmp tmp
       (let [c (ctx tmp)
             a (cli/create-cmd c {:title "Built it"})
@@ -4492,13 +4496,10 @@ Restart the daemon.
             _    (cli/close-cmd
                   (assoc c :now "2026-04-30T10:00:00Z")
                   {:id a-id :summary "shipped in #999"})
-            out  (cli/prime-cmd (prime-ctx tmp) {})
-            rc-start (str/index-of out "## Recently Closed")
-            cm-start (count out)
-            section  (subs out rc-start cm-start)]
-        (is (str/includes? section "shipped in #999")
-            "the latest note (close summary) surfaces")
-        (is (not (str/includes? section "halfway there"))
+            out  (cli/prime-cmd (prime-ctx tmp) {:json? true})]
+        (is (str/includes? out "\"summary\":\"shipped in #999\"")
+            "the close summary is what lands in recently_closed")
+        (is (not (str/includes? out "halfway there"))
             "earlier progress notes are not surfaced as the summary")))))
 
 (deftest prime-cmd-omits-schema-section-test

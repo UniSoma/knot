@@ -90,4 +90,5 @@ _Avoid_: "archiving" / "un-archiving" as actions a command performs (they are co
 
 ## Flagged ambiguities
 
+- "the three leverages" for `knot --help` / `knot prime` / the bundled skill — proposed and rejected (2026-08-13). **Leverage** is this glossary's ticket metric (the directed forward unblocking cone); reusing it for knot's documentation architecture puts a second, unrelated meaning on a sharpened term. Those three are the **context surfaces** — *pull*, *push*, and *pointer*, named for when their material enters context. They are documentation vocabulary, not ticket vocabulary, so they are defined in [ADR 0017](docs/adr/0017-three-context-surfaces-pull-push-pointer.md) rather than here.
 - "parent blocks parent" — proposed and rejected (2026-05-14). Conflates composition with sequencing; loses the "umbrella has own work" and "optional follow-up child" cases. Sequencing belongs in `:deps`.

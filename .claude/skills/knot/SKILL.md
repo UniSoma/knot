@@ -17,8 +17,8 @@ user may already have a tracker.
 
 ## The CLI is the contract
 
-`.tickets/` is an implementation detail; `knot` is the interface. Route every read and every write through it —
-including the ones your own tools would otherwise handle:
+`.tickets/` is an implementation detail; `knot` is the interface. `knot prime` states the rule at session start; what
+follows is why it holds and how it cashes out against your own tools:
 
 | Against `.tickets/`, instead of… | Run                                                                      |
 |----------------------------------|--------------------------------------------------------------------------|
@@ -37,7 +37,7 @@ Three invariants knot holds on every write, each of which a hand-edit silently b
 - Terminal status and archive placement move together — a flipped `status:` line strands the file where later queries
   miss it.
 
-When a `knot` command surprises you, report it to the user as a bug and stop there. When knot's surface can't express
+When a `knot` command surprises you, report it to the user as a bug and stop there. When no `knot` command can express
 what you need, that gap is itself the ticket to file.
 
 False economies and their answers:
@@ -88,20 +88,16 @@ session start.
 When the question names a subset, pass the filter — don't list everything and scan the columns. Titles wrap, columns
 shift, the archive is absent, and the user can't verify what you skipped.
 
-`list` / `ready` / `blocked` / `closed` / `prime` all take these (each repeatable):
+`list` / `ready` / `blocked` / `closed` / `prime` share a filter set (`knot <cmd> --help` names them; each is
+repeatable). What the help won't tell you:
 
-```
---type <type>       --status <status>    --tag <tag>        --mode <afk|hitl>
---assignee <user>   --priority <0-4>     --limit <n>
-```
-
-On `prime` they hit every section at once — `knot prime --assignee me` is your tickets everywhere.
-
-The four listing commands take more: `--acceptance-complete=false` (at least one unchecked AC) or `=true` (all
-checked), which drops tickets carrying no AC from either view; and three graph filters — `--parent <id>` (direct
-children), `--closure <id>` (transitively related, archive included), `--component <id>` (the seed's live cluster).
-Their tables also carry computed columns: `CC` (component), `AGE`, `AC` (acceptance progress), `CHLD` (child
-progress), `LEV` (leverage), `CPL` (coupling).
+- On `prime` a filter hits every section at once — `knot prime --assignee me` is your tickets everywhere.
+- `--acceptance-complete` drops tickets carrying no AC from *both* views, so `=false` is "has an unchecked AC", not
+  "isn't finished".
+- The three graph filters answer three different questions: `--parent <id>` direct children, `--closure <id>`
+  everything transitively related with the archive included, `--component <id>` the seed's live cluster.
+- The listing tables carry computed columns — `CC` (component), `AGE`, `AC`, `CHLD`, `LEV` (leverage), `CPL`
+  (coupling) — which are derived, not stored, and never filterable.
 
 **Before composing a graph query or reading a computed column, load
 [`references/listing-filters-and-columns.md`](references/listing-filters-and-columns.md)** — scope rules (live-induced
@@ -237,16 +233,9 @@ is in [`references/json-protocol.md`](references/json-protocol.md).
 is in the loop (the default for new tickets). Treat it as a contract — pick up a `hitl` ticket only when the user
 authorizes that specific ticket.
 
-Handed autonomy, the loop is:
-
-1. `knot ready --mode afk --json` — enumerate candidates (`knot prime --mode afk` first, unless prime is already in the
-   session).
-2. `knot show <id>` — confirm the scope is what you think it is.
-3. `knot start <id>` — claim it.
-4. `knot add-note <id> "<progress>"` — after each non-trivial milestone.
-5. `knot update <id> --priority … --tags …` — for any frontmatter revision along the way; `knot edit` has no TTY to
-   open here.
-6. `knot close <id> --summary "<what landed>"` — when it ships.
+Handed autonomy, the loop is `knot prime --mode afk` — run it unless a `SessionStart` reminder already put it in the
+conversation. It prints the sequence (enumerate → confirm → claim → note → update → close) and it is the single source
+of truth for that sequence; this skill deliberately keeps no second copy to drift against it.
 
 ## JSON
 
@@ -276,22 +265,10 @@ Per-command `data` shapes, the error-code and check-code catalogues, the strict-
 and `prime`'s `stale` / `ready_to_close` fields are pinned in
 [`references/json-protocol.md`](references/json-protocol.md).
 
-## Command index
+## Finding a command or a flag
 
-```
-init / info / schema / serve     start a project; runtime config + allowed values; frontmatter JSON Schema; browser panel
-prime                            session primer: project, in-progress, ready-to-close, ready, recently closed
-list (alias ls) / show           live tickets; one ticket in full
-ready / blocked / closed         unblocked work; waiting work; the archive, newest close first
-create                           new ticket
-start / status / close / reopen  status transitions (gates fire on start and close)
-delete                           remove a file; leaf-only, --cascade rewrites referrers
-add-note / update / edit         append; non-interactive set/replace; $EDITOR
-dep / undep / dep tree           directional blocking edges, cycle-checked on add
-link / unlink                    symmetric peer edges
-check                            integrity scan
-migrate-ac                       one-shot: lift legacy body checklists into frontmatter :acceptance
-```
+`knot --help` lists every command, `knot <cmd> --help` its flags, caveats, and examples. This skill carries no
+inventory of either on purpose — a list here is a copy that outlives what it copied.
 
 Exit codes are `0` success and `1` error, plus `2` on `knot check` for unable-to-scan. Unknown flags are rejected
 rather than absorbed (`Unknown option: :bogus`, exit 1) — when a flag you expect fails that way, `knot <cmd> --help`

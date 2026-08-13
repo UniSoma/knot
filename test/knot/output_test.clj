@@ -1497,42 +1497,53 @@
           "first line is a directive that names the knot CLI"))))
 
 (deftest prime-text-user-says-mapping-test
-  (testing "output contains a user-phrase mapping covering the canonical intents"
+  (testing "output maps user phrasing onto the three irrecoverable intents"
     (let [out (output/prime-text sample-prime-data)]
       (is (str/includes? out "what's next")
           "covers 'what's next?'")
-      (is (str/includes? out "tackle")
-          "covers 'let's tackle <id>'")
-      (is (or (str/includes? out "I'm done")
-              (str/includes? out "let's close"))
-          "covers 'I'm done / shipped / let's close'")
-      (is (or (str/includes? out "note that")
-              (str/includes? out "FYI"))
-          "covers 'note that / FYI'")
-      (is (str/includes? out "blocked on")
-          "covers 'blocked on'"))))
+      (is (str/includes? out "show me")
+          "covers 'show me <id>'")
+      (is (str/includes? out "let's close")
+          "covers 'let's close this'"))))
+
+(deftest prime-text-carries-no-flag-inventory-test
+  ;; The push surface names a flag only when the point is which flag to
+  ;; choose; everything derivable belongs to `--help` — ADR 0017.
+  (let [out (output/prime-text sample-prime-data)
+        first-section (str/index-of out "## ")
+        preamble (subs out 0 first-section)]
+    (testing "the recoverable intents are gone from the preamble"
+      (doseq [snippet ["knot list" "knot start" "knot add-note" "knot update" "knot dep"]]
+        (is (not (str/includes? preamble snippet))
+            (str "`" snippet "` is recoverable from --help and must not sit on push"))))
+    (testing "the preamble routes to the pull surface instead"
+      (is (str/includes? preamble "knot --help")
+          "names the command index's real home")
+      (is (str/includes? preamble "knot <cmd> --help")
+          "names where flags live"))
+    (testing "--summary survives as the one flag that loses information when skipped"
+      (is (str/includes? preamble "--summary")))))
 
 (deftest prime-text-hitl-preamble-rows-test
   (let [out (output/prime-text sample-prime-data)
         first-section (str/index-of out "## ")
         preamble (subs out 0 first-section)]
-    (testing "hitl preamble surfaces all 8 canonical agent verbs in the intent table"
-      (doseq [snippet ["knot ready" "knot show" "knot list" "knot start"
-                       "knot add-note" "knot update" "knot close" "knot dep"]]
+    (testing "hitl preamble keeps exactly the three intents chosen by irrecoverability"
+      (doseq [snippet ["knot ready" "knot show <id>" "knot close <id> --summary"]]
         (is (str/includes? preamble snippet)
             (str "hitl preamble missing intent for `" snippet "`"))))
-    (testing "hitl preamble teaches the canonical `knot update` patch flags"
-      (is (re-find #"knot update <id>.*--title.*--tags.*--priority" preamble)
-          "the update row surfaces the four patch flags"))
-    (testing "hitl preamble's closing pointer names the less-common ops"
-      (is (str/includes? preamble "less-common ops")
-          "modernized pointer phrasing 'less-common ops' present")
-      (doseq [op ["info" "check" "link" "reopen" "--json" "partial-id"]]
-        (is (str/includes? preamble op)
-            (str "less-common ops pointer mentions `" op "`"))))
-    (testing "hitl preamble drops the legacy 'lifecycle, graph ops' phrasing"
-      (is (not (re-find #"lifecycle, graph ops" preamble))
-          "the old skill-pointer prelude is gone"))))
+    (testing "hitl preamble points at the skill for judgment, not for commands"
+      (is (str/includes? preamble "invoke the `knot` skill")
+          "the pointer sentence is present")
+      (doseq [topic ["lifecycle gates" "deps vs links" "--json" "autonomous mode"]]
+        (is (str/includes? preamble topic)
+            (str "skill pointer names the branch `" topic "`"))))
+    (testing "the pointer's branch list stays disjoint from the skill description's"
+      ;; The description triggers cold on project markers, id shape, and
+      ;; ticket-shaped intent. Push names only what push declined to cover.
+      (doseq [cold [".knot.edn" "base32" "GH-"]]
+        (is (not (str/includes? preamble cold))
+            (str "`" cold "` belongs to the skill description, not to push"))))))
 
 (deftest prime-text-negative-space-test
   (testing "output explicitly tells the agent NOT to cat or hand-edit ticket files"
@@ -1604,16 +1615,15 @@
           "all three steps present")
       (is (< add-note-i update-i close-i)
           "ordering: add-note → update → close"))
-    (testing "afk preamble carries the `never knot edit` anti-pattern"
-      (is (re-find #"(?i)never use `knot edit`|never `knot edit`" preamble)
-          "anti-pattern names the forbidden command verbatim")
-      (is (or (str/includes? preamble "TTY")
-              (re-find #"(?i)\$editor|interactive" preamble))
-          "anti-pattern explains *why* (interactive / no-TTY failure)"))
-    (testing "afk skill pointer drops 'lifecycle' (subsumed by the explicit verbs)"
-      (is (not (re-find #"lifecycle" preamble))
-          "afk pointer no longer mentions 'lifecycle'")
-      (doseq [topic ["graph ops" "JSON shapes" "partial-id"]]
+    (testing "the `knot edit` anti-pattern moved to the pull surface"
+      ;; Naming a command only to forbid it makes it more available, not
+      ;; less; the caveat now lives in `knot help edit` — ADR 0017.
+      (is (not (str/includes? preamble "knot edit"))
+          "afk preamble no longer names the command it doesn't want used")
+      (is (str/includes? preamble "non-interactively")
+          "the positive target survives: patch with `knot update`"))
+    (testing "afk skill pointer names the judgment branches"
+      (doseq [topic ["lifecycle gates" "deps vs links" "--json"]]
         (is (str/includes? preamble topic)
             (str "afk pointer keeps `" topic "`"))))))
 
@@ -1916,72 +1926,31 @@
       (is (str/includes? section "kno-bbb"))
       (is (str/includes? section "Beta shipped"))))
 
-  (testing "entries with a :summary surface the summary text in the section"
+  ;; Summaries stay off the text (push) surface entirely — ADR 0017. A
+  ;; summary long enough to need truncating is one the agent would act on
+  ;; half of; the section's job is orientation, which the title does.
+  (testing "summaries never reach prime text, however short"
     (let [data (assoc sample-prime-data
                       :recently-closed
-                      [{:id "kno-aaa" :title "Alpha" :closed "2026-04-29T10:00:00Z"
-                        :summary "shipped in PR #482"}])
+                      [{:id "kno-short" :title "Short" :closed "2026-04-29T10:00:00Z"
+                        :summary "Short summary, no paragraph break."}
+                       {:id "kno-multi" :title "Multi-paragraph close"
+                        :closed "2026-04-28T10:00:00Z"
+                        :summary "First paragraph is the headline.\n\nSecond paragraph has follow-up details."}])
           out (output/prime-text data)
           rc-start (str/index-of out "## Recently Closed")
           section  (subs out rc-start (count out))]
-      (is (str/includes? section "shipped in PR #482"))))
-
-  (testing "long multi-paragraph summary truncates at the first paragraph boundary"
-    (let [data (assoc sample-prime-data
-                      :recently-closed
-                      [{:id "kno-multi"
-                        :title "Multi-paragraph close"
-                        :closed "2026-04-29T10:00:00Z"
-                        :summary "First paragraph is the headline.\n\nSecond paragraph has follow-up details that should NOT surface in prime."}])
-          out (output/prime-text data)
-          rc-start (str/index-of out "## Recently Closed")
-          section  (subs out rc-start (count out))]
-      (is (str/includes? section "First paragraph is the headline.")
-          "first paragraph appears")
-      (is (not (str/includes? section "Second paragraph has follow-up"))
-          "everything after the first \\n\\n is dropped from prime text")
-      (is (str/includes? section "(see knot show kno-multi)")
-          "truncation marker pointing at full summary appended")))
-
-  (testing "summary >280 chars hard-caps at 280 even with no paragraph break"
-    (let [long-summary (apply str (repeat 30 "Lorem ipsum dolor sit amet, consectetur. "))
-          data (assoc sample-prime-data
-                      :recently-closed
-                      [{:id "kno-long"
-                        :title "Long single paragraph"
-                        :closed "2026-04-29T10:00:00Z"
-                        :summary long-summary}])
-          out (output/prime-text data)
-          rc-start (str/index-of out "## Recently Closed")
-          section  (subs out rc-start (count out))
-          summary-line (some (fn [l] (when (str/starts-with? l "    ") l))
-                             (str/split-lines section))]
-      (is (some? summary-line) "summary line found")
-      ;; Line is "    " (4 indent) + truncated body + " (see knot show kno-long)".
-      ;; The body slice itself should be ≤ 280 chars.
-      (is (str/includes? summary-line "(see knot show kno-long)")
-          "hard-cap truncation also gets the see-knot-show marker")
-      (let [marker " (see knot show kno-long)"
-            body   (-> summary-line
-                       (subs 4)
-                       (str/replace marker ""))]
-        (is (<= (count body) 280)
-            (str "truncated body is ≤ 280 chars (was " (count body) ")")))))
-
-  (testing "short single-paragraph summary is NOT truncated and gets no marker"
-    (let [data (assoc sample-prime-data
-                      :recently-closed
-                      [{:id "kno-short"
-                        :title "Short"
-                        :closed "2026-04-29T10:00:00Z"
-                        :summary "Short summary, no paragraph break."}])
-          out (output/prime-text data)
-          rc-start (str/index-of out "## Recently Closed")
-          section  (subs out rc-start (count out))]
-      (is (str/includes? section "Short summary, no paragraph break.")
-          "short summary surfaces in full")
+      (is (str/includes? section "kno-short") "id still surfaces")
+      (is (str/includes? section "Multi-paragraph close") "title still surfaces")
+      (is (not (str/includes? section "Short summary, no paragraph break."))
+          "a summary short enough to fit is still not printed")
+      (is (not (str/includes? section "First paragraph is the headline."))
+          "no first-paragraph slice either")
       (is (not (str/includes? section "(see knot show"))
-          "no truncation marker when no truncation happened")))
+          "no truncation marker, because nothing is truncated")
+      (is (every? (fn [l] (not (str/starts-with? l "    ")))
+                  (str/split-lines section))
+          "no indented summary lines remain — every entry is one line")))
 
   (testing "JSON keeps the full multi-paragraph summary unchanged"
     (let [full-summary "First paragraph is the headline.\n\nSecond paragraph has follow-up details."

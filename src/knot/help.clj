@@ -86,6 +86,17 @@
                           (when note (str "\n    " note)))))
          "\n")))
 
+(defn- notes-block
+  "Render a NOTES section: one indented line per entry. Carries the
+   caveats a flag description can't — the gotchas that would otherwise
+   have to be cached in prose elsewhere. Returns nil when there are no
+   notes."
+  [color? notes]
+  (when (seq notes)
+    (str "\n" (bold color? "NOTES") "\n"
+         (str/join "\n" (for [n notes] (str "  " n)))
+         "\n")))
+
 (defn key->cmd-name
   "Convert a registry key like `:init` or `:dep/tree` into its display
    form `\"init\"` or `\"dep tree\"`."
@@ -467,7 +478,8 @@
     :restrict?   true
     :flags       []
     :examples    [{:cmd "knot edit kno-01abc"
-                   :note "Edit the ticket's frontmatter and body."}]}
+                   :note "Edit the ticket's frontmatter and body."}]
+    :notes       ["Needs a TTY. Without one — a CI job, an agent run — use `knot update` for frontmatter and named body sections, or `knot add-note` to append."]}
 
    :update
    {:group       :notes
@@ -689,7 +701,7 @@
    flag labels / example commands / subcommand labels) and `:registry`
    (used to resolve `:subcommands` keys to their display names +
    descriptions)."
-  [cmd-name {:keys [description flags examples exit-codes subcommands aliases]
+  [cmd-name {:keys [description flags examples exit-codes subcommands aliases notes]
              :as entry}
    {:keys [color? registry] :as _opts}]
   (str (bold color? "USAGE") "\n  " (cyan color? (synopsis cmd-name entry)) "\n"
@@ -698,6 +710,7 @@
        (aliases-block color? aliases)
        (flags-block color? flags)
        (subcommands-block color? registry subcommands)
+       (notes-block color? notes)
        (examples-block color? examples)
        (exit-codes-block color? exit-codes)))
 

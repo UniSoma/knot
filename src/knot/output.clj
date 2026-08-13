@@ -680,34 +680,26 @@
       (str "knot check: ok" suffix)
       (str total " issues (" errs " errors, " warns " warnings)" suffix))))
 
-(defn- prime-skill-pointer
-  "Closing sentence shared by the found/afk preambles, parameterised by
-   the topic list inside the parentheses. Centralised so a reword to the
-   wrapping template (`For the full reference (...), invoke the `knot`
-   skill.`) can't drift between the two preambles."
-  [topics]
-  (str "For the full reference (" topics "), invoke the `knot` skill."))
+;; Both preambles are the *push* surface: always loaded, every turn, in every
+;; project that runs the SessionStart hook. They carry only what an agent
+;; can't recover on its own — the routing rule, the three irrecoverable
+;; commands, and live state. Anything derivable from the CLI belongs to the
+;; *pull* surface (`knot --help`), judgment to the *pointer* surface (the
+;; skill). See docs/adr/0017-three-context-surfaces-pull-push-pointer.md.
 
 (def ^:private prime-preamble-found
-  "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial IDs across live+archive and keeps frontmatter consistent.
+  "Use the `knot` CLI for all ticket reads and writes in this project — don't `cat`, `grep`, or hand-edit files under `.tickets/`. `knot` resolves partial ids across live+archive and keeps frontmatter consistent.
 
-When the user says... → you do:
-  \"what's next?\" / \"what should I work on?\"        → `knot ready` (add `--mode afk` for agent-runnable only)
-  \"show me <id>\" / \"tell me about <id>\"            → `knot show <id>` (resolves partial ids; works on archive too)
-  \"any pending bugs?\" / \"what's tagged X?\"          → `knot list --type bug` (also: --tag, --mode, --assignee, --status, --limit)
-  \"let's tackle <id>\" / \"start working on <id>\"    → `knot start <id>`
-  \"note that...\" / \"FYI...\" mid-task               → `knot add-note <id> \"...\"`
-  \"retitle / retag / change priority / set ...\"    → `knot update <id> --title|--tags|--priority|--assignee|--description ...`
-  \"I'm done\" / \"shipped\" / \"let's close this\"      → `knot close <id> --summary \"...\"`
-  \"blocked on <other>\" / \"what's blocking <id>?\"   → `knot dep <current> <other>` / `knot dep tree <id>`
+  \"what's next?\"       → `knot ready`
+  \"show me <id>\"       → `knot show <id>` (partial ids resolve; reads the archive too)
+  \"let's close this\"   → `knot close <id> --summary \"...\"` (the summary is the ticket's record — write it)
 
-Don't read `.tickets/<id>--*.md` directly — prefer `knot show <id>`. Don't write to `.tickets/` by hand — `knot create` / `add-note` / `update` keep frontmatter valid.
+`knot --help` lists every other command; `knot <cmd> --help` has its flags.
 
-For less-common ops (`info` / `check` / `link` / `reopen` / `--json` shapes / partial-id contract), invoke the `knot` skill.")
+For the judgment the help text can't carry (lifecycle gates, deps vs links, driving decisions off `--json`, autonomous mode), invoke the `knot` skill.")
 
 (def ^:private prime-preamble-afk
-  (str
-   "You are an autonomous agent picking up unblocked work in this project. Use the `knot` CLI for all ticket reads and writes — don't `cat`, `grep`, or hand-edit files under `.tickets/`.
+  "You are an autonomous agent picking up unblocked work in this project. Use the `knot` CLI for all ticket reads and writes — don't `cat`, `grep`, or hand-edit files under `.tickets/`.
 
 Autonomous flow:
 
@@ -715,13 +707,12 @@ Autonomous flow:
   knot show <id>                                 confirm scope before claiming
   knot start <id>                                claim
   knot add-note <id> \"<progress>\"                log progress on long runs
-  knot update <id> --priority 0 --tags p0,auth   patch frontmatter or named body sections (non-interactive — never use `knot edit`, it opens $EDITOR and will fail without a TTY)
+  knot update <id> --priority 0 --tags p0,auth   patch frontmatter or named body sections, non-interactively
   knot close <id> --summary \"...\"                ship — the summary lands in the ticket as a note
 
 Don't pick up `hitl` tickets — those need a human in the loop. The `mode` field is the contract.
 
-"
-   (prime-skill-pointer "graph ops, JSON shapes, partial-id resolution")))
+For the judgment the help text can't carry (lifecycle gates, deps vs links, driving decisions off `--json`), invoke the `knot` skill.")
 
 (def ^:private prime-preamble-no-project
   "No Knot project was discovered from the current directory. Run `knot init`
@@ -829,42 +820,15 @@ before issuing other Knot commands.")
         foot  (if (str/blank? footer) "" (str footer "\n"))]
     (str "## " header "\n\n" nudge-block body foot)))
 
-(def ^:private prime-summary-char-cap
-  "Hard char-cap for a Recently Closed summary's first paragraph in prime
-   text output. Long monoliths still get truncated even when there is no
-   `\\n\\n` break to slice on."
-  280)
-
-(defn- truncate-prime-summary
-  "Truncate a Recently Closed summary for prime text display:
-     1. Slice at the first `\\n\\n` paragraph boundary.
-     2. If the result still exceeds `prime-summary-char-cap`, hard-cap.
-     3. When either rule fired, append ` (see knot show <id>)` so the
-        agent knows where the rest lives.
-   JSON consumers bypass this and always get the full string."
-  [summary id]
-  (let [boundary (str/index-of summary "\n\n")
-        sliced   (if boundary (subs summary 0 boundary) summary)
-        capped   (if (> (count sliced) prime-summary-char-cap)
-                   (subs sliced 0 prime-summary-char-cap)
-                   sliced)
-        truncated? (or (some? boundary) (> (count sliced) prime-summary-char-cap))]
-    (if truncated?
-      (str capped " (see knot show " id ")")
-      capped)))
-
 (defn- prime-recently-closed-line
-  "Render a single recently-closed entry as one or two lines: `id  title`,
-   then an indented summary line when `:summary` is present and non-blank.
-   The summary is truncated at the first paragraph boundary or at the
-   `prime-summary-char-cap` (whichever is shorter); see
-   `truncate-prime-summary`. JSON callers (`jsonify-recently-closed`)
-   skip this path and emit the full string."
-  [{:keys [id title summary]}]
-  (let [head (str (or id "") "  " (or title ""))]
-    (if (and (some? summary) (not (str/blank? summary)))
-      (str head "\n    " (truncate-prime-summary summary id))
-      head)))
+  "Render a single recently-closed entry as one line: `id  title`. The
+   section orients the agent — *this was just done, don't redo it* — which
+   a title satisfies; `knot show <id>` carries the rest, archive included.
+   Summaries stay off the push surface deliberately: a summary long enough
+   to need truncating is one the agent would act on half of. JSON callers
+   (`jsonify-recently-closed`) emit the full string."
+  [{:keys [id title]}]
+  (str (or id "") "  " (or title "")))
 
 (defn- prime-recently-closed-section
   "Render the `## Recently Closed` section. Returns `\"\"` when entries is

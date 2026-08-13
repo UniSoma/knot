@@ -9,7 +9,7 @@ A Babashka file-based ticket tracker, storing tickets as markdown with YAML fron
 - **Prefer nREPL for evaluation.** `clj-nrepl-eval -p 7888 '<form>'` over `bb -cp src -e '<form>'` for sanity checks and exploration — persistent session (state survives between calls), no JVM cold-start, `:reload`-aware. See [docs/agents/clojure-repl-evaluation.md](docs/agents/clojure-repl-evaluation.md).
 - **Test before commit.** Run `bb test`. See [docs/agents/testing.md](docs/agents/testing.md).
 - **Lint before commit.** Run `clj-kondo --lint src test`. See [docs/agents/linting-and-formatting.md](docs/agents/linting-and-formatting.md).
-- **Keep `.claude/skills/knot/SKILL.md` in sync with the CLI.** This repo dogfoods knot, so the bundled skill is both downstream documentation and the contract every future agent loads. When you add/remove a command, change a flag, or change a JSON shape, update the skill in the same commit. A drifted skill silently misleads every agent that loads it.
+- **Place agent-facing material on exactly one of the three context surfaces.** Knot reaches a client project through *pull* (`knot --help`, generated, authoritative for anything derivable from the CLI), *push* (`knot prime`, always loaded — only what a cold agent can't recover, plus live state), and *pointer* (`.claude/skills/knot/SKILL.md`, the judgment help text can't hold). Never inventory commands or flags in prose; a per-command caveat goes in that command's help `:notes`. When you add/remove a command, change a flag, or change a JSON shape, the surfaces move in the same commit. See [ADR 0017](docs/adr/0017-three-context-surfaces-pull-push-pointer.md).
 
 ## Where to look
 
