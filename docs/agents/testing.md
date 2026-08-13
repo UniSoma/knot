@@ -8,6 +8,12 @@ bb test
 
 The task globs `test/**/*_test.clj` and runs every namespace it finds. There is no scoped subset — the suite is fast enough that every change runs the full set.
 
+## When the suite applies
+
+`bb test` and `clj-kondo` gate commits that touch executable code: `src/`, `test/`, `bb.edn`, or CI workflows.
+
+Documentation-only commits ship without either. Prose carries no coverage and no lint surface, so both tools report on a diff they cannot see: markdown files anywhere in the tree, tickets under `.tickets/`, ADRs under `docs/adr/`, `CONTEXT.md`, `AGENTS.md` / `CLAUDE.md`, and the bundled skills under `.claude/skills/`. A commit that mixes prose with code follows the code half — one touched `.clj` file puts the full suite back in play.
+
 ## Cross-platform considerations
 
 `windows-latest` is a blocking CI gate alongside `ubuntu-latest` and `macos-latest`. Tests must pass on all three; a Windows-only failure blocks the merge.
