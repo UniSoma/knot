@@ -105,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CPL` (coupling, ADR 0012) is the ticket's 1-hop undirected degree: the
   count of distinct live neighbors reached via `:deps` (both directions) or
   `:links`, deduped across axes, with `:parent` excluded and closed
-  neighbors still counted. Both render as integer columns between `AC` and
+  neighbors dropped. Both render as integer columns between `AC` and
   `TITLE` in the text tables and as the `leverage` / `coupling` integers
   under `--json`. New `knot.query` primitives back both metrics.
 - **`--closure <id>[,<id>…]` on `list` / `ready` / `blocked` / `closed`.**

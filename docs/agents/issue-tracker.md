@@ -12,11 +12,11 @@ No `Read`, `cat`, `grep`, `Write`, `Edit`, `sed`, or `mv` against files under `.
 
 ## Conventions
 
-- **Create an issue**: `knot create --type <bug|feature|task|chore|epic> --title "..." --description "..." --priority <1-4> --mode <hitl|afk> --tags tag1,tag2`. Prefer the `knot:create` skill for richer framing (auto-detected links/deps).
+- **Create an issue**: `knot create "<title>" --type <bug|feature|task|chore|epic> --description "..." --priority <1-4> --mode <hitl|afk> --tags tag1,tag2`. The title is **positional** — there is no `--title` flag on `create`. Invoke the `knot` skill for richer framing (`--dep` / `--link` wiring at create time).
 - **Read an issue**: `knot show <id>` (resolves partial IDs across live + archive).
-- **List issues**: `knot list` with `--type`, `--tag`, `--mode`, `--status`, `--assignee`, `--priority`, `--limit`, `--json` filters. Also `--parent <id>` (direct children) and `--closure <id>[,<id>…]` (everything related to the seed via parent/deps/links; `--via` narrows axes) on `list`/`ready`/`blocked`/`closed`.
+- **List issues**: `knot list` with `--type`, `--tag`, `--mode`, `--status`, `--assignee`, `--priority`, `--limit`, `--json` filters. Also `--parent <id>` (direct children), `--closure <id>[,<id>…]` (everything related to the seed via parent/deps/links; `--via` narrows axes), and `--acceptance-complete=<true|false>` on `list`/`ready`/`blocked`/`closed`, plus `--component <id>` (the seed's live-induced connected component, mutually exclusive with `--closure`) on `list`/`ready`/`blocked`.
 - **Comment on an issue**: `knot add-note <id> "..."`.
-- **Apply / remove labels (tags)**: `knot update <id> --tags <comma-list>` (replaces the full set).
+- **Apply / remove labels (tags)**: `knot update <id> --add-tag <tag>` / `--remove-tag <tag>` (repeatable, idempotent deltas). `--tags <comma-list>` replaces the full set and is mutually exclusive with the delta flags.
 - **Close**: `knot close <id> --summary "..."`. Won't-do is closed with `--summary "Won't do: ..."`.
 
 ## AFK protocol: `ok:false error:"open_children"`
@@ -39,7 +39,7 @@ On either, an umbrella with non-terminal children emits `{ok:false, error:{code:
 
 ## When a skill says "publish to the issue tracker"
 
-Run `knot create` (or invoke the `knot:create` skill for guided framing).
+Run `knot create "<title>"` (or invoke the `knot` skill for guided framing).
 
 ## When a skill says "fetch the relevant ticket"
 
