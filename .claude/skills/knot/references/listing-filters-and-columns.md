@@ -121,6 +121,15 @@ them:
 - **`LEV` and `CPL` are orthogonal to readiness.** A deps-leaf can be `ready`
   and the highest-leverage row at once; neither number says anything about
   whether the ticket can be started.
+- **`LVL` orders work into waves.** Everything at level 0 can run now,
+  everything at level 1 becomes ready once level 0 closes, and so on — so an
+  orchestrator gets its schedule with
+  `knot blocked --parent <id> --json | jq 'group_by(.level)'` and needs no
+  separate waves command. `LEV` says which of the ready tickets to take
+  first; `LVL` says how many rounds away the rest are.
+- **A `-` in `LVL` is a bug report, not a big number.** It means the ticket
+  is on a live deps cycle, so no schedule exists until the cycle is broken —
+  run `knot check` and cut an edge.
 - **`CHLD` is progress, not readiness.** An umbrella at `0/5` may still be
   `ready` — its own integration work is what is ready, not its children.
 - **Component membership ignores your filters**, so a `CC` ordinal read off a

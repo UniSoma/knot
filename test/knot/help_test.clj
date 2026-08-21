@@ -807,7 +807,8 @@
    :children   ["children_total" "children_terminal"]
    :leverage   ["leverage"]
    :coupling   ["coupling"]
-   :cc         ["cc"]})
+   :cc         ["cc"]
+   :level      ["level"]})
 
 (deftest listing-notes-document-computed-columns-test
   ;; ADR 0017: anything derivable from the CLI belongs on the pull surface,

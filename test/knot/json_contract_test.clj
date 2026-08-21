@@ -949,7 +949,9 @@
           (is (integer? (:leverage t))
               "list rows carry a leverage integer")
           (is (integer? (:coupling t))
-              "list rows carry a coupling integer"))))
+              "list rows carry a coupling integer")
+          (is (contains? t :level)
+              "list rows carry a level key (null only on a live deps cycle)"))))
 
     (testing "ready --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "ready" "--json")
@@ -962,7 +964,9 @@
           (is (integer? (:leverage t))
               "ready rows carry a leverage integer")
           (is (integer? (:coupling t))
-              "ready rows carry a coupling integer"))))
+              "ready rows carry a coupling integer")
+          (is (contains? t :level)
+              "ready rows carry a level key (null only on a live deps cycle)"))))
 
     (testing "blocked --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "blocked" "--json")
@@ -975,7 +979,9 @@
           (is (integer? (:leverage t))
               "blocked rows carry a leverage integer")
           (is (integer? (:coupling t))
-              "blocked rows carry a coupling integer"))))
+              "blocked rows carry a coupling integer")
+          (is (contains? t :level)
+              "blocked rows carry a level key (null only on a live deps cycle)"))))
 
     (testing "closed --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "closed" "--json")
@@ -990,7 +996,9 @@
           (is (not (contains? t :leverage))
               "closed rows carry NO leverage field — not on closed in v1")
           (is (not (contains? t :coupling))
-              "closed rows carry NO coupling field — not on closed in v1"))))))
+              "closed rows carry NO coupling field — not on closed in v1")
+          (is (not (contains? t :level))
+              "closed rows carry NO level field — not on closed in v1"))))))
 
 (deftest data-shape-show-test
   ;; Pin AC#2 for show --json: single object envelope. Body included.

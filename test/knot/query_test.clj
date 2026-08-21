@@ -710,6 +710,127 @@
       (is (= 2 (query/leverage tickets "base" #{"closed"}))
           "base's live cone is {mid-open top}; mid-closed severs its own path"))))
 
+(deftest levels-test
+  (testing "ready ⇔ level 0; each further live link adds one"
+    ;; a deps b deps c, all live. c is ready (0), b waits on one (1),
+    ;; a waits on a two-link chain (2).
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["c"])
+                   (ct "c")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 0 (get lv "c")))
+      (is (= 1 (get lv "b")))
+      (is (= 2 (get lv "a")))))
+
+  (testing "every ready ticket is level 0 and every blocked ticket is >= 1"
+    (let [tickets [(ct "root" :deps ["mid" "solo"])
+                   (ct "mid" :deps ["leaf"])
+                   (ct "leaf")
+                   (ct "solo")
+                   (ct "broken" :deps ["ghost"])
+                   (ct "done" :status "closed")]
+          lv      (query/levels tickets #{"closed"})]
+      (doseq [t (query/ready tickets #{"closed"})]
+        (is (= 0 (get lv (get-in t [:frontmatter :id])))
+            (str (get-in t [:frontmatter :id]) " is ready, so level 0")))
+      (doseq [t (query/blocked tickets #{"closed"})]
+        (is (<= 1 (get lv (get-in t [:frontmatter :id])))
+            (str (get-in t [:frontmatter :id]) " is blocked, so level >= 1")))))
+
+  (testing "longest chain wins when a ticket has several live deps"
+    ;; a deps both solo (a leaf) and mid (one link deep) => 2, not 1.
+    (let [tickets [(ct "a" :deps ["solo" "mid"])
+                   (ct "solo")
+                   (ct "mid" :deps ["leaf"])
+                   (ct "leaf")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 2 (get lv "a")))))
+
+  (testing "a missing referent is a live leaf blocker: level 1, not 0"
+    (let [tickets [(ct "a" :deps ["ghost"])]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 1 (get lv "a"))
+          "a broken ref still gates, so a is not ready and not level 0")
+      (is (not (contains? lv "ghost"))
+          "a missing id is not a corpus ticket, so it gets no level of its own")))
+
+  (testing "a broken ref deeper in the chain lengthens it"
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["ghost"])]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 2 (get lv "a")))
+      (is (= 1 (get lv "b")))))
+
+  (testing "a closed intermediary severs the chain"
+    ;; a deps b(closed) deps c(open): b is non-conductive, so a is ready.
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :status "closed" :deps ["c"])
+                   (ct "c")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 0 (get lv "a"))
+          "a's only dep is closed, so nothing live gates a")
+      (is (= 0 (get lv "c")))))
+
+  (testing "closed tickets carry no level"
+    (let [tickets [(ct "a" :status "closed" :deps ["b"])
+                   (ct "b")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (not (contains? lv "a"))
+          "a closed ticket is not a node of the live-induced subgraph")))
+
+  (testing "members of a live deps cycle get nil"
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :deps ["a"])
+                   (ct "outside")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (contains? lv "a") "cycle members are still keys of the map")
+      (is (nil? (get lv "a")))
+      (is (nil? (get lv "b")))
+      (is (= 0 (get lv "outside"))
+          "a ticket off the cycle is unaffected")))
+
+  (testing "a self-loop is a cycle of one"
+    (let [tickets [(ct "a" :deps ["a"])]
+          lv      (query/levels tickets #{"closed"})]
+      (is (contains? lv "a"))
+      (is (nil? (get lv "a")))))
+
+  (testing "depending through a live cycle has no finite chain either"
+    ;; top deps a; a and b cycle. top's longest chain is unbounded => nil.
+    (let [tickets [(ct "top" :deps ["a"])
+                   (ct "a" :deps ["b"])
+                   (ct "b" :deps ["a"])]
+          lv      (query/levels tickets #{"closed"})]
+      (is (contains? lv "top"))
+      (is (nil? (get lv "top")))))
+
+  (testing "a cycle broken by a closed member is no longer a cycle"
+    (let [tickets [(ct "a" :deps ["b"])
+                   (ct "b" :status "closed" :deps ["a"])]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 0 (get lv "a")))))
+
+  (testing "level is whole-graph: a blocker outside the parent still gates"
+    ;; child sits under umbrella p; its blocker lives under another parent.
+    (let [tickets [(ct "p")
+                   (ct "child" :parent "p" :deps ["elsewhere"])
+                   (ct "elsewhere" :parent "other")
+                   (ct "other")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 1 (get lv "child"))
+          "the blocker is outside the umbrella but still counts")))
+
+  (testing "a diamond counts the longest path once, not each route"
+    (let [tickets [(ct "top" :deps ["left" "right"])
+                   (ct "left" :deps ["base"])
+                   (ct "right" :deps ["base"])
+                   (ct "base")]
+          lv      (query/levels tickets #{"closed"})]
+      (is (= 2 (get lv "top")))))
+
+  (testing "an empty corpus yields an empty map"
+    (is (= {} (query/levels [] #{"closed"})))))
+
 (deftest coupling-test
   (testing "both directions of :deps count"
     ;; a deps b; c deps a. a's neighbors are {b (forward) c (reverse)} => 2.

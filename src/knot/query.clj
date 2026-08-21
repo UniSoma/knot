@@ -465,6 +465,58 @@
                              (live? terminal-statuses (get index %)))
                        seen))))))
 
+(defn levels
+  "Map of `id -> level` for every LIVE ticket in `tickets`: the length of
+   the longest chain of live blockers beneath it through `:deps`, computed
+   over the live-induced deps subgraph. `0` exactly when the ticket is
+   `ready` (no live dep), `n` when some chain of `n` still-open deps must
+   close before it can start.
+
+   Whole-graph, never umbrella-scoped — a blocker under another parent
+   still gates. A closed (terminal) dep is NON-CONDUCTIVE, exactly as in
+   `leverage`: it severs the chain, so `a -> b(closed) -> c` leaves `a` at
+   0. Unlike `leverage`, a broken ref is NOT dropped — a missing referent
+   counts as a live leaf blocker (level >= 1), which is what keeps
+   `ready <=> level 0` exact and matches how `blocked` reads it.
+
+   A ticket that sits on a live `:deps` cycle, or depends through one, has
+   no finite longest chain: its value is `nil` (rendered `-`, emitted as
+   JSON `null`). A cycle is a data error `knot check` reports, not a
+   schedule. Closed tickets are not nodes of the live-induced subgraph and
+   are absent from the map entirely, so callers reading it with `get` see
+   `nil` for them too.
+
+   One memoised depth-first pass over the whole corpus, guarded by the
+   on-stack path set — cheaper than the per-row rebuild `leverage` does."
+  [tickets terminal-statuses]
+  (let [index (index-by-id tickets)
+        memo  (atom {})]
+    (letfn [(live-dep? [dep-id]
+              (not (terminal-status? terminal-statuses (dep-status index dep-id))))
+            (level-of [id on-stack]
+              (cond
+                (contains? on-stack id) nil
+                (contains? @memo id)    (get @memo id)
+                :else
+                (let [live-deps (filter live-dep? (deps-of (get index id)))
+                      ;; a missing referent is a live leaf: chain length 0 below it
+                      sub       (map (fn [d]
+                                       (when (get index d)
+                                         (level-of d (conj on-stack id))))
+                                     (filter #(get index %) live-deps))
+                      value     (cond
+                                  (empty? live-deps)  0
+                                  (some nil? sub)     nil
+                                  :else               (inc (apply max 0 sub)))]
+                  (swap! memo assoc id value)
+                  value)))]
+      (into {}
+            (comp (filter (partial live? terminal-statuses))
+                  (map (fn [t]
+                         (let [id (get-in t [:frontmatter :id])]
+                           [id (level-of id #{})]))))
+            tickets))))
+
 (defn coupling
   "Count of DISTINCT LIVE tickets `id` is directly connected to at one hop
    through `:deps` (in EITHER direction) or `:links` — the undirected 1-hop

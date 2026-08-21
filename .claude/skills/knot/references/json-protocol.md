@@ -284,6 +284,12 @@ Optional keys that may be present:
   (`null` for singletons — uniform shape, so don't branch on key presence).
 - `leverage` / `coupling` (integer) — the `LEV` and `CPL` metrics, present on
   every `list`/`ready`/`blocked` row.
+- `level` (integer or `null`) — the `LVL` metric, present on **every**
+  `list`/`ready`/`blocked` row (uniform shape, so don't branch on key
+  presence). `null` when the ticket sits on, or depends through, a live deps
+  cycle, and on a closed row surfaced by `list --status closed` — a closed
+  ticket is not a node of the live graph. `group_by(.level)` over
+  `blocked --json` is the wave order.
 - `body` (string) — included in *single-ticket-shape* envelopes; omitted in *ls-shape*.
 - `sections` (object) — `show --json` only. The same body, split by
   `## ` heading: each key is the heading slugified the way ticket
@@ -294,7 +300,7 @@ Optional keys that may be present:
   unchanged — `sections` is a second view of it, so read one section
   instead of a full render.
 
-The three computed graph fields (`cc`, `leverage`, `coupling`) are emitted by
+The four computed graph fields (`cc`, `leverage`, `coupling`, `level`) are emitted by
 `list`/`ready`/`blocked` only — `closed --json`, `show`, and every non-listing
 command omit them. Their scope rules live in
 [`listing-filters-and-columns.md`](listing-filters-and-columns.md).

@@ -797,6 +797,66 @@
       (is (not (re-find #"\bCPL\b" first-line))
           "no CPL header when no ticket carries :coupling (e.g. closed listing)"))))
 
+(def ^:private sample-ls-tickets-with-level
+  "Rows carry a top-level :level, mirroring how the cli annotates
+   list/ready/blocked rows. First row level 2, second level nil (a member
+   of a live deps cycle)."
+  [(assoc (first sample-ls-tickets) :level 2)
+   (assoc (second sample-ls-tickets) :level nil)])
+
+(deftest ls-table-lvl-column-shown-when-level-attached-test
+  (testing "LVL column header appears when at least one ticket carries :level"
+    (let [out (output/ls-table sample-ls-tickets-with-level {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (re-find #"\bLVL\b" first-line)
+          "LVL header surfaces when any input ticket has :level attached")))
+
+  (testing "LVL sits after ASSIGNEE and before TITLE"
+    (let [out (output/ls-table sample-ls-tickets-with-level {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          assignee-i (str/index-of first-line "ASSIGNEE")
+          lvl-i      (str/index-of first-line "LVL")
+          title-i    (str/index-of first-line "TITLE")]
+      (is (every? some? [assignee-i lvl-i title-i]))
+      (is (< assignee-i lvl-i title-i)
+          "LVL sits between ASSIGNEE and TITLE")))
+
+  (testing "LVL is the last computed column, after CPL"
+    (let [tickets [(assoc (first sample-ls-tickets) :leverage 3 :coupling 2 :level 2)
+                   (assoc (second sample-ls-tickets) :leverage 0 :coupling 0 :level 0)]
+          out     (output/ls-table tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))
+          lev-i   (str/index-of first-line "LEV")
+          cpl-i   (str/index-of first-line "CPL")
+          lvl-i   (str/index-of first-line "LVL")
+          title-i (str/index-of first-line "TITLE")]
+      (is (every? some? [lev-i cpl-i lvl-i title-i]))
+      (is (< lev-i cpl-i lvl-i title-i)
+          "LVL follows CPL and stays before TITLE")))
+
+  (testing "level values render as integers and nil renders a dash"
+    (let [out   (output/ls-table sample-ls-tickets-with-level {:color? false :tty? false})
+          lines (str/split-lines out)
+          line1 (some (fn [l] (when (str/includes? l "kno-01abcd0001") l)) lines)
+          line2 (some (fn [l] (when (str/includes? l "kno-01abcd0002") l)) lines)]
+      (is (re-find #"\b2\b" line1) "row with level 2 renders 2")
+      (is (re-find #"bob\s+-\s+" line2)
+          "a cycle member's nil level renders `-`")))
+
+  (testing "level 0 renders 0, not a dash"
+    (let [tickets [(assoc (first sample-ls-tickets) :level 0)]
+          out     (output/ls-table tickets {:color? false :tty? false})
+          line    (some (fn [l] (when (str/includes? l "kno-01abcd0001") l))
+                        (str/split-lines out))]
+      (is (re-find #"\b0\b" line) "a ready row renders 0"))))
+
+(deftest ls-table-lvl-column-omitted-when-no-level-test
+  (testing "LVL column header is absent when no input ticket carries :level"
+    (let [out (output/ls-table sample-ls-tickets {:color? false :tty? false})
+          first-line (first (str/split-lines out))]
+      (is (not (re-find #"\bLVL\b" first-line))
+          "no LVL header when no ticket carries :level (e.g. closed listing)"))))
+
 (def ^:private sample-ls-tickets-with-cc
   "Rows carry a top-level :cc ordinal (nil for singletons), mirroring how the
    cli annotates list/ready/blocked rows. First row in component 1, second a
@@ -1124,6 +1184,29 @@
           [a]     (:data parsed)]
       (is (not (contains? a :coupling))
           "absent :coupling means no JSON field — keeps closed/show byte-unchanged"))))
+
+(deftest ls-json-level-test
+  (testing "rows with :level attached emit a level integer (including 0)"
+    (let [tickets [(assoc {:frontmatter {:id "x" :status "open"} :body ""} :level 2)
+                   (assoc {:frontmatter {:id "y" :status "open"} :body ""} :level 0)]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a b]   (:data parsed)]
+      (is (= 2 (:level a)))
+      (is (= 0 (:level b)) "level 0 is emitted, not omitted")))
+
+  (testing "a nil level (live deps cycle) still emits the key as null"
+    (let [tickets [(assoc {:frontmatter {:id "x" :status "open"} :body ""} :level nil)]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a]     (:data parsed)]
+      (is (contains? a :level) "the key is present so consumers need no branch")
+      (is (nil? (:level a)) "a cycle member emits level null")))
+
+  (testing "rows without :level attached carry no level key (show/closed parity)"
+    (let [tickets [{:frontmatter {:id "x" :status "open"} :body ""}]
+          parsed  (json/parse-string (output/ls-json tickets) true)
+          [a]     (:data parsed)]
+      (is (not (contains? a :level))
+          "absent :level means no JSON field — keeps closed/show byte-unchanged"))))
 
 (deftest colorize-test
   (testing "with color? false, returns the text unchanged"

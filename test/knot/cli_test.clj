@@ -5125,8 +5125,8 @@ Restart the daemon.
             row (some (fn [l] (when (str/includes? l "kno-noupdate0001") l))
                       (str/split-lines out))]
         (is (some? row))
-        (is (re-find #"\s-\s+0\s+0\s+No updated" row)
-            "unparseable :updated renders as `-` in the AGE cell (LEV 0, CPL 0, then TITLE)")))))
+        (is (re-find #"\s-\s+0\s+0\s+0\s+No updated" row)
+            "unparseable :updated renders as `-` in the AGE cell (LEV 0, CPL 0, LVL 0, then TITLE)")))))
 
 (deftest ls-cmd-limit-test
   (testing "ls-cmd with :limit caps the result count"
