@@ -320,11 +320,18 @@
     :args        [{:name "id" :required true}]
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
+                  {:name :external-ref :coerce []
+                   :desc "Record an external reference alongside the ones already on the ticket (repeatable; idempotent). Never replaces."}
                   {:name :force :coerce :boolean :default false
                    :desc "Bypass the acceptance and open-children gates; requires --summary."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
+    :notes       ["--external-ref appends here, unlike `knot update --external-ref`, which replaces the whole list. The status change, the --summary note and the ref land in one write."
+                  "git:<sha> is the convention for the commit that closed the ticket. knot stores the string verbatim: it does not parse it, verify the sha, or read git HEAD for you."
+                  "Re-recording a ref the ticket already carries is a no-op; a blank value is ignored. Use `knot update --remove-external-ref` to take one back."]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
                    :note "Close with a summary."}
+                  {:cmd "knot close kno-01abc --summary \"Shipped in v1.2\" --external-ref git:9f2c1ab"
+                   :note "Close and record the commit that did it, in one write."}
                   {:cmd "knot close kno-01abc --force --summary \"wontfix: outdated\""
                    :note "Override the acceptance gate when AC is intentionally unfinished."}]}
 
@@ -539,6 +546,10 @@
                    :desc "Remove a single tag (repeatable; idempotent). Mutually exclusive with --tags."}
                   {:name :external-ref :coerce []
                    :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
+                  {:name :add-external-ref :coerce []
+                   :desc "Add a single external reference (repeatable; idempotent). Mutually exclusive with --external-ref."}
+                  {:name :remove-external-ref :coerce []
+                   :desc "Remove a single external reference (repeatable; idempotent). Mutually exclusive with --external-ref."}
                   {:name :ac :coerce []
                    :desc "Acceptance criterion to flip, by 1-based ordinal or exact title (repeatable; all flips share one --done/--undone). Use --add-ac / --remove-ac to add or remove criteria."}
                   {:name :add-ac    :coerce []
@@ -567,6 +578,8 @@
                    :note "Claim the ticket only if nobody holds it."}
                   {:cmd "knot update kno-01abc --add-tag stale --remove-tag wip"
                    :note "Apply tag deltas (mutually exclusive with --tags)."}
+                  {:cmd "knot update kno-01abc --add-external-ref git:9f2c1ab"
+                   :note "Apply external-ref deltas (mutually exclusive with --external-ref)."}
                   {:cmd "knot update kno-01abc --description \"New desc.\""
                    :note "Replace just the Description section."}
                   {:cmd "knot update kno-01abc --ac \"Ship it\" --done"

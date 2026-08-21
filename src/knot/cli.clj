@@ -480,6 +480,25 @@
                         {:already-assigned true
                          :current-assignee current}))))))
 
+(defn- apply-external-ref-deltas
+  "Apply `--add-external-ref` / `--remove-external-ref` deltas from
+   `opts` to `fm`'s `:external_refs`, with the same semantics
+   `apply-tag-deltas` gives tags: existing order preserved, removes
+   drop in place, adds append at the end in flag order deduped against
+   the post-remove set, an empty result clearing the key. `close`
+   reuses it with an add-only opts map so the appended ref rides along
+   in the single close write."
+  [fm opts]
+  (let [existing (vec (:external_refs fm))
+        removes  (set (:remove-external-ref opts))
+        kept     (vec (remove removes existing))
+        present  (set kept)
+        appends  (->> (:add-external-ref opts) (remove present) distinct vec)
+        result   (vec (concat kept appends))]
+    (if (empty? result)
+      (dissoc fm :external_refs)
+      (assoc fm :external_refs result))))
+
 (defn status-cmd
   "Transition the ticket whose id is `(:id opts)` (full or partial) to
    `(:status opts)`. The resolver canonicalizes the id before save so
@@ -492,6 +511,11 @@
    throw before any file is written. A non-blank summary is appended as
    a timestamped note under `## Notes` via `ticket/append-note`, sharing
    the same writer path as `add-note-cmd`.
+
+   `(:external-ref opts)` (declared only on `close`) appends each value
+   to `:external_refs`, deduped against what the ticket already carries
+   — it never replaces the list, and it rides along in the same write
+   as the status change and the summary note.
 
    The acceptance gate fires on `:active-status → :terminal-statuses`
    transitions when at least one frontmatter `:acceptance` entry has
@@ -551,7 +575,10 @@
                         (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
             new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
-                       (contains? opts :assignee) (put-assignee assignee))
+                       (contains? opts :assignee) (put-assignee assignee)
+                       (seq (:external-ref opts))
+                       (apply-external-ref-deltas
+                        {:add-external-ref (:external-ref opts)}))
             body*    (if (and (some? summary) (not (str/blank? summary)))
                        (ticket/append-note (:body loaded)
                                            now
@@ -992,7 +1019,9 @@
       (or (contains? opts :add-tag)
           (contains? opts :remove-tag)) (apply-tag-deltas opts)
       (contains? opts :external-ref) (clear-when :external_refs
-                                                 empty? (vec external-ref)))))
+                                                 empty? (vec external-ref))
+      (or (contains? opts :add-external-ref)
+          (contains? opts :remove-external-ref)) (apply-external-ref-deltas opts))))
 
 (defn- update-body
   "Apply the body-mutation flags from `opts` to `body`. `--body`
@@ -1055,6 +1084,30 @@
       (throw (ex-info (str "--add-tag and --remove-tag overlap on: "
                            (str/join ", " (sort overlap)))
                       {:offending [:add-tag :remove-tag]
+                       :overlap   (vec (sort overlap))})))))
+
+(defn- validate-external-ref-delta-opts!
+  "Validate the `--add-external-ref` / `--remove-external-ref` flag
+   pair, mirroring `validate-tag-delta-opts!`. Throws `ex-info` when
+   the call mixes the replace-all `--external-ref` with either delta
+   flag, or when the same value appears in both directions on the same
+   call. `update-cmd` surfaces the message as either a `die` or a
+   `{ok:false, error:{code:\"invalid_argument\", …}}` envelope under
+   `--json`."
+  [opts]
+  (let [delta-keys (filter #(contains? opts %)
+                           [:add-external-ref :remove-external-ref])]
+    (when (and (contains? opts :external-ref) (seq delta-keys))
+      (throw (ex-info (str "--external-ref is mutually exclusive with "
+                           "--add-external-ref / --remove-external-ref")
+                      {:offending (vec (cons :external-ref delta-keys))}))))
+  (let [adds    (set (:add-external-ref opts))
+        removes (set (:remove-external-ref opts))
+        overlap (set/intersection adds removes)]
+    (when (seq overlap)
+      (throw (ex-info (str "--add-external-ref and --remove-external-ref "
+                           "overlap on: " (str/join ", " (sort overlap)))
+                      {:offending [:add-external-ref :remove-external-ref]
                        :overlap   (vec (sort overlap))})))))
 
 (defn- validate-ac-delta-opts!
@@ -1185,6 +1238,7 @@
                     {:offending (filter #(contains? opts %)
                                         [:description :design])})))
   (validate-tag-delta-opts! opts)
+  (validate-external-ref-delta-opts! opts)
   (validate-ac-delta-opts! opts)
   (validate-ac-flip-opts! opts)
   (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}

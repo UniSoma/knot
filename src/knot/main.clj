@@ -235,7 +235,8 @@
          vec)))
 
 (defn- normalize-ac-delta-values
-  "Normalize a vector of values from `--add-ac` / `--remove-ac`: trim
+  "Normalize a vector of values from `--add-ac` / `--remove-ac` (and the
+   external-ref deltas, which have the same shape): trim
    surrounding whitespace and reject blanks. Unlike tag deltas, comma
    characters are allowed (AC titles legitimately contain commas; there
    is no comma-list replace flag to round-trip against). Throws
@@ -642,6 +643,13 @@
           opts* (cond-> (assoc base :json? json?)
                   (contains? merged :summary) (assoc :summary (:summary merged))
                   (contains? merged :assignee) (assoc :assignee (:assignee merged))
+                  ;; `--external-ref ""` yields [""] from babashka.cli's
+                  ;; `:coerce []`; drop blanks so a stray empty value is a
+                  ;; no-op append rather than a literal blank ref (mirrors
+                  ;; update-handler's normalization of the replace-all flag).
+                  (contains? merged :external-ref)
+                  (assoc :external-ref
+                         (vec (remove str/blank? (:external-ref merged))))
                   (:if-unassigned opts)       (assoc :if-unassigned? true)
                   (:force opts)               (assoc :force? true))]
       (try
@@ -1079,6 +1087,19 @@
                     (contains? merged :remove-tag)
                     (assoc :remove-tag (normalize-tag-delta-values
                                         :remove-tag (:remove-tag merged)))
+
+                    ;; External-ref deltas: blank-reject only. Refs are
+                    ;; repeated single values, never a comma-list, so
+                    ;; there is no round-trip to protect as with tags.
+                    (contains? merged :add-external-ref)
+                    (assoc :add-external-ref
+                           (normalize-ac-delta-values
+                            :add-external-ref (:add-external-ref merged)))
+
+                    (contains? merged :remove-external-ref)
+                    (assoc :remove-external-ref
+                           (normalize-ac-delta-values
+                            :remove-external-ref (:remove-external-ref merged)))
 
                     ;; AC-delta normalization: blank-reject only (no
                     ;; comma-reject — AC titles can contain commas, and

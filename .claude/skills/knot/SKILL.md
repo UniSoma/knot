@@ -167,6 +167,13 @@ knot delete <id>                             # remove the file (leaf-only; --cas
 Always give `knot close` a `--summary`. It lands as a timestamped note and becomes the answer to "what did we ship?"
 months later; skipping it loses that for free.
 
+When a commit is what finished the ticket, record it as `knot close <id> --summary "…" --external-ref git:<sha>` —
+`git:` plus the full sha, which is the convention this project follows so a later reader can go from a closed ticket
+straight to the diff. Put the sha in the ref, not in the summary prose: the ref is a field an agent can read back out
+of `--json`, and the summary is prose nobody can query. knot stores whatever string you pass and checks nothing, so
+the convention only holds if you keep it — and it never guesses the sha from `git HEAD`, because most closes are not
+paired with a commit.
+
 In a project with custom `:statuses` — say a `review` stage between `in_progress` and `closed` — transition with `knot
 status <id> <new>` so you don't jump a stage that `start` and `close` skip past. `knot info` prints the project's
 ladder.
@@ -202,8 +209,9 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 (destructive, no `--force`, git is the undo). To add to a ticket, reach for `add-note`.
 
 The trap in the middle is set-semantics: `--tags` replaces the whole tag list, so adding one tag by re-sending the list
-drops anything you hadn't read first. For a one-tag or one-criterion change reach for the delta flags —
-`--add-tag` / `--remove-tag` and `--add-ac` / `--remove-ac` — which leave the rest untouched. The tag deltas are
+drops anything you hadn't read first. `--external-ref` has the same shape. For a one-value change reach for the delta
+flags — `--add-tag` / `--remove-tag`, `--add-external-ref` / `--remove-external-ref`, and `--add-ac` / `--remove-ac` —
+which leave the rest untouched. The tag and external-ref deltas are
 idempotent; `--remove-ac` is not, because a value that matches no criterion exits 1 rather than reporting a write that
 never happened.
 

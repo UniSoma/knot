@@ -2617,6 +2617,66 @@
         (is (= [] (get-in parsed [:data :external_refs]))
             "blank --external-ref must clear external_refs to [] in the envelope, not store [\"\"]")))))
 
+(deftest close-external-ref-end-to-end-test
+  (testing "close --summary --external-ref appends the ref and closes in one call"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--external-ref" "JIRA-1")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "close" id
+                      "--summary" "Shipped."
+                      "--external-ref" "git:abc123" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "close --external-ref err=" err))
+        (is (= true (:ok parsed)))
+        (is (= "closed" (get-in parsed [:data :status])))
+        (is (= ["JIRA-1" "git:abc123"]
+               (vec (get-in parsed [:data :external_refs])))
+            "the ref appends to the existing list rather than replacing it")
+        (is (str/includes? (get-in parsed [:data :body]) "Shipped.")
+            "status, summary note and ref all land in the same write")
+        (is (str/includes? (get-in parsed [:meta :archived_to]) "archive")))))
+
+  (testing "closing twice with the same ref does not duplicate it"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            _ (run-knot tmp "close" id "--external-ref" "git:abc123")
+            {:keys [exit out]}
+            (run-knot tmp "close" id "--external-ref" "git:abc123" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (= ["git:abc123"]
+               (vec (get-in parsed [:data :external_refs])))))))
+
+  (testing "update --add-external-ref / --remove-external-ref round-trip"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--external-ref" "JIRA-1")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--add-external-ref" "git:abc"
+                      "--remove-external-ref" "JIRA-1" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "external-ref deltas err=" err))
+        (is (= ["git:abc"] (vec (get-in parsed [:data :external_refs])))))))
+
+  (testing "--external-ref with --add-external-ref exits 1 invalid_argument"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "update" id
+                      "--external-ref" "JIRA-1"
+                      "--add-external-ref" "git:abc" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"mutually exclusive" (get-in parsed [:error :message])))))))
+
 (deftest create-body-flag-not-consumed-end-to-end-test
   ;; Regression guard for kno-01kqgqcqmy19 review: --body is `update`'s
   ;; whole-body-replace flag, not a `create` flag. Adding it to a global

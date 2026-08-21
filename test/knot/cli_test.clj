@@ -1200,6 +1200,78 @@
         (is (str/includes? (get-in parsed [:data :body]) "Shipped.")
             "summary note is appended in the body of the JSON envelope")))))
 
+(deftest close-cmd-external-ref-test
+  (testing "--external-ref appends to existing refs and closes in one write"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id
+                                    :summary "Shipped."
+                                    :external-ref ["git:abc123"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-1" "git:abc123"]
+               (vec (get-in loaded [:frontmatter :external_refs])))
+            "the new ref appends after the existing ones")
+        (is (= "closed" (get-in loaded [:frontmatter :status])))
+        (is (str/includes? (:body loaded) "Shipped.")
+            "status, summary note and ref all land in the same saved file"))))
+
+  (testing "--external-ref on a ticket with no refs creates the list"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id :external-ref ["git:abc123"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["git:abc123"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "--external-ref is idempotent: an existing ref is not duplicated"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["git:abc123"]})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id :external-ref ["git:abc123"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["git:abc123"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "repeated --external-ref values in one call dedupe, order preserved"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp)
+                                   {:id id
+                                    :external-ref ["git:a" "git:a" "git:b"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["git:a" "git:b"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "an empty --external-ref list leaves existing refs untouched"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            _       (cli/close-cmd (ctx tmp) {:id id :external-ref []})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-1"]
+               (vec (get-in loaded [:frontmatter :external_refs])))
+            "close never clears refs — it only appends"))))
+
+  (testing "--external-ref reaches the --json envelope"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            out     (cli/close-cmd (ctx tmp)
+                                   {:id id :external-ref ["git:abc123"]
+                                    :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= ["git:abc123"] (vec (get-in parsed [:data :external_refs]))))))))
+
 (deftest reopen-cmd-test
   (testing "reopen-cmd transitions a closed ticket to open and clears :closed"
     (with-tmp tmp
@@ -3624,6 +3696,117 @@ Restart the daemon.
             parsed  (cheshire/parse-string out true)]
         (is (= true (:ok parsed)))
         (is (= ["b" "c"] (vec (get-in parsed [:data :tags]))))))))
+
+(deftest update-cmd-external-ref-deltas-test
+  (testing "--add-external-ref appends in flag order"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :add-external-ref ["git:abc"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-1" "git:abc"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "--add-external-ref is idempotent when the ref is already present"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1" "git:abc"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :add-external-ref ["git:abc"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-1" "git:abc"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "--remove-external-ref drops in place and is idempotent when absent"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T"
+                                     :external-ref ["JIRA-1" "git:abc" "JIRA-2"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :remove-external-ref ["git:abc"]})
+            after-1 (store/load-one tmp ".tickets" id)
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :remove-external-ref ["git:abc"]})
+            after-2 (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-1" "JIRA-2"]
+               (vec (get-in after-1 [:frontmatter :external_refs]))))
+        (is (= ["JIRA-1" "JIRA-2"]
+               (vec (get-in after-2 [:frontmatter :external_refs])))
+            "removing an absent ref is a no-op, not an error"))))
+
+  (testing "a remove that empties the list clears the :external_refs key"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :remove-external-ref ["JIRA-1"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (not (contains? (:frontmatter loaded) :external_refs))))))
+
+  (testing "adds and removes compose in one write"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1" "JIRA-2"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :add-external-ref ["git:abc"]
+                                     :remove-external-ref ["JIRA-1"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= ["JIRA-2" "git:abc"]
+               (vec (get-in loaded [:frontmatter :external_refs])))))))
+
+  (testing "same value in both directions throws ex-info (overlap)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"--add-external-ref.*--remove-external-ref.*overlap"
+             (cli/update-cmd (ctx tmp)
+                             {:id id
+                              :add-external-ref ["git:abc"]
+                              :remove-external-ref ["git:abc"]}))))))
+
+  (testing "--external-ref combined with --add-external-ref throws (mutex)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--external-ref.*mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id
+                                               :external-ref ["x"]
+                                               :add-external-ref ["y"]}))))))
+
+  (testing "--external-ref combined with --remove-external-ref throws (mutex)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"--external-ref.*mutually exclusive"
+                              (cli/update-cmd (ctx tmp)
+                                              {:id id
+                                               :external-ref ["x"]
+                                               :remove-external-ref ["y"]}))))))
+
+  (testing "--json envelope reflects the post-mutation external_refs"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :external-ref ["JIRA-1"]})
+            id      (id-of-created created "t")
+            out     (cli/update-cmd (ctx tmp)
+                                    {:id id :add-external-ref ["git:abc"]
+                                     :json? true})
+            parsed  (cheshire/parse-string out true)]
+        (is (= true (:ok parsed)))
+        (is (= ["JIRA-1" "git:abc"]
+               (vec (get-in parsed [:data :external_refs]))))))))
 
 (deftest update-cmd-ac-deltas-test
   (testing "--add-ac appends a new criterion with done: false"
