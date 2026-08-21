@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.help :as help]
+            [knot.output :as output]
             [knot.version :as version]))
 
 (def ^:private dep-entry
@@ -765,3 +766,65 @@
       (is (zero? exit) (str "expected exit 0; err=" err))
       (is (= (str version/version "\n") out))
       (is (str/blank? err)))))
+
+;; --- listing column documentation drift guard -------------------------------
+
+(def ^:private output-ns
+  "The `knot.output` namespace object, reached through a public var so the
+   alias stays used and the harvest below has something to scan."
+  (:ns (meta #'output/ls-table)))
+
+(defn- column-def?
+  [x]
+  (and (map? x) (contains? x :key) (contains? x :header)))
+
+(def ^:private ls-column-defs
+  "Every column definition the listing table can render, harvested by SHAPE
+   from the `ls-*` vars in `knot.output` — any var holding a
+   `{:key ... :header ...}` map or a vector of them. Shape rather than name
+   so a column added under an unexpected var name is still caught."
+  (->> (ns-interns output-ns)
+       (filter (fn [[sym _]] (str/starts-with? (name sym) "ls-")))
+       (mapcat (fn [[_ v]]
+                 (let [value @v]
+                   (cond
+                     (column-def? value)                                    [value]
+                     (and (sequential? value) (seq value)
+                          (every? column-def? value))                       (seq value)
+                     :else                                                  nil))))
+       set))
+
+(def ^:private passthrough-column-keys
+  "Columns that print a frontmatter field verbatim. Everything else in the
+   table is computed and therefore owes the reader an explanation."
+  #{:id :status :priority :mode :type :assignee :title})
+
+(def ^:private computed-column-json-fields
+  "Computed column key -> the `--json` field name(s) its NOTES line must
+   name. AGE has no field of its own; it is bucketed from `updated`."
+  {:age        ["updated"]
+   :acceptance ["acceptance"]
+   :children   ["children_total" "children_terminal"]
+   :leverage   ["leverage"]
+   :coupling   ["coupling"]
+   :cc         ["cc"]})
+
+(deftest listing-notes-document-computed-columns-test
+  ;; ADR 0017: anything derivable from the CLI belongs on the pull surface,
+  ;; so every computed column is defined in the help of the commands that
+  ;; render it. This guard fails when a column is added without its note.
+  (let [computed (remove #(contains? passthrough-column-keys (:key %)) ls-column-defs)]
+
+    (testing "every computed column output.clj renders is covered by this guard"
+      (is (= (set (map :key computed))
+             (set (keys computed-column-json-fields)))
+          "a new computed column needs a NOTES line and an entry here"))
+
+    (doseq [cmd [:list :ready :blocked]]
+      (let [notes (str/join "\n" (:notes (get help/registry cmd)))]
+        (doseq [{:keys [key header]} computed]
+          (testing (str "knot help " (name cmd) " explains " header)
+            (is (re-find (re-pattern (str "\\b" header "\\b")) notes))
+            (doseq [field (get computed-column-json-fields key)]
+              (is (str/includes? notes (str "`" field "`"))
+                  (str header " must name its --json field " field)))))))))

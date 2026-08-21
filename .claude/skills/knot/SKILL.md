@@ -100,12 +100,12 @@ repeatable). What the help won't tell you:
   "isn't finished".
 - The three graph filters answer three different questions: `--parent <id>` direct children, `--closure <id>`
   everything transitively related with the archive included, `--component <id>` the seed's live cluster.
-- The listing tables carry computed columns — `CC` (component), `AGE`, `AC`, `CHLD`, `LEV` (leverage), `CPL`
-  (coupling) — which are derived, not stored, and never filterable.
+- The listing tables carry computed columns, derived rather than stored and never filterable; `knot help list`
+  defines each one and names its `--json` field.
 
 **Before composing a graph query or reading a computed column, load
 [`references/listing-filters-and-columns.md`](references/listing-filters-and-columns.md)** — scope rules (live-induced
-vs corpus-wide), fail-fast cases, and `--json` field names are pinned there.
+vs corpus-wide), fail-fast cases, and how to act on the columns are pinned there.
 
 ### Partial ids
 

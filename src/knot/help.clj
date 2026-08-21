@@ -144,6 +144,20 @@
                      (str "  " code "  " reason)))
          "\n")))
 
+(def ^:private listing-column-notes
+  "Definitions for the computed columns `list`, `ready` and `blocked`
+   render, shared by all three registry entries. The pull surface owns
+   these (ADR 0017) — no prose document should cache them. A column added
+   to `output/ls-columns-for` adds a line here; `help-test` fails until it
+   does."
+  ["Computed columns are live-induced: a closed ticket is neither counted nor conductive, so a chain running through one is severed."
+   "AGE  time since the ticket's `updated` stamp, bucketed as Nd / Nw / Nm, or `-` when there is no usable stamp. No --json field of its own: read the raw `updated` timestamp."
+   "AC  done/total acceptance criteria, `-` when the ticket has none. The column appears only when some row in the view carries criteria. --json carries the full `acceptance` list instead."
+   "CHLD  terminal/total direct children, `-` for a ticket that is not an umbrella. The column appears only when the view holds an umbrella. --json adds `children_total` and `children_terminal`, on umbrella rows only."
+   "LEV  leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. --json field `leverage`, always an integer on these three commands."
+   "CPL  coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. --json field `coupling`, always an integer on these three commands."
+   "CC  connected component: which cluster of the live graph (parent, deps and links, undirected) the row sits on. The number is a throwaway within-snapshot ordinal — largest cluster 1, `-` for a singleton — and membership ignores your filters. --json field `cc` on every row, null for a singleton. Use --component to work one cluster."])
+
 (def registry
   "Source of truth for every CLI command. Keys are registry IDs:
    single-word commands use a bare keyword (`:init`); two-token
@@ -247,6 +261,7 @@
                   {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
+    :notes       listing-column-notes
     :examples    [{:cmd "knot list --mode afk --tag p0"
                    :note "Show afk-mode tickets tagged p0."}
                   {:cmd "knot list --parent kno-01abc"
@@ -407,6 +422,7 @@
                   {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
+    :notes       listing-column-notes
     :examples    [{:cmd "knot ready --mode afk"
                    :note "Show afk-mode tickets ready to start."}
                   {:cmd "knot ready --parent kno-01abc"
@@ -434,6 +450,7 @@
                   {:name :component :coerce :string :desc "Filter to the seed id's live-induced connected component over parent, deps, and links (closed non-conductive; resolves a partial id; single id, never an ordinal). The CC column's action-companion. Mutually exclusive with --closure."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
+    :notes       listing-column-notes
     :examples    [{:cmd "knot blocked"
                    :note "Show tickets currently blocked by an open dep."}
                   {:cmd "knot blocked --mode afk"

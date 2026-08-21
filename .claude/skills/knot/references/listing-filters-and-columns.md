@@ -102,88 +102,24 @@ knot list --component kno-01abc
 knot list --acceptance-complete=false --mode afk
 ```
 
-## Columns
+## Reading the columns
 
-Full layout:
-`CC ID STATUS PRI MODE TYPE ASSIGNEE AGE [AC] [CHLD] [LEV] [CPL] TITLE`.
+`knot help list` defines every computed column and names its `--json` field —
+do not re-derive them from here. What help cannot tell you is how to *act* on
+them:
 
-### `CC` — connected components
-
-`list`/`ready`/`blocked` (NOT `closed`) carry a leading `CC` column (before
-`ID`) marking which connected component of the *live-induced* graph the row
-sits in, over all three axes (`:parent` ∪ `:deps` ∪ `:links`, undirected) —
-closed tickets are non-conductive, so a cluster joined only through a closed
-bridge splits. Membership and size are **filter-independent** (computed over
-all live tickets; `--tag`/`--type`/`--limit` never change a row's component).
-The label is a **throwaway global ordinal**: only components with **≥2 live
-members** are numbered, **size-descending** (largest = `1`), ties by min
-member id; **singletons render `-`**. Numbering is global, so a filtered view
-may show non-contiguous numbers (`1, 3, 4`) — it is a within-snapshot grouping
-aid, not a stable id. The text column is present **iff at least one visible
-row carries a real ordinal** (stricter than `LEV`/`CPL`: an all-singleton view
-shows no column). In `--json`, **every** list/ready/blocked row carries a `cc`
-field — integer ordinal or **`null`** for singletons (uniform shape; don't
-branch on key-presence); `closed --json`, `show`, and all non-listing commands
-omit it. NB the live-induced scope deliberately differs from `--closure`
-(corpus-wide, single-seed).
-
-### `CHLD` — umbrella progress
-
-When a result set contains at least one *umbrella* (a ticket with ≥1 direct
-child), the four listing commands add a `CHLD` column showing `terminal/total`
-of that ticket's direct children (`-` for non-umbrellas); the column is hidden
-entirely when no umbrella is present. `show` mirrors this as a
-`## Children (d/t)` heading. `terminal` counts every closed child including
-`Won't do:` closures, and the tally spans live+archive, so it asserts nothing
-about readiness — an umbrella at `0/5` can still be `ready`. In `--json`,
-umbrella rows carry `children_total`/`children_terminal` (present only on
-umbrellas, so `jq 'select(has("children_total"))'` selects them); read these
-instead of re-deriving the rollup from `--parent` queries.
-
-### `LEV` — leverage
-
-`list`/`ready`/`blocked` (NOT `closed`) carry a `LEV` column: the count of
-*live* tickets that transitively depend on the row through `:deps` — its
-forward unblocking cone, computed over the *live-induced* deps subgraph. A
-closed intermediary is non-conductive and **severs** the cone (its dependents
-are not reached through it, and it is not tallied); cycles are guarded and
-broken refs dropped; the row itself is excluded. High `LEV` flags a keystone —
-closing it unblocks the most work. It is independent of readiness: a deps-leaf
-can be both `ready` and highest-leverage. The column is always present on those
-three listings (`-` never appears; a leaf shows `0`). In `--json`, those rows
-carry a `leverage` integer; `closed --json`, `show`, and all non-listing
-commands omit it.
-
-### `CPL` — coupling
-
-`list`/`ready`/`blocked` (NOT `closed`) carry a `CPL` column beside `LEV`: the
-count of *distinct live* tickets the row is directly connected to at one hop
-through `:deps` (in **either** direction) or `:links` — its undirected 1-hop
-degree over those two axes, computed over the *live-induced* graph. `:parent`
-is excluded (that rollup is `CHLD`); neighbors are deduped across axes (a pair
-joined by both a dep and a link counts once); closed neighbors and broken refs
-are dropped; the row itself is never counted. High `CPL` flags a tangled,
-high-context ticket. It is 1-hop only (no transitive walk). The column is
-always present on those three listings (`-` never appears; an isolated ticket
-shows `0`). In `--json`, those rows carry a `coupling` integer; `closed --json`,
-`show`, and all non-listing commands omit it.
-
-### `AC` — acceptance progress
-
-Listing tables (`list`/`ready`/`blocked`/`closed`) gain a conditional `AC`
-column rendered as `d/t` (e.g. `2/5`) immediately before `TITLE`. The column
-is omitted entirely when no ticket in the result set has acceptance, so quiet
-projects don't pay the width cost. Tickets without AC render as `-`.
-Force-closed terminal tickets render their partial counts (`2/5`) — useful
-audit signal when scanning archive. `--json` is unchanged: raw `:acceptance`
-already passes through.
-
-### `AGE`
-
-Every listing table carries an `AGE` column to the immediate left of `AC` (or
-`TITLE` when `AC` is absent), bucketed from each ticket's `:updated` against
-`now`: `Nd` (<14d), `Nw` (14–42d, floor by 7), `Nm` (>42d, floor by 30), or `-`
-when `:updated` is missing or unparseable. Same bucketing the
-`knot prime ## In Progress` column already uses. `--json` is unchanged —
-consumers compute age client-side from the existing `:updated` field; no new
-keys, no schema bump.
+- **`LEV` picks the next ticket when several are ready.** The highest-leverage
+  ready ticket dissolves the most waiting structure, so it is the default
+  answer to "which of these first?" — priority only overrides it when a
+  deadline says so.
+- **`CPL` is a cost, not a virtue.** A high-coupling ticket needs the most
+  surrounding context loaded before it can be reasoned about, so it is a poor
+  fit for a cold agent run and a good candidate for splitting.
+- **`LEV` and `CPL` are orthogonal to readiness.** A deps-leaf can be `ready`
+  and the highest-leverage row at once; neither number says anything about
+  whether the ticket can be started.
+- **`CHLD` is progress, not readiness.** An umbrella at `0/5` may still be
+  `ready` — its own integration work is what is ready, not its children.
+- **Component membership ignores your filters**, so a `CC` ordinal read off a
+  filtered view still names the whole island. Feed any member id to
+  `--component` to see the rest of it.
