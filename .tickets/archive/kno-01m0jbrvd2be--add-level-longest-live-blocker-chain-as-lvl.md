@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-08-21T14:32:03.731877234Z'
-updated: '2026-08-21T16:26:42.626765375Z'
+updated: '2026-08-21T16:49:49.709050755Z'
 closed: '2026-08-21T16:26:42.626765375Z'
 parent: kno-01m0jbrv6wbe
 tags:
@@ -27,6 +27,8 @@ deps:
 - kno-01m0jbrv9mtn
 external_refs:
 - git:c624b1d
+links:
+- kno-01m0jkmpnkk4
 ---
 
 ## Description
