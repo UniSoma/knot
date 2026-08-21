@@ -6,7 +6,7 @@ type: task
 priority: 4
 mode: hitl
 created: '2026-05-01T02:54:25.277798011Z'
-updated: '2026-05-14T02:40:41.761222235Z'
+updated: '2026-08-21T14:32:03.935591783Z'
 tags:
 - future
 - concurrency
@@ -21,6 +21,8 @@ acceptance:
   done: false
 - title: README "Concurrency" section updated to document the new opt-in path
   done: false
+links:
+- kno-01m0jbrvkdq2
 ---
 
 ## Description
