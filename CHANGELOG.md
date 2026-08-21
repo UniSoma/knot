@@ -14,9 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Acceptance criteria are addressable by number, and `--ac` repeats.** `knot update <id> --ac 2 --done` flips the second criterion in the frontmatter list; an all-digits value on `--ac` or `--remove-ac` is a 1-based ordinal, anything else is still an exact title, and there is no prefix matching. `knot show` now numbers each criterion, so the number an agent reads is the number it passes back. `--ac` is repeatable and every value shares the one `--done` / `--undone` direction, so a run can close out several criteria in a single write. Ordinals resolve against the list as it stands at that step of the apply order (add, then flip, then remove), which is what makes `--add-ac "new" --ac 3 --done` flip the criterion just appended. A criterion whose title is all digits is reachable only by its own ordinal — the ordinal reading wins; rename it to address it by name. This exists because real AC titles run 150-250 characters and retyping one verbatim is a silent-failure machine.
+
 - **`show --json` splits the body into `sections`.** The payload gains a `sections` object mapping each `## ` heading, slugified the way ticket filenames are, to the raw markdown below it; text before the first heading lands under `""`. An agent that needs the design notes can now read `jq -r '.data.sections.design'` instead of a full render. `body` is untouched and `acceptance` still passes through as the same `[{title, done}]` list `list --json` emits, so existing consumers keep working.
 
 - **Conditional claim: `--if-unassigned` on `start` and `update`, plus `--assignee ""` on the listings.** `knot start <id> --assignee me --if-unassigned` takes a ticket only when nobody holds it; if someone got there first, nothing is written, the exit code is 1, and `--json` reports `{ok: false, error: {code: "already_assigned", current_assignee: "..."}}`. `knot update` honours the same flag with the same semantics, dropping every other flag in the losing call. `start` also gains `--assignee` so the claim and the transition are one write. On the read side, `--assignee ""` now means unassigned on `list`/`ready`/`blocked`/`closed`/`prime` — it used to match nothing — so `knot ready --assignee ""` is the frontier query that pairs with the claim. This is a courtesy protocol, not a lock: the read-modify-write window is accepted on a single host.
+
+### Fixed
+
+- **A `--remove-ac` that matches nothing now exits 1.** It used to report success and write the file unchanged, so a typo in a criterion title looked like a removal. Any non-matching value — unknown title or out-of-range ordinal — now fails with the same "no acceptance criterion matching …" message `--ac` emits, and nothing is written.
 
 ## [0.10.0] - 2026-08-13
 

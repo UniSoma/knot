@@ -132,8 +132,8 @@
                   :body "Body text.\n"}
           s (output/show-text ticket)]
       (is (str/includes? s "## Acceptance Criteria"))
-      (is (str/includes? s "- [ ] first"))
-      (is (str/includes? s "- [x] second"))))
+      (is (str/includes? s "1. [ ] first"))
+      (is (str/includes? s "2. [x] second"))))
 
   (testing "the synthesized AC section sits between the body and the inverse sections"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
@@ -168,7 +168,7 @@
                   :body ""}
           s (output/show-text ticket)]
       (is (str/includes? s "## Acceptance Criteria"))
-      (is (str/includes? s "- [ ] only")))))
+      (is (str/includes? s "1. [ ] only")))))
 
 (deftest color-enabled-test
   (testing "TTY with no overrides — color enabled"

@@ -100,7 +100,7 @@
                         second)
             shown  (cli/show-cmd (ctx tmp) {:id id})]
         (is (str/includes? shown "## Acceptance Criteria"))
-        (is (str/includes? shown "- [ ] Ship it")))))
+        (is (str/includes? shown "1. [ ] Ship it")))))
 
   (testing "explicit --type/--priority/--assignee/--parent/--tags/--external-ref are stored"
     (with-tmp tmp
@@ -1423,7 +1423,7 @@
                                      :acceptance ["a"]})
             id      (id-of-created created "t")
             _       (cli/start-cmd (ctx tmp) {:id id})
-            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["a"] :done true})
             saved   (atom nil)
             err     (with-err-str
                       (reset! saved
@@ -1509,7 +1509,7 @@
             id      (id-of-created created "t")
             _       (cli/start-cmd (ctx tmp) {:id id})
             saved   (cli/update-cmd (ctx tmp)
-                                    {:id id :ac "a" :done true :status "closed"})
+                                    {:id id :ac ["a"] :done true :status "closed"})
             loaded  (store/load-one tmp ".tickets" id)]
         (is (string? saved))
         (is (= "closed" (get-in loaded [:frontmatter :status])))
@@ -1554,7 +1554,7 @@
                                      :acceptance ["a"]})
             id      (id-of-created created "t")
             _       (cli/start-cmd (ctx tmp) {:id id})
-            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["a"] :done true})
             saved   (cli/close-cmd (ctx tmp) {:id id})]
         (is (some #{"archive"} (map str (fs/components saved)))))))
 
@@ -1565,7 +1565,7 @@
                                      :acceptance ["a" "b" "c"]})
             id      (id-of-created created "t")
             _       (cli/start-cmd (ctx tmp) {:id id})
-            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["a"] :done true})
             data    (try
                       (cli/status-cmd (ctx tmp) {:id id :status "closed"})
                       nil
@@ -3653,7 +3653,7 @@ Restart the daemon.
                                     {:title "T"
                                      :acceptance ["a" "b"]})
             id      (id-of-created created "t")
-            _       (cli/update-cmd (ctx tmp) {:id id :ac "a" :done true})
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["a"] :done true})
             _       (cli/update-cmd (ctx tmp) {:id id :add-ac ["a" "c"]})
             loaded  (store/load-one tmp ".tickets" id)]
         (is (= [{:title "a" :done true}
@@ -3672,15 +3672,17 @@ Restart the daemon.
                 {:title "y" :done false}]
                (vec (get-in loaded [:frontmatter :acceptance])))))))
 
-  (testing "--remove-ac is a no-op when no title matches"
+  (testing "--remove-ac with no matching title throws instead of silently succeeding"
     (with-tmp tmp
       (let [created (cli/create-cmd (ctx tmp)
                                     {:title "T" :acceptance ["a"]})
-            id      (id-of-created created "t")
-            _       (cli/update-cmd (ctx tmp) {:id id :remove-ac ["ghost"]})
-            loaded  (store/load-one tmp ".tickets" id)]
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
+                              (cli/update-cmd (ctx tmp) {:id id :remove-ac ["ghost"]})))
         (is (= [{:title "a" :done false}]
-               (vec (get-in loaded [:frontmatter :acceptance])))))))
+               (vec (get-in (store/load-one tmp ".tickets" id)
+                            [:frontmatter :acceptance])))
+            "nothing is written when a removal does not match"))))
 
   (testing "--remove-ac that empties the list drops the YAML key"
     (with-tmp tmp
@@ -3700,7 +3702,7 @@ Restart the daemon.
             _       (cli/update-cmd (ctx tmp)
                                     {:id id
                                      :add-ac ["new"]
-                                     :ac "new"
+                                     :ac ["new"]
                                      :done true
                                      :remove-ac ["drop"]})
             loaded  (store/load-one tmp ".tickets" id)]
@@ -3734,6 +3736,117 @@ Restart the daemon.
         (is (= true (:ok parsed)))
         (is (= [{:title "b" :done false}]
                (vec (get-in parsed [:data :acceptance]))))))))
+
+(deftest update-cmd-ac-ordinal-test
+  (testing "--ac <n> --done flips the nth frontmatter criterion (1-based)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["one" "two" "three"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["2"] :done true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "one"   :done false}
+                {:title "two"   :done true}
+                {:title "three" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "an out-of-range ordinal throws and writes nothing"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a" "b" "c" "d"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
+                              (cli/update-cmd (ctx tmp) {:id id :ac ["9"] :done true})))
+        (is (every? (complement :done)
+                    (get-in (store/load-one tmp ".tickets" id)
+                            [:frontmatter :acceptance]))))))
+
+  (testing "--ac is repeatable: several ordinals flip in one write, sharing the direction"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["1" "3"] :done true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done true}
+                {:title "b" :done false}
+                {:title "c" :done true}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--ac mixes ordinals and titles in one call"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["1" "c"] :done true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [true false true]
+               (mapv :done (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "ordinals resolve against the list as it stands at the flip step (post-add)"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["keep" "drop"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :add-ac ["new"] :ac ["3"] :done true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "keep" :done false}
+                {:title "drop" :done false}
+                {:title "new"  :done true}]
+               (vec (get-in loaded [:frontmatter :acceptance])))
+            "--ac 3 addresses the criterion --add-ac just appended"))))
+
+  (testing "an all-digits title: the ordinal wins, and the digit-titled entry keeps its own ordinal"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["2" "b"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :ac ["2"] :done true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "2" :done false}
+                {:title "b" :done true}]
+               (vec (get-in loaded [:frontmatter :acceptance])))
+            "\"2\" addressed the second entry, not the entry titled \"2\"")
+        (cli/update-cmd (ctx tmp) {:id id :ac ["1"] :done true})
+        (is (= [{:title "2" :done true}
+                {:title "b" :done true}]
+               (vec (get-in (store/load-one tmp ".tickets" id)
+                            [:frontmatter :acceptance])))
+            "the digit-titled entry is reachable by its own ordinal"))))
+
+  (testing "--remove-ac accepts an ordinal"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a" "b" "c"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id id :remove-ac ["2"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done false}
+                {:title "c" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))))))
+
+  (testing "--remove-ac with an out-of-range ordinal throws and writes nothing"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a" "b"]})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
+                              (cli/update-cmd (ctx tmp) {:id id :remove-ac ["5"]})))
+        (is (= 2 (count (get-in (store/load-one tmp ".tickets" id)
+                                [:frontmatter :acceptance])))))))
+
+  (testing "--remove-ac ordinals resolve against the list as it stands at the remove step"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp)
+                                    {:title "T" :acceptance ["a"]})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :add-ac ["b" "c"] :remove-ac ["2" "3"]})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= [{:title "a" :done false}]
+               (vec (get-in loaded [:frontmatter :acceptance])))
+            "both removals index the post-add list, and neither shifts the other")))))
 
 (deftest update-cmd-body-sectional-test
   (testing "update --description replaces the Description section in place"
@@ -3840,7 +3953,7 @@ Restart the daemon.
                                      :acceptance ["one" "two" "three"]})
             id      (id-of-created created "t")
             _       (cli/update-cmd (ctx tmp)
-                                    {:id id :ac "two" :done true})
+                                    {:id id :ac ["two"] :done true})
             loaded  (store/load-one tmp ".tickets" id)
             ac      (get-in loaded [:frontmatter :acceptance])]
         (is (= [{:title "one"   :done false}
@@ -3856,9 +3969,9 @@ Restart the daemon.
                                      :acceptance ["only"]})
             id      (id-of-created created "t")
             _       (cli/update-cmd (ctx tmp)
-                                    {:id id :ac "only" :done true})
+                                    {:id id :ac ["only"] :done true})
             _       (cli/update-cmd (ctx tmp)
-                                    {:id id :ac "only" :undone true})
+                                    {:id id :ac ["only"] :undone true})
             loaded  (store/load-one tmp ".tickets" id)
             ac      (get-in loaded [:frontmatter :acceptance])]
         (is (= [{:title "only" :done false}] ac)))))
@@ -3871,7 +3984,7 @@ Restart the daemon.
             id      (id-of-created created "t")]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :ac "Ship It" :done true}))
+                                              {:id id :ac ["Ship It"] :done true}))
             "case mismatch is treated as no match"))))
 
   (testing "update --ac with a non-existent title throws an :ac-not-found error"
@@ -3882,7 +3995,7 @@ Restart the daemon.
             id      (id-of-created created "t")]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no acceptance criterion"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :ac "ghost" :done true}))))))
+                                              {:id id :ac ["ghost"] :done true}))))))
 
   (testing "update --done and --undone are mutually exclusive"
     (with-tmp tmp
@@ -3891,7 +4004,7 @@ Restart the daemon.
             id      (id-of-created created "t")]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"mutually exclusive"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :ac "x"
+                                              {:id id :ac ["x"]
                                                :done true :undone true}))))))
 
   (testing "update --ac requires exactly one of --done or --undone"
@@ -3901,7 +4014,7 @@ Restart the daemon.
             id      (id-of-created created "t")]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires --done or --undone"
                               (cli/update-cmd (ctx tmp)
-                                              {:id id :ac "x"}))))))
+                                              {:id id :ac ["x"]}))))))
 
   (testing "update --done without --ac is an error"
     (with-tmp tmp
@@ -3921,7 +4034,7 @@ Restart the daemon.
                                      :acceptance ["x" "y"]})
             id      (id-of-created created "t")
             _       (cli/update-cmd (ctx tmp)
-                                    {:id id :ac "y" :done true})
+                                    {:id id :ac ["y"] :done true})
             loaded  (store/load-one tmp ".tickets" id)
             fm      (:frontmatter loaded)]
         (is (= "T" (:title fm)))
@@ -4168,7 +4281,7 @@ Restart the daemon.
             done    (cli/create-cmd c {:title "All AC done"  :acceptance ["a"]})
             d-id    (id-of-created done "all-ac-done")
             _       (cli/start-cmd c {:id d-id})
-            _       (cli/update-cmd c {:id d-id :ac "a" :done true})
+            _       (cli/update-cmd c {:id d-id :ac ["a"] :done true})
             partial (cli/create-cmd c {:title "Partial AC" :acceptance ["a" "b"]})
             p-id    (id-of-created partial "partial-ac")
             _       (cli/start-cmd c {:id p-id})
@@ -4213,7 +4326,7 @@ Restart the daemon.
             done (cli/create-cmd c {:title "Done one" :acceptance ["a"]})
             d-id (id-of-created done "done-one")
             _    (cli/start-cmd c {:id d-id})
-            _    (cli/update-cmd c {:id d-id :ac "a" :done true})
+            _    (cli/update-cmd c {:id d-id :ac ["a"] :done true})
             out  (cli/prime-cmd (prime-ctx tmp) {:json? true})
             parsed (cheshire/parse-string out true)
             rtc  (get-in parsed [:data :ready_to_close])]
@@ -4232,14 +4345,14 @@ Restart the daemon.
             id1 (id-of-created t1 "older-done")
             _   (cli/start-cmd (assoc c :now "2026-04-25T09:00:00Z") {:id id1})
             _   (cli/update-cmd (assoc c :now "2026-04-25T10:00:00Z")
-                                {:id id1 :ac "a" :done true})
+                                {:id id1 :ac ["a"] :done true})
             ;; newer updated last
             t2 (cli/create-cmd (assoc c :now "2026-04-28T08:00:00Z")
                                {:title "Newer done" :acceptance ["b"]})
             id2 (id-of-created t2 "newer-done")
             _   (cli/start-cmd (assoc c :now "2026-04-28T09:00:00Z") {:id id2})
             _   (cli/update-cmd (assoc c :now "2026-04-28T10:00:00Z")
-                                {:id id2 :ac "b" :done true})
+                                {:id id2 :ac ["b"] :done true})
             ;; text shape
             out (cli/prime-cmd (prime-ctx tmp) {})
             rtc-i (str/index-of out "## Ready to close")

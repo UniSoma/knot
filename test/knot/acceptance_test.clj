@@ -8,10 +8,16 @@
     (is (= "" (acceptance/render-section nil)))
     (is (= "" (acceptance/render-section []))))
 
-  (testing "renders a `- [ ] / - [x]` checklist with leading blank-line separator"
-    (is (= "\n## Acceptance Criteria\n\n- [ ] foo\n- [x] bar\n"
+  (testing "renders a numbered `N. [ ] / N. [x]` checklist with leading blank-line separator"
+    (is (= "\n## Acceptance Criteria\n\n1. [ ] foo\n2. [x] bar\n"
            (acceptance/render-section [{:title "foo" :done false}
-                                       {:title "bar" :done true}])))))
+                                       {:title "bar" :done true}]))))
+
+  (testing "the ordinal is the 1-based number --ac and --remove-ac accept"
+    (let [out (acceptance/render-section [{:title "a" :done false}
+                                          {:title "b" :done false}
+                                          {:title "c" :done false}])]
+      (is (str/includes? out "3. [ ] c")))))
 
 (deftest from-titles-test
   (testing "lifts a vector of titles into structured entries with done:false"
@@ -27,30 +33,6 @@
     (is (nil? (acceptance/from-titles [])))
     (is (nil? (acceptance/from-titles nil)))
     (is (nil? (acceptance/from-titles ["" "  "])))))
-
-(deftest flip-test
-  (testing "flips the matching entry's :done state"
-    (is (= [{:title "x" :done true}]
-           (acceptance/flip [{:title "x" :done false}] "x" true)))
-    (is (= [{:title "x" :done false}]
-           (acceptance/flip [{:title "x" :done true}] "x" false))))
-
-  (testing "leaves other entries untouched"
-    (is (= [{:title "a" :done false}
-            {:title "b" :done true}
-            {:title "c" :done false}]
-           (acceptance/flip [{:title "a" :done false}
-                             {:title "b" :done false}
-                             {:title "c" :done false}]
-                            "b" true))))
-
-  (testing "exact case-sensitive match (no fuzzy matching)"
-    (is (nil? (acceptance/flip [{:title "Foo" :done false}] "foo" true))))
-
-  (testing "no match returns nil"
-    (is (nil? (acceptance/flip [{:title "x" :done false}] "ghost" true)))
-    (is (nil? (acceptance/flip nil "anything" true)))
-    (is (nil? (acceptance/flip [] "anything" true)))))
 
 (deftest parse-body-section-test
   (testing "returns nil when the body has no `## Acceptance Criteria` section"
@@ -183,3 +165,35 @@
                                 :acceptance [{:title "x" :done true}]}
                   :body        "## Description\n\nD.\n"}]
       (is (= ticket (acceptance/migrate-ticket ticket))))))
+
+(deftest resolve-index-test
+  (testing "an all-digits argument is a 1-based ordinal"
+    (let [ac [{:title "a" :done false}
+              {:title "b" :done false}
+              {:title "c" :done false}]]
+      (is (= 0 (acceptance/resolve-index ac "1")))
+      (is (= 2 (acceptance/resolve-index ac "3")))))
+
+  (testing "anything else is an exact, case-sensitive title match"
+    (let [ac [{:title "Foo" :done false}
+              {:title "bar" :done false}]]
+      (is (= 1 (acceptance/resolve-index ac "bar")))
+      (is (nil? (acceptance/resolve-index ac "foo")))
+      (is (nil? (acceptance/resolve-index ac "ghost")))))
+
+  (testing "an out-of-range ordinal resolves to nothing"
+    (let [ac [{:title "a" :done false}]]
+      (is (nil? (acceptance/resolve-index ac "2")))
+      (is (nil? (acceptance/resolve-index ac "0")))))
+
+  (testing "an all-digits title is unreachable by title — the ordinal wins"
+    (let [ac [{:title "2" :done false}
+              {:title "b" :done false}]]
+      (is (= 1 (acceptance/resolve-index ac "2"))
+          "\"2\" addresses the second entry, not the entry titled \"2\"")
+      (is (= 0 (acceptance/resolve-index ac "1"))
+          "the digit-titled entry is still reachable by its own ordinal")))
+
+  (testing "empty/nil acceptance resolves nothing"
+    (is (nil? (acceptance/resolve-index nil "1")))
+    (is (nil? (acceptance/resolve-index [] "anything")))))

@@ -1083,6 +1083,9 @@
                     ;; AC-delta normalization: blank-reject only (no
                     ;; comma-reject — AC titles can contain commas, and
                     ;; there is no comma-list replace flag to round-trip).
+                    (contains? merged :ac)
+                    (assoc :ac (normalize-ac-delta-values :ac (:ac merged)))
+
                     (contains? merged :add-ac)
                     (assoc :add-ac (normalize-ac-delta-values
                                     :add-ac (:add-ac merged)))

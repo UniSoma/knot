@@ -181,8 +181,8 @@ is the recovery path.
 Two gates block a transition with exit 1 and a JSON `error.code`:
 
 - `acceptance_incomplete` — closing (any active→terminal move) with a frontmatter `:acceptance` entry still unchecked.
-  Clear it by checking the box: `knot update <id> --ac "<title>" --done`, which composes with `--status`, so `knot
-  update <id> --ac "last AC" --done --status closed` checks and closes in one call.
+  Clear it by checking the box: `knot update <id> --ac 3 --done` (or the exact title), which composes with `--status`,
+  so `knot update <id> --ac 3 --done --status closed` checks and closes in one call.
 - `open_children` — starting *or* closing a ticket that has a child in a non-terminal status. Clear it by finishing
   the children.
 
@@ -203,7 +203,14 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 
 The trap in the middle is set-semantics: `--tags` replaces the whole tag list, so adding one tag by re-sending the list
 drops anything you hadn't read first. For a one-tag or one-criterion change reach for the delta flags —
-`--add-tag` / `--remove-tag` and `--add-ac` / `--remove-ac` — which are idempotent and leave the rest untouched.
+`--add-tag` / `--remove-tag` and `--add-ac` / `--remove-ac` — which leave the rest untouched. The tag deltas are
+idempotent; `--remove-ac` is not, because a value that matches no criterion exits 1 rather than reporting a write that
+never happened.
+
+Address a criterion by the number `knot show` prints beside it rather than retyping it: real AC titles run to a
+paragraph, and a title reproduced with one character off is a silent miss. `--ac` and `--remove-ac` read an all-digits
+value as that 1-based ordinal, anything else as an exact title, and `--ac` is repeatable, so
+`knot update <id> --ac 2 --ac 5 --done` closes out two criteria in one write.
 
 ## Graph: deps vs links
 

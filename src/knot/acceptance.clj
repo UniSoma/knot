@@ -3,7 +3,8 @@
    in frontmatter. The `## Acceptance Criteria` body section is never
    stored on disk — `knot show` synthesizes it from frontmatter at
    display time. This namespace owns the pure transformations: render
-   to markdown, flip a single entry, validate the on-disk shape, parse
+   to markdown, resolve an ordinal or title to an entry, validate the
+   on-disk shape, parse
    a body section (one-shot migration only)."
   (:require [clojure.string :as str]))
 
@@ -33,7 +34,9 @@
 
 (defn render-section
   "Format an `:acceptance` vector as a `## Acceptance Criteria` markdown
-   block, preceded by a leading blank-line separator. Returns `\"\"`
+   block, preceded by a leading blank-line separator. Each entry is
+   numbered with its 1-based ordinal — the number `--ac` and
+   `--remove-ac` accept in place of the title. Returns `\"\"`
    when the vector is nil/empty so callers can concatenate
    unconditionally."
   [acceptance]
@@ -41,8 +44,9 @@
     ""
     (str "\n## Acceptance Criteria\n\n"
          (str/join "\n"
-                   (for [{:keys [title done]} acceptance]
-                     (str "- [" (if done "x" " ") "] " title)))
+                   (map-indexed (fn [i {:keys [title done]}]
+                                  (str (inc i) ". [" (if done "x" " ") "] " title))
+                                acceptance))
          "\n")))
 
 (defn from-titles
@@ -57,17 +61,22 @@
                      (mapv (fn [t] {:title t :done false})))]
     (when (seq entries) entries)))
 
-(defn flip
-  "Return `acceptance` with the entry whose `:title` equals `title`
-   updated so its `:done` is `done?`. Match is exact and
-   case-sensitive. Returns nil when no entry matches — callers raise
-   the user-facing error so the message can name the command surface."
-  [acceptance title done?]
-  (let [vec*  (vec (or acceptance []))
-        idx   (->> (map-indexed (fn [i e] [i e]) vec*)
-                   (some (fn [[i e]] (when (= title (:title e)) i))))]
-    (when idx
-      (assoc-in vec* [idx :done] (boolean done?)))))
+(defn resolve-index
+  "Resolve `arg` against `acceptance` to a 0-based index. An all-digits
+   `arg` is a 1-based ordinal into the list; anything else is an exact,
+   case-sensitive title match (first match wins). Returns nil when
+   nothing matches — an out-of-range ordinal, or an unknown title.
+
+   The ordinal reading wins outright: an entry whose title is all
+   digits is not reachable by that title, only by its own ordinal.
+   Rename it to address it by name."
+  [acceptance arg]
+  (let [vec* (vec (or acceptance []))]
+    (if (re-matches #"\d+" (str arg))
+      (let [i (dec (parse-long arg))]
+        (when (and (nat-int? i) (< i (count vec*))) i))
+      (->> (map-indexed vector vec*)
+           (some (fn [[i e]] (when (= arg (:title e)) i)))))))
 
 (def ^:private section-heading "## Acceptance Criteria")
 

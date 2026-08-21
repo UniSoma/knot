@@ -1032,7 +1032,7 @@
 
       (and (or done? undone?) (not ac?))
       (throw (ex-info (str "--" (if done? "done" "undone")
-                           " requires --ac \"<title>\"")
+                           " requires --ac <ordinal|\"title\">")
                       {:offending [(if done? :done :undone)]})))))
 
 (defn- validate-tag-delta-opts!
@@ -1089,35 +1089,65 @@
                         (mapv (fn [t] {:title t :done false})))]
       (assoc fm :acceptance (vec (concat existing appends))))))
 
+(defn- ac-not-found!
+  "Raise the user-facing error for an `--ac` / `--remove-ac` value that
+   addresses no criterion — an unknown title, or an ordinal outside the
+   list. Both flags share the message shape."
+  [arg]
+  (throw (ex-info (str "no acceptance criterion matching " (pr-str arg))
+                  {:ac-not-found arg})))
+
+(defn- removal-indices
+  "Indices in `acceptance` addressed by one `--remove-ac` value. An
+   all-digits value is a 1-based ordinal and names at most one entry;
+   any other value is an exact title and names *every* entry carrying
+   it, so a list with duplicate titles still clears in one call. Throws
+   when the value addresses nothing."
+  [acceptance arg]
+  (let [hits (if (re-matches #"\d+" (str arg))
+               (when-let [i (acceptance/resolve-index acceptance arg)] #{i})
+               (set (keep-indexed (fn [i e] (when (= arg (:title e)) i))
+                                  acceptance)))]
+    (if (seq hits) hits (ac-not-found! arg))))
+
 (defn- apply-ac-removes
-  "Apply `--remove-ac` from `opts` to `fm`'s `:acceptance`. Drops every
-   entry whose `:title` matches a removal value (exact match). Missing
-   matches are no-ops. An empty resulting list drops the YAML key."
+  "Apply `--remove-ac` from `opts` to `fm`'s `:acceptance`. Each value is
+   an exact title (dropping every entry that carries it) or a 1-based
+   ordinal. Every value resolves against the list as it stands at this
+   step — the post-flip snapshot — so removals never shift each other.
+   A value matching nothing throws. An empty resulting list drops the
+   YAML key."
   [fm opts]
   (if-not (contains? opts :remove-ac)
     fm
-    (let [removes (set (:remove-ac opts))
-          kept    (vec (remove (fn [e] (contains? removes (:title e)))
-                               (or (:acceptance fm) [])))]
+    (let [existing (vec (or (:acceptance fm) []))
+          drop-idx (into #{} (mapcat #(removal-indices existing %))
+                         (:remove-ac opts))
+          kept     (vec (keep-indexed (fn [i e] (when-not (drop-idx i) e))
+                                      existing))]
       (if (empty? kept)
         (dissoc fm :acceptance)
         (assoc fm :acceptance kept)))))
 
 (defn- apply-ac-flip
-  "When `opts` carries `--ac`, flip the matching frontmatter entry on
-   `fm`. Returns the (possibly updated) frontmatter. Throws when the
-   title does not match any entry — the user named a criterion that
-   does not exist."
+  "When `opts` carries `--ac`, flip the addressed frontmatter entries on
+   `fm`. `--ac` is repeatable and every value shares the single
+   `--done` / `--undone` direction. A value is an exact title or a
+   1-based ordinal into the list as it stands at this step — the
+   post-add snapshot. Throws when a value addresses no entry."
   [fm opts]
   (if-not (contains? opts :ac)
     fm
-    (let [title    (:ac opts)
-          done?    (boolean (:done opts))
-          flipped  (acceptance/flip (:acceptance fm) title done?)]
-      (if flipped
-        (assoc fm :acceptance flipped)
-        (throw (ex-info (str "no acceptance criterion matching " (pr-str title))
-                        {:ac-not-found title}))))))
+    (let [done? (boolean (:done opts))]
+      (reduce (fn [fm* arg]
+                (let [ac  (:acceptance fm*)
+                      idx (acceptance/resolve-index ac arg)]
+                  (if idx
+                    (assoc fm* :acceptance
+                           (assoc-in (vec ac) [idx :done] done?))
+                    (ac-not-found! arg))))
+              fm
+              (:ac opts)))))
 
 (defn update-cmd
   "Apply non-interactive updates to the ticket whose id is `(:id opts)`
@@ -1126,8 +1156,10 @@
    values; sectional body flags (`:description`, `:design`) replace
    those `## ...` sections in place; `:body` replaces the whole body
    and is mutually exclusive with the sectional flags. The acceptance
-   triple `(:ac \"<title>\" + :done|:undone)` flips the `:done` state
-   of one frontmatter `acceptance` entry; the title must match exactly.
+   triple `(:ac [<ordinal|title> ...] + :done|:undone)` flips the
+   `:done` state of the addressed frontmatter `acceptance` entries; an
+   all-digits value is a 1-based ordinal, anything else must match a
+   title exactly.
    `(:status opts)` transitions the ticket's status in the same call;
    the v0.3 acceptance gate fires *after* AC mutations so
    `--ac \"last\" --done --status closed` works in one shot.

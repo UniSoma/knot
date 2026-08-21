@@ -22,7 +22,7 @@ The gate skips on:
 
 Two ways to clear it:
 
-1. Mark the AC done — `knot update <id> --ac "<title>" --done`. Composes with `--status` in one call: `knot update <id> --ac "last AC" --done --status closed` checks then closes.
+1. Mark the AC done — `knot update <id> --ac <ordinal|"title"> --done`, repeatable. Composes with `--status` in one call: `knot update <id> --ac 4 --done --status closed` checks then closes.
 2. `--force --summary "<reason>"`. Required pair: `--force` without a non-blank `--summary` exits `invalid_argument`. The summary is appended as a Notes entry and serves as the override record.
 
 ## Open-children gate on start and close transitions

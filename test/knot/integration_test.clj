@@ -233,10 +233,10 @@
   ;; `extract-rel-order`) have their own targeted assertions below.
   (testing "--acceptance survives all four dash-leading shapes"
     (doseq [[label value rendered]
-            [["single-line"  "- text"                "- [ ] - text"]
-             ["double-dash"  "--text"                "- [ ] --text"]
-             ["alias-shaped" "-x"                    "- [ ] -x"]
-             ["multi-line"   "- one\n- two\n- three" "- [ ] - one\n- two\n- three"]]]
+            [["single-line"  "- text"                "1. [ ] - text"]
+             ["double-dash"  "--text"                "1. [ ] --text"]
+             ["alias-shaped" "-x"                    "1. [ ] -x"]
+             ["multi-line"   "- one\n- two\n- three" "1. [ ] - one\n- two\n- three"]]]
       (testing label
         (with-tmp tmp
           (run-knot tmp "init")
@@ -251,7 +251,7 @@
       (let [{:keys [exit out err]} (run-knot tmp "create" "x" "--acceptance=- text")]
         (is (zero? exit) (str "= form err=" err))
         (let [{shown :out} (run-knot tmp "show" (id-from-create-out out "x"))]
-          (is (str/includes? shown "- [ ] - text"))))))
+          (is (str/includes? shown "1. [ ] - text"))))))
   (testing "aliases (-t, -a) accept dash-leading values"
     (with-tmp tmp
       (run-knot tmp "init")
@@ -353,8 +353,8 @@
                                          "--add-ac" "--second")]
         (is (zero? exit) (str "update --add-ac err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (str/includes? shown "- [ ] - first"))
-          (is (str/includes? shown "- [ ] --second"))))))
+          (is (str/includes? shown "1. [ ] - first"))
+          (is (str/includes? shown "2. [ ] --second"))))))
   (testing "--external-ref survives dash-leading value (repeatable)"
     (with-tmp tmp
       (run-knot tmp "init")
@@ -375,7 +375,7 @@
             {:keys [exit err]} (run-knot tmp "update" id "--ac" "- task" "--done")]
         (is (zero? exit) (str "update --ac --done err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (str/includes? shown "- [x] - task"))))))
+          (is (str/includes? shown "1. [x] - task"))))))
   (testing "--remove-tag dash-leading value removes the matching tag"
     ;; Mirrors the --add-tag dash-leading test against the remove branch.
     ;; normalize-tag-delta-values runs over the extracted values and must
@@ -409,9 +409,9 @@
                                          "--remove-ac" "--second")]
         (is (zero? exit) (str "update --remove-ac err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (not (str/includes? shown "- [ ] - first"))
+          (is (not (str/includes? shown "1. [ ] - first"))
               "the dash-leading AC `- first` must actually be removed")
-          (is (not (str/includes? shown "- [ ] --second"))
+          (is (not (str/includes? shown "2. [ ] --second"))
               "the dash-leading AC `--second` must actually be removed"))))))
 
 (deftest dash-leading-value-flags-survive-transition-test
@@ -2316,8 +2316,8 @@
             (run-knot tmp "update" id "--ac" "second" "--done")]
         (is (zero? exit) (str "update --ac err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (str/includes? shown "- [ ] first"))
-          (is (str/includes? shown "- [x] second"))))))
+          (is (str/includes? shown "1. [ ] first"))
+          (is (str/includes? shown "2. [x] second"))))))
 
   (testing "update --ac with a non-matching title exits non-zero"
     (with-tmp tmp
@@ -2326,7 +2326,53 @@
             {:keys [exit err]}
             (run-knot tmp "update" id "--ac" "ghost" "--done")]
         (is (= 1 exit))
-        (is (str/includes? err "no acceptance criterion"))))))
+        (is (str/includes? err "no acceptance criterion")))))
+
+  (testing "update --ac <n> is repeatable and flips by ordinal end-to-end"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--acceptance" "first"
+                                    "--acceptance" "second"
+                                    "--acceptance" "third")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--ac" "1" "--ac" "3" "--done")]
+        (is (zero? exit) (str "update --ac ordinal err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "1. [x] first"))
+          (is (str/includes? shown "2. [ ] second"))
+          (is (str/includes? shown "3. [x] third"))))))
+
+  (testing "update --ac with an out-of-range ordinal exits 1"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--acceptance" "real")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--ac" "9" "--done")]
+        (is (= 1 exit))
+        (is (str/includes? err "no acceptance criterion")))))
+
+  (testing "update --remove-ac with a non-matching value exits 1 instead of succeeding"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--acceptance" "real")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--remove-ac" "ghost")]
+        (is (= 1 exit))
+        (is (str/includes? err "no acceptance criterion")))))
+
+  (testing "update --remove-ac <n> drops the nth criterion end-to-end"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T"
+                                    "--acceptance" "first"
+                                    "--acceptance" "second")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "update" id "--remove-ac" "1")]
+        (is (zero? exit) (str "update --remove-ac ordinal err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "1. [ ] second"))
+          (is (not (str/includes? shown "first"))))))))
 
 (deftest update-ac-deltas-end-to-end-test
   (testing "update --add-ac round-trips via the real CLI"
@@ -2369,7 +2415,7 @@
                       "--ac" "Ship it" "--done")]
         (is (zero? exit) (str "compose err=" err))
         (let [{shown :out} (run-knot tmp "show" id)]
-          (is (str/includes? shown "- [x] Ship it")))))))
+          (is (str/includes? shown "1. [x] Ship it")))))))
 
 (deftest update-ac-delta-errors-end-to-end-test
   (testing "--add-ac and --remove-ac overlap exits 1 with invalid_argument JSON envelope"

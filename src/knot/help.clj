@@ -517,12 +517,12 @@
                    :desc "Remove a single tag (repeatable; idempotent). Mutually exclusive with --tags."}
                   {:name :external-ref :coerce []
                    :desc "Replace external_refs (repeatable). Pass a single \"\" to clear; omit entirely to leave alone."}
-                  {:name :ac
-                   :desc "Acceptance criterion title to flip (exact match). Use with --done or --undone. Use --add-ac / --remove-ac to add or remove criteria."}
+                  {:name :ac :coerce []
+                   :desc "Acceptance criterion to flip, by 1-based ordinal or exact title (repeatable; all flips share one --done/--undone). Use --add-ac / --remove-ac to add or remove criteria."}
                   {:name :add-ac    :coerce []
                    :desc "Add an acceptance criterion with done: false (repeatable; idempotent on exact-match title)."}
                   {:name :remove-ac :coerce []
-                   :desc "Remove an acceptance criterion by exact title (repeatable; idempotent — missing match is a no-op)."}
+                   :desc "Remove an acceptance criterion by 1-based ordinal or exact title (repeatable). A value matching nothing exits 1."}
                   {:name :done   :coerce :boolean
                    :desc "Mark the --ac criterion as done."}
                   {:name :undone :coerce :boolean
@@ -535,7 +535,10 @@
                    :desc "Replace the ## Design section."}
                   {:name :body         :body? true
                    :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design. The ## Acceptance Criteria section is display-only on write — use --add-ac / --remove-ac / --ac to mutate criteria."}]
-    :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."]
+    :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."
+                  "--ac and --remove-ac read an all-digits value as a 1-based ordinal into the acceptance list, the number `knot show` prints beside each criterion; anything else is an exact title. No prefix matching."
+                  "Ordinals resolve against the list as it stands at that step of the apply order (add -> flip -> remove), so --add-ac \"new\" --ac <last> --done flips the criterion just added."
+                  "A criterion whose title is all digits is reachable only by its own ordinal — the ordinal reading wins. Rename it to address it by name."]
     :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
                    :note "Bump priority and replace the tag list."}
                   {:cmd "knot update kno-01abc --assignee agent-1 --if-unassigned"
@@ -546,6 +549,8 @@
                    :note "Replace just the Description section."}
                   {:cmd "knot update kno-01abc --ac \"Ship it\" --done"
                    :note "Flip the matching frontmatter acceptance criterion to done."}
+                  {:cmd "knot update kno-01abc --ac 1 --ac 3 --done"
+                   :note "Flip the first and third criteria by ordinal in one write."}
                   {:cmd "knot update kno-01abc --add-ac \"Ship it\" --remove-ac \"old\""
                    :note "Add and/or remove acceptance criteria by exact-match title (apply order: add → flip → remove)."}
                   {:cmd "knot update kno-01abc --body \"Plain body.\""
