@@ -3011,6 +3011,58 @@
         (is (= [] issues)
             (str "no unknown_id issues attributable to the deleted target; got " issues))))))
 
+(deftest if-unassigned-end-to-end-test
+  (testing "start --if-unassigned fails on stderr, not a stack trace, and writes nothing"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Taken" "--assignee" "alice")
+            id     (id-of-create c-out)
+            path   (str/trim c-out)
+            before (slurp path)
+            {:keys [exit out err]} (run-knot tmp "start" id
+                                             "--assignee" "agent-1"
+                                             "--if-unassigned")]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; out=" out))
+        (is (str/includes? err "alice") "stderr names the current assignee")
+        (is (not (str/includes? err "Exception"))
+            "a lost claim is a clean failure, not a stack trace")
+        (is (= before (slurp path)) "no write on a lost claim"))))
+
+  (testing "update --if-unassigned fails the same way"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Taken" "--assignee" "alice")
+            id     (id-of-create c-out)
+            path   (str/trim c-out)
+            before (slurp path)
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--assignee" "agent-1"
+                                         "--priority" "0"
+                                         "--if-unassigned")]
+        (is (= 1 exit))
+        (is (str/includes? err "alice"))
+        (is (= before (slurp path))
+            "the other flags in the same call are dropped too")))))
+
+(deftest empty-assignee-filter-end-to-end-test
+  (testing "ready --assignee \"\" lists exactly the ready tickets with no assignee"
+    (with-tmp tmp
+      ;; `--assignee ""` because create otherwise defaults the assignee
+      ;; to `git config user.name`, which is set in this repo's checkout.
+      (run-knot tmp "create" "Unclaimed work" "--assignee" "")
+      (run-knot tmp "create" "Claimed work" "--assignee" "alice")
+      (let [{:keys [exit out err]} (run-knot tmp "ready" "--assignee" "")]
+        (is (zero? exit) (str "ready --assignee \"\" err=" err))
+        (is (str/includes? out "Unclaimed work"))
+        (is (not (str/includes? out "Claimed work"))))))
+
+  (testing "list --assignee \"\" mirrors the same convention"
+    (with-tmp tmp
+      (run-knot tmp "create" "Unclaimed work" "--assignee" "")
+      (run-knot tmp "create" "Claimed work" "--assignee" "alice")
+      (let [{:keys [exit out]} (run-knot tmp "list" "--assignee" "")]
+        (is (zero? exit))
+        (is (str/includes? out "Unclaimed work"))
+        (is (not (str/includes? out "Claimed work")))))))
+
 (deftest closure-filter-end-to-end-test
   (testing "list --closure pulls in relatives across parent/deps/links, excludes unrelated"
     (with-tmp tmp

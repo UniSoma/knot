@@ -174,7 +174,7 @@
                   {:name :limit :coerce :long
                    :desc "Cap the number of ready-section tickets shown."}
                   {:name :status   :coerce [] :desc "Filter all sections by status (repeatable)."}
-                  {:name :assignee :coerce [] :desc "Filter all sections by assignee (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter all sections by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter all sections by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter all sections by type (repeatable)."}
                   {:name :priority :coerce [:long] :desc "Filter all sections by priority 0-4 (repeatable)."}]
@@ -236,7 +236,7 @@
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
-                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
@@ -277,11 +277,20 @@
     :description "Transition a ticket to the project's active status (default: in_progress)."
     :args        [{:name "id" :required true}]
     :restrict?   true
-    :flags       [{:name :force :coerce :boolean :default false
+    :flags       [{:name :assignee :alias :a
+                   :desc "Set the assignee as part of the transition (\"\" clears it)."}
+                  {:name :if-unassigned :coerce :boolean
+                   :desc "Only transition when the ticket has no assignee; otherwise write nothing and exit 1 (already_assigned)."}
+                  {:name :force :coerce :boolean :default false
                    :desc "Bypass the open-children gate (no --summary required at start)."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
+    :notes       ["--if-unassigned is the conditional claim: the assignee is read before any gate and before the write, so a losing claim leaves the file untouched."
+                  "Any existing assignee loses the claim, including your own — two agents polling the same frontier cannot both win a ticket."
+                  "Under --json the failure is {ok:false, error:{code:\"already_assigned\", current_assignee:\"<holder>\"}}; without it the message goes to stderr."]
     :examples    [{:cmd "knot start kno-01abc"
                    :note "Mark a ticket as active (in_progress by default)."}
+                  {:cmd "knot start kno-01abc --assignee agent-1 --if-unassigned"
+                   :note "Claim and start the ticket only if nobody holds it."}
                   {:cmd "knot start kno-01abc --force"
                    :note "Start the umbrella anyway despite open children."}]}
 
@@ -387,7 +396,7 @@
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
-                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
@@ -414,7 +423,7 @@
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
-                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
@@ -443,7 +452,7 @@
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}
                   {:name :limit    :coerce :long    :desc "Cap the number of rows."}
                   {:name :status   :coerce [] :desc "Filter by status (repeatable)."}
-                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable)."}
+                  {:name :assignee :coerce [] :desc "Filter by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter by type (repeatable)."}
                   {:name :mode     :coerce [] :desc "Filter by mode (repeatable)."}
@@ -498,6 +507,8 @@
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
                   {:name :mode         :desc "Replace the mode (afk|hitl)."}
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}
+                  {:name :if-unassigned :coerce :boolean
+                   :desc "Only apply the update when the ticket has no assignee; otherwise write nothing and exit 1 (already_assigned)."}
                   {:name :parent       :desc "Set or clear (\"\") the parent id."}
                   {:name :tags         :desc "Replace tags (comma-list); pass \"\" to clear."}
                   {:name :add-tag      :coerce []
@@ -524,8 +535,11 @@
                    :desc "Replace the ## Design section."}
                   {:name :body         :body? true
                    :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design. The ## Acceptance Criteria section is display-only on write — use --add-ac / --remove-ac / --ac to mutate criteria."}]
+    :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."]
     :examples    [{:cmd "knot update kno-01abc --priority 0 --tags p0,auth"
                    :note "Bump priority and replace the tag list."}
+                  {:cmd "knot update kno-01abc --assignee agent-1 --if-unassigned"
+                   :note "Claim the ticket only if nobody holds it."}
                   {:cmd "knot update kno-01abc --add-tag stale --remove-tag wip"
                    :note "Apply tag deltas (mutually exclusive with --tags)."}
                   {:cmd "knot update kno-01abc --description \"New desc.\""
@@ -537,7 +551,7 @@
                   {:cmd "knot update kno-01abc --body \"Plain body.\""
                    :note "Destructive whole-body replace (use git to recover)."}]
     :exit-codes  [{:code 0 :when "ticket saved"}
-                  {:code 1 :when "no ticket matches, ambiguous id, or conflicting body flags"}]}
+                  {:code 1 :when "no ticket matches, ambiguous id, conflicting body flags, or --if-unassigned lost the claim"}]}
 
    :info
    {:group       :project

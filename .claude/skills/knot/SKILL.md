@@ -62,6 +62,7 @@ session start.
 | "what's next?" / "what should I pick up?"               | `knot ready` (add `--mode afk` for agent-runnable only)                       |
 | "show me the backlog" / "list tickets"                  | `knot list`                                                                   |
 | "any open bugs?" / "what's tagged <x>?" / "my tickets"  | `knot list --type bug` / `--tag <x>` / `--assignee <user>`                    |
+| "what's unclaimed?" / "take the next free one"          | `knot ready --assignee ""`, then `knot start <id> --assignee <you> --if-unassigned` |
 | "what's under <id>?"                                    | `knot list --parent <id>` (direct children)                                   |
 | "what's related to <id>?"                               | `knot list --closure <id>` (everything transitively related, archive included) |
 | "what's the live cluster around <id>?"                  | `knot list --component <id>`                                                  |
@@ -92,6 +93,9 @@ shift, the archive is absent, and the user can't verify what you skipped.
 repeatable). What the help won't tell you:
 
 - On `prime` a filter hits every section at once — `knot prime --assignee me` is your tickets everywhere.
+- `--assignee ""` means *unassigned*, so `knot ready --assignee ""` is the unclaimed frontier. When more than one loop
+  reads that frontier, claim with `knot start <id> --assignee <you> --if-unassigned` — it writes nothing and exits 1
+  (`already_assigned`) when someone got there first, which a bare `--assignee` does not.
 - `--acceptance-complete` drops tickets carrying no AC from *both* views, so `=false` is "has an unchecked AC", not
   "isn't finished".
 - The three graph filters answer three different questions: `--parent <id>` direct children, `--closure <id>`

@@ -1060,6 +1060,84 @@
         (is (= "active" (get-in loaded [:frontmatter :status]))
             "start-cmd reads :active-status from ctx, not the literal in_progress")))))
 
+(deftest if-unassigned-guard-test
+  (testing "start-cmd --assignee --if-unassigned claims an unassigned ticket"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/start-cmd (ctx tmp) {:id             id
+                                              :assignee       "agent-1"
+                                              :if-unassigned? true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "in_progress" (get-in loaded [:frontmatter :status])))
+        (is (= "agent-1" (get-in loaded [:frontmatter :assignee]))
+            "the claim writes the status flip and the assignee in one save"))))
+
+  (testing "start-cmd --if-unassigned refuses an assigned ticket without writing"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :assignee "alice"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            thrown  (try (cli/start-cmd (ctx tmp) {:id             id
+                                                   :assignee       "agent-1"
+                                                   :if-unassigned? true})
+                         nil
+                         (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? thrown) "an assigned ticket must not be claimed")
+        (is (true? (:already-assigned (ex-data thrown))))
+        (is (= "alice" (:current-assignee (ex-data thrown)))
+            "the failure names the current assignee")
+        (is (str/includes? (ex-message thrown) "alice"))
+        (is (= before (slurp created)) "no write on a refused claim"))))
+
+  (testing "update-cmd --if-unassigned claims an unassigned ticket"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp) {:id             id
+                                               :assignee       "agent-1"
+                                               :status         "in_progress"
+                                               :if-unassigned? true})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "agent-1" (get-in loaded [:frontmatter :assignee])))
+        (is (= "in_progress" (get-in loaded [:frontmatter :status]))))))
+
+  (testing "update-cmd --if-unassigned refuses an assigned ticket without writing"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :assignee "alice"})
+            id      (id-of-created created "t")
+            before  (slurp created)
+            thrown  (try (cli/update-cmd (ctx tmp) {:id             id
+                                                    :assignee       "agent-1"
+                                                    :priority       0
+                                                    :if-unassigned? true})
+                         nil
+                         (catch clojure.lang.ExceptionInfo e e))]
+        (is (some? thrown))
+        (is (true? (:already-assigned (ex-data thrown))))
+        (is (= "alice" (:current-assignee (ex-data thrown))))
+        (is (= before (slurp created))
+            "not one byte changes — the other flags in the same call are dropped too"))))
+
+  (testing "a blank on-disk assignee counts as unassigned"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :assignee ""})
+            id      (id-of-created created "t")]
+        (is (some? (cli/start-cmd (ctx tmp) {:id             id
+                                             :assignee       "agent-1"
+                                             :if-unassigned? true})))
+        (is (= "agent-1" (get-in (store/load-one tmp ".tickets" id)
+                                 [:frontmatter :assignee]))))))
+
+  (testing "without --if-unassigned an assigned ticket is still claimable"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :assignee "alice"})
+            id      (id-of-created created "t")]
+        (is (some? (cli/start-cmd (ctx tmp) {:id id :assignee "agent-1"})))
+        (is (= "agent-1" (get-in (store/load-one tmp ".tickets" id)
+                                 [:frontmatter :assignee]))
+            "the predicate is opt-in; the flagless path is unchanged")))))
+
 (deftest start-cmd-json-test
   (testing "start-cmd with :json? threads through to the JSON envelope"
     (with-tmp tmp

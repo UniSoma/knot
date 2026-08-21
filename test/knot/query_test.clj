@@ -422,6 +422,19 @@
              (mapv #(get-in % [:frontmatter :id])
                    (query/filter-tickets ts {:assignee #{"alice"}}))))))
 
+  (testing ":assignee \"\" matches tickets with no assignee"
+    (let [ts [(ft "a" :assignee "alice")
+              (ft "b")
+              (ft "c" :assignee "")]]
+      (is (= ["b" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:assignee #{""}})))
+          "an absent :assignee key and a blank value both count as unassigned")
+      (is (= ["a" "b" "c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/filter-tickets ts {:assignee #{"alice" ""}})))
+          "\"\" composes with named assignees in the same value set")))
+
   (testing ":type criteria filters by ticket type"
     (let [ts [(ft "a" :type "bug")
               (ft "b" :type "feature")

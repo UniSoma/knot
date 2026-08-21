@@ -1,7 +1,8 @@
 (ns knot.query
   "Pure graph algorithms over ticket sequences:
    cycle detection, dep-tree, ready/blocked, filters."
-  (:require [knot.acceptance :as acceptance]))
+  (:require [clojure.string :as str]
+            [knot.acceptance :as acceptance]))
 
 (defn non-terminal
   "Return only those tickets whose `:status` is not in `terminal-statuses`.
@@ -17,7 +18,10 @@
    Empty/nil `vs` is a no-op match. `:tag` checks set overlap with the
    ticket's `:tags`; the scalar enum keys (`:type`, `:status`, `:mode`,
    `:assignee`, `:priority`, `:parent`) do equality lookup on the matching
-   frontmatter key. `:priority` matches integer-equality; tickets without a
+   frontmatter key. `:assignee` additionally reads `\"\"` in `vs` as
+   \"unassigned\" — it matches tickets with no `:assignee` key and tickets
+   whose `:assignee` is blank, mirroring the write-side clear convention
+   (`update --assignee \"\"`). `:priority` matches integer-equality; tickets without a
    `:priority` field are excluded (mirrors `:assignee`/`:mode`). `:parent`
    matches direct children by canonical-id equality; tickets without a
    `:parent` are excluded (no orphan sentinel).
@@ -35,7 +39,9 @@
         :tag      (boolean (some vs (or (:tags fm) [])))
         :status   (contains? vs (:status fm))
         :mode     (contains? vs (:mode fm))
-        :assignee (contains? vs (:assignee fm))
+        :assignee (let [a (:assignee fm)]
+                    (or (contains? vs a)
+                        (and (contains? vs "") (str/blank? (or a "")))))
         :type     (contains? vs (:type fm))
         :priority (contains? vs (:priority fm))
         :parent   (contains? vs (:parent fm))

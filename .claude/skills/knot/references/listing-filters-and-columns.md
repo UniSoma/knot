@@ -22,6 +22,20 @@ identical: `prime` additionally requires the ticket to sit in the project's
 status. A fully-checked ticket still in `open` shows up in the `list` view and
 not in `prime`'s.
 
+## `--assignee ""`
+
+An empty `--assignee` value means **unassigned** on all five listing commands
+(`list`/`ready`/`blocked`/`closed`/`prime`), mirroring the write side, where
+`update <id> --assignee ""` clears the field. It matches tickets with no
+`assignee` key and tickets whose `assignee` is blank, and it composes with
+named handles in the same call: `--assignee "" --assignee alice` is "free or
+alice's".
+
+`knot ready --assignee ""` is the frontier query for an agent looking for
+unclaimed work; pair it with `knot start <id> --assignee me --if-unassigned`
+(see `lifecycle-gates.md`) so two agents reading that list cannot both win the
+same ticket.
+
 ## Graph filters
 
 ### `--parent <id>`

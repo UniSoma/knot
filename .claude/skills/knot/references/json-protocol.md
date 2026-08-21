@@ -210,6 +210,7 @@ carries, and which commands surface it.
 | `has_incoming_refs` | `delete <id>` target is referenced by another ticket (`:parent`/`:deps`/`:links`). | `referrers: {id, field}[]` | `delete` (without `--cascade`). Drop the refs first (`undep`, `unlink`, `update --parent ""`) or re-run with `--cascade` to rewrite them. |
 | `invalid_argument` | Validation failure on a flag value or flag combination.         | —                         | `info --json` (e.g. unknown flag); also surfaces from `update --json` for conflicting body flags. Other commands keep argument-parse errors on stderr (see *Argument-parsing errors* below). |
 | `acceptance_incomplete` | Active→terminal transition attempted while at least one frontmatter `:acceptance` entry is unchecked. | `open_acceptance: {title}[]` | `close --json`, `status --json` (terminal target), `update --json` (with `--status <terminal>`). Pass `--force --summary "<reason>"` to override. |
+| `already_assigned` | `--if-unassigned` was passed and the ticket already carries a non-blank `assignee`. Nothing was written. | `current_assignee: string` | `start --json`, `update --json`. |
 | `no_project`      | No `.knot.edn` and no `.tickets/` discoverable from cwd.         | —                         | `check --json` (exit 2), `info --json` (exit 1).                         |
 | `config_invalid`  | `.knot.edn` exists but cannot be parsed / contains invalid keys. | —                         | `check --json` (exit 2), `info --json` (exit 1).                         |
 

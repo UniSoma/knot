@@ -453,6 +453,33 @@
 
       :else :bypass)))
 
+(defn- put-assignee
+  "Set the frontmatter `:assignee`, or drop the key when `assignee` is
+   blank — the same set-or-clear convention `update-frontmatter` applies
+   to the optional fields."
+  [fm assignee]
+  (if (str/blank? (or assignee ""))
+    (dissoc fm :assignee)
+    (assoc fm :assignee assignee)))
+
+(defn- guard-unassigned!
+  "The conditional-claim predicate behind `--if-unassigned`. A no-op
+   unless `(:if-unassigned? opts)` is set; otherwise throws when
+   `loaded` already carries a non-blank `:assignee`. Both `status-cmd`
+   and `update-cmd` call this on the freshly-read ticket before any
+   mutation, so a losing claim leaves the file byte-identical. The
+   thrown `ex-data` carries `:already-assigned` and `:current-assignee`
+   for the handler to project into the `already_assigned` error
+   envelope. A ticket already assigned to the claimant is a conflict
+   too — the point is that exactly one caller wins a contested claim."
+  [loaded opts]
+  (when (:if-unassigned? opts)
+    (let [current (get-in loaded [:frontmatter :assignee])]
+      (when-not (str/blank? (or current ""))
+        (throw (ex-info (str "ticket is already assigned to " current)
+                        {:already-assigned true
+                         :current-assignee current}))))))
+
 (defn status-cmd
   "Transition the ticket whose id is `(:id opts)` (full or partial) to
    `(:status opts)`. The resolver canonicalizes the id before save so
@@ -482,7 +509,7 @@
    not have to infer archive routing. Returns nil when no ticket
    matches (json mode does not change the not-found contract; the
    handler emits the envelope)."
-  [ctx {:keys [id status summary json? force?]}]
+  [ctx {:keys [id status summary json? force? assignee] :as opts}]
   (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
         (resolve-ctx ctx)]
     (when (and (some? summary)
@@ -491,6 +518,7 @@
                            "terminal status; " status " is non-terminal")
                       {:status status})))
     (when-let [loaded (resolve-or-nil project-root tickets-dir id)]
+      (guard-unassigned! loaded opts)
       (let [full-id  (get-in loaded [:frontmatter :id])
             source   (get-in loaded [:frontmatter :status])
             ac       (get-in loaded [:frontmatter :acceptance])
@@ -522,7 +550,8 @@
                        (warn-open-children-bypass!
                         (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
-            new-fm   (assoc (:frontmatter loaded) :status status)
+            new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
+                       (contains? opts :assignee) (put-assignee assignee))
             body*    (if (and (some? summary) (not (str/blank? summary)))
                        (ticket/append-note (:body loaded)
                                            now
@@ -1136,6 +1165,7 @@
                            " is non-terminal")
                       {:status (:status opts)})))
     (when-let [loaded (resolve-or-nil project-root tickets-dir (:id opts))]
+      (guard-unassigned! loaded opts)
       (let [full-id  (get-in loaded [:frontmatter :id])
             source   (get-in loaded [:frontmatter :status])
             fm*      (-> (:frontmatter loaded)

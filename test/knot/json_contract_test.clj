@@ -480,6 +480,58 @@
     (is (str/includes? (get-in envelope [:error :message]) missing-id)
         (str label ": error.message must reference the missing id"))))
 
+(deftest error-envelope-already-assigned-contract-test
+  ;; Pin the `already_assigned` error envelope emitted when
+  ;; `--if-unassigned` loses a claim. The envelope carries the current
+  ;; holder under `error.current_assignee` so a polling agent can log
+  ;; who won without re-reading the ticket.
+  (testing "start --if-unassigned --json — already_assigned"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Taken" "--assignee" "alice"
+                                   "--json")
+            id (get-in (parse-envelope c-out) [:data :id])
+            {:keys [exit out err]} (run-knot tmp "start" id
+                                             "--assignee" "agent-1"
+                                             "--if-unassigned" "--json")
+            envelope (parse-envelope out)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (str/blank? err) "the envelope routes to stdout, not stderr")
+        (assert-envelope-invariants! envelope "start --if-unassigned --json")
+        (is (= false (:ok envelope)))
+        (is (= "already_assigned" (get-in envelope [:error :code])))
+        (is (= "alice" (get-in envelope [:error :current_assignee])))
+        (is (string? (get-in envelope [:error :message]))))))
+
+  (testing "update --if-unassigned --json — already_assigned"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Taken" "--assignee" "alice"
+                                   "--json")
+            id (get-in (parse-envelope c-out) [:data :id])
+            {:keys [exit out err]} (run-knot tmp "update" id
+                                              "--assignee" "agent-1"
+                                              "--if-unassigned" "--json")
+            envelope (parse-envelope out)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (str/blank? err))
+        (assert-envelope-invariants! envelope "update --if-unassigned --json")
+        (is (= false (:ok envelope)))
+        (is (= "already_assigned" (get-in envelope [:error :code])))
+        (is (= "alice" (get-in envelope [:error :current_assignee]))))))
+
+  (testing "start --if-unassigned --json — a won claim is an ordinary success"
+    (with-tmp tmp
+      (let [{c-out :out} (run-knot tmp "create" "Free" "--assignee" "" "--json")
+            id (get-in (parse-envelope c-out) [:data :id])
+            {:keys [exit out]} (run-knot tmp "start" id
+                                         "--assignee" "agent-1"
+                                         "--if-unassigned" "--json")
+            envelope (parse-envelope out)]
+        (is (zero? exit))
+        (assert-envelope-invariants! envelope "start claim --json")
+        (is (true? (:ok envelope)))
+        (is (= "agent-1" (get-in envelope [:data :assignee])))
+        (is (= "in_progress" (get-in envelope [:data :status])))))))
+
 (deftest error-envelope-not-found-contract-test
   ;; Pin AC#5 (not_found): every id-resolving --json command emits the
   ;; same canonical not_found envelope shape on a missing id. One

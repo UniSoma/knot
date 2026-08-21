@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **`show --json` splits the body into `sections`.** The payload gains a `sections` object mapping each `## ` heading, slugified the way ticket filenames are, to the raw markdown below it; text before the first heading lands under `""`. An agent that needs the design notes can now read `jq -r '.data.sections.design'` instead of a full render. `body` is untouched and `acceptance` still passes through as the same `[{title, done}]` list `list --json` emits, so existing consumers keep working.
 
+- **Conditional claim: `--if-unassigned` on `start` and `update`, plus `--assignee ""` on the listings.** `knot start <id> --assignee me --if-unassigned` takes a ticket only when nobody holds it; if someone got there first, nothing is written, the exit code is 1, and `--json` reports `{ok: false, error: {code: "already_assigned", current_assignee: "..."}}`. `knot update` honours the same flag with the same semantics, dropping every other flag in the losing call. `start` also gains `--assignee` so the claim and the transition are one write. On the read side, `--assignee ""` now means unassigned on `list`/`ready`/`blocked`/`closed`/`prime` — it used to match nothing — so `knot ready --assignee ""` is the frontier query that pairs with the claim. This is a courtesy protocol, not a lock: the read-modify-write window is accepted on a single host.
+
 ## [0.10.0] - 2026-08-13
 
 ### Added

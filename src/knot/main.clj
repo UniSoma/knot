@@ -569,6 +569,23 @@
                     "or --force --summary \"<reason>\" to override."))
       (System/exit 1))))
 
+(defn- emit-already-assigned!
+  "Emit the `--if-unassigned` claim failure: JSON envelope with code
+   `already_assigned` and `current_assignee: \"<holder>\"`, or a
+   plain-text stderr message naming the holder. Exits 1 in both modes.
+   Nothing was written before this fires — the predicate runs on the
+   freshly-read ticket, ahead of every gate and the save."
+  [cmd-name json? msg current-assignee]
+  (if json?
+    (do (println-out (output/error-envelope-str
+                      {:code             "already_assigned"
+                       :message          msg
+                       :current_assignee current-assignee}))
+        (System/exit 1))
+    (binding [*out* *err*]
+      (println (str "knot " cmd-name ": " msg "; nothing was written."))
+      (System/exit 1))))
+
 (defn- emit-open-children!
   "Emit the open-children gate failure: JSON envelope with code
    `open_children` and `open_children: [<id>, ...]`, or a plain-text
@@ -624,6 +641,8 @@
                   {:id id})
           opts* (cond-> (assoc base :json? json?)
                   (contains? merged :summary) (assoc :summary (:summary merged))
+                  (contains? merged :assignee) (assoc :assignee (:assignee merged))
+                  (:if-unassigned opts)       (assoc :if-unassigned? true)
                   (:force opts)               (assoc :force? true))]
       (try
         (let [out (transition-fn (discover-ctx) opts*)]
@@ -644,6 +663,10 @@
               (:open-children data)
               (emit-open-children!
                cmd-name json? (:gate data) (.getMessage e) (:open-child-ids data))
+
+              (:already-assigned data)
+              (emit-already-assigned!
+               cmd-name json? (.getMessage e) (:current-assignee data))
 
               json?
               (emit-error-envelope! {:code    "invalid_argument"
@@ -1027,6 +1050,10 @@
                     (:force opts)
                     (assoc :force? true)
 
+                    (contains? merged :if-unassigned)
+                    (-> (dissoc :if-unassigned)
+                        (assoc :if-unassigned? (boolean (:if-unassigned opts))))
+
                     (contains? merged :tags)
                     (assoc :tags (split-tags (:tags merged)))
 
@@ -1081,6 +1108,10 @@
             (:open-children data)
             (emit-open-children!
              "update" json? (:gate data) (.getMessage e) (:open-child-ids data))
+
+            (:already-assigned data)
+            (emit-already-assigned!
+             "update" json? (.getMessage e) (:current-assignee data))
 
             json?
             (emit-error-envelope! {:code    "invalid_argument"
