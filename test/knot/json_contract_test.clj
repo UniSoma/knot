@@ -971,6 +971,36 @@
           (is (string? (:title (first blocking))))
           (is (string? (:status (first blocking)))))))))
 
+(deftest data-shape-show-sections-test
+  ;; Pin the additive `show --json` keys: `sections` (body split by
+  ;; `## ` heading slug) and `acceptance` (the frontmatter list, same
+  ;; shape as `list --json` rows). `body` stays byte-identical to what
+  ;; it was before `sections` existed — the regression guard for
+  ;; existing consumers.
+  (with-tmp tmp
+    (let [{:keys [out]} (run-knot tmp "create" "sections fixture"
+                                  "-d" "What it does."
+                                  "--design" "How."
+                                  "--acceptance" "first thing")
+          id (id-of out "sections-fixture")
+          envelope (parse-envelope (:out (run-knot tmp "show" id "--json")))
+          data     (:data envelope)]
+      (testing "body is byte-identical to the pre-sections rendering"
+        (is (= "## Description\n\nWhat it does.\n\n## Design\n\nHow.\n"
+               (:body data))))
+
+      (testing "sections maps heading slugs to the markdown below them"
+        (is (= {:description "\n\nWhat it does.\n\n"
+                :design      "\n\nHow.\n"}
+               (:sections data))))
+
+      (testing "acceptance is the structured frontmatter list"
+        (is (= [{:title "first thing" :done false}] (:acceptance data)))
+        (let [row (->> (:data (parse-envelope (:out (run-knot tmp "list" "--json"))))
+                       (some #(when (= id (:id %)) %)))]
+          (is (= (:acceptance row) (:acceptance data))
+              "show and list emit acceptance in the same shape"))))))
+
 (deftest data-shape-prime-test
   ;; Pin AC#2 for prime --json: object envelope with a fixed top-level
   ;; key set that downstream agents iterate against. Snake_case keys.

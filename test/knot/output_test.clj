@@ -962,6 +962,37 @@
              ac)
           "acceptance entries pass through unchanged through the JSON envelope"))))
 
+(deftest show-json-sections-test
+  (testing "sections splits the body by `## ` heading slug, body unchanged"
+    (let [body   "## Description\n\nWhat.\n\n## User Stories\n\n- one\n"
+          ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body body}
+          parsed (json/parse-string (output/show-json ticket) true)]
+      (is (= {:description  "\n\nWhat.\n\n"
+              :user-stories "\n\n- one\n"}
+             (get-in parsed [:data :sections])))
+      (is (= body (get-in parsed [:data :body]))
+          "body stays the whole raw markdown")))
+
+  (testing "an empty body emits an empty sections object"
+    (let [ticket {:frontmatter {:id "kno-A"} :body ""}
+          parsed (json/parse-string (output/show-json ticket) true)]
+      (is (= {} (get-in parsed [:data :sections])))))
+
+  (testing "sections is present on the inverses arity too"
+    (let [ticket {:frontmatter {:id "kno-A"} :body "## Notes\n\nn\n"}
+          parsed (json/parse-string (output/show-json ticket {:blockers [] :blocking []
+                                                              :children [] :linked []})
+                                    true)]
+      (is (= {:notes "\n\nn\n"} (get-in parsed [:data :sections]))))))
+
+(deftest ls-json-omits-sections-test
+  (testing "list rows carry neither body nor sections"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha"} :body "## Notes\n\nn\n"}
+          parsed (json/parse-string (output/ls-json [ticket]) true)]
+      (is (not (contains? (first (:data parsed)) :sections)))
+      (is (not (contains? (first (:data parsed)) :body))))))
+
 (deftest show-json-children-progress-test
   (testing "umbrella ticket emits children_total/children_terminal under :data"
     (let [ticket (assoc {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}

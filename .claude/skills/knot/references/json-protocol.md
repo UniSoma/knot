@@ -284,6 +284,14 @@ Optional keys that may be present:
 - `leverage` / `coupling` (integer) — the `LEV` and `CPL` metrics, present on
   every `list`/`ready`/`blocked` row.
 - `body` (string) — included in *single-ticket-shape* envelopes; omitted in *ls-shape*.
+- `sections` (object) — `show --json` only. The same body, split by
+  `## ` heading: each key is the heading slugified the way ticket
+  filenames are (`## User Stories` → `user-stories`), each value is the
+  raw markdown below that heading, untrimmed, in body order. Text before
+  the first heading lands under `""`; a blank preamble is omitted, and a
+  repeated heading concatenates rather than clobbers. `body` is
+  unchanged — `sections` is a second view of it, so read one section
+  instead of a full render.
 
 The three computed graph fields (`cc`, `leverage`, `coupling`) are emitted by
 `list`/`ready`/`blocked` only — `closed --json`, `show`, and every non-listing
@@ -298,7 +306,7 @@ command omit them. Their scope rules live in
 | `ready`              | `ticket[]`                                            | no    | Non-terminal, non-blocked, sorted by priority.                                                                                                                   |
 | `blocked`            | `ticket[]`                                            | no    | Non-terminal tickets with at least one open `:deps` ref.                                                                                                         |
 | `closed`             | `ticket[]`                                            | no    | Terminal-status tickets from archive; entries additionally carry `closed` (ISO-8601 string).                                                                     |
-| `show <id>`          | `ticket`                                              | yes   | Plus computed inverse arrays at `data.blockers`, `data.blocking`, `data.children`, `data.linked`. Each inverse entry is `{id, title, status}` or `{id, missing: true}`. Umbrella tickets also carry `children_total`/`children_terminal` (see *Optional keys*). |
+| `show <id>`          | `ticket`                                              | yes   | Plus `sections` (body split by heading slug, see *Optional keys*) and computed inverse arrays at `data.blockers`, `data.blocking`, `data.children`, `data.linked`. Each inverse entry is `{id, title, status}` or `{id, missing: true}`. Umbrella tickets also carry `children_total`/`children_terminal` (see *Optional keys*). |
 | `dep tree <id>`      | `{id, title?, status?, missing?, seen_before?, deps?}` | n/a   | Recursive tree node. Tolerant root: missing id emits `{id, missing: true}` with `ok: true`. Seen-before nodes carry `seen_before: true` and omit `deps`.         |
 | `prime`              | `{project, in_progress, ready_to_close, ready, ready_truncated, ready_remaining, recently_closed}` | n/a | `project` is `{found, prefix, project_name?, live_count, archive_count}`. `ready_truncated` is boolean; `ready_remaining` is integer. Ticket entries are body-less. `in_progress` entries may carry `stale: true` when `:updated` is 14+ days old; the flag is **in_progress-only** — `ready` copies of the same ticket never carry it. To find stalled work, iterate `.in_progress` and filter on `stale`. `ready_to_close` is a parallel array of active-status tickets whose every `:acceptance` entry is checked — mutually exclusive with `in_progress` (those tickets do not also appear there); vacuously-complete tickets (no AC list) deliberately do not migrate into it. |
 | `info`               | `{project, paths, defaults, allowed_values, counts}`  | n/a   | See *`info` shape* below.                                                                                                                                        |
@@ -595,6 +603,12 @@ fi
 # Tolerate missing dep-tree roots (data.missing branch):
 knot dep tree "$id" --json |
   jq -r 'if .data.missing then "missing root: \(.data.id)" else .data | .. | objects | .id end'
+
+# Read one body section instead of the whole ticket:
+knot show "$id" --json | jq -r '.data.sections.description'
+
+# List the open acceptance criteria of a ticket:
+knot show "$id" --json | jq -r '.data.acceptance[] | select(.done | not) | .title'
 
 # Watch the project for new integrity issues:
 knot check --json | jq '.data.issues[] | select(.severity == "error")'

@@ -241,17 +241,32 @@
      :children (mapv jsonify-inverse-entry (:children inverses))
      :linked   (mapv jsonify-inverse-entry (:linked   inverses))}))
 
+(defn- show-payload
+  "Ticket payload for `show --json`: the shared `jsonify-ticket`
+   projection plus `sections`, the body split by `## ` heading slug (see
+   `ticket/body-sections`). `body` is untouched — `sections` is a second
+   view of the same markdown, so an agent can `jq .data.sections.design`
+   instead of re-parsing a full render. Kept out of `jsonify-ticket`
+   deliberately: that helper also feeds `ls --json` and the mutator
+   envelopes, which stay byte-unchanged."
+  [ticket]
+  (assoc (jsonify-ticket ticket {:include-body? true})
+         :sections (ticket/body-sections (:body ticket))))
+
 (defn show-json
   "Render a ticket map wrapped in the v0.3 success envelope. The ticket
-   sits under `:data`; keys inside it are snake_case. With `inverses`,
-   adds `blockers`, `blocking`, `children`, `linked` arrays alongside the
-   frontmatter under `:data` — entries are `{id, title, status}` for
-   resolved refs or `{id, missing:true}` for broken ones."
+   sits under `:data`; keys inside it are snake_case. `sections` carries
+   the body split by heading slug; `acceptance` passes through from
+   frontmatter as the same `[{title, done}]` list `ls --json` emits.
+   With `inverses`, adds `blockers`, `blocking`, `children`, `linked`
+   arrays alongside the frontmatter under `:data` — entries are
+   `{id, title, status}` for resolved refs or `{id, missing:true}` for
+   broken ones."
   ([ticket]
-   (envelope-str (jsonify-ticket ticket {:include-body? true})))
+   (envelope-str (show-payload ticket)))
   ([ticket inverses]
    (envelope-str
-    (merge (jsonify-ticket ticket {:include-body? true})
+    (merge (show-payload ticket)
            (inverses->json-fields inverses)))))
 
 (defn ls-json

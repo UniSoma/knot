@@ -139,6 +139,36 @@
             (subs head 0 cut)
             head))))))
 
+(def ^:private body-heading-pat
+  ;; A `## ` heading line: group 1 is the heading text, trailing
+  ;; whitespace excluded. `### ` does not match, so subheadings stay
+  ;; inside their parent section.
+  #"(?m)^## +(.+?)[ \t]*$")
+
+(defn body-sections
+  "Split a ticket `body` into a map of section slug -> the raw markdown
+   below that section's `## ` heading, in body order. Slugs come from
+   `derive-slug`, so `## User Stories` keys `\"user-stories\"`. Any text
+   before the first heading lands under `\"\"`; a blank preamble is
+   omitted. Values are the raw substring between the heading line and
+   the next `## ` heading — nothing is trimmed or normalized. Repeated
+   headings (and headings that slugify to `\"\"`) concatenate rather than
+   clobber. Empty/nil bodies give `{}`."
+  [body]
+  (let [body*   (or body "")
+        matcher (re-matcher body-heading-pat body*)
+        add     (fn [m k s] (update m k #(if % (str % s) s)))
+        sections (loop [acc (array-map)
+                        k   ""
+                        pos 0]
+                   (if (.find matcher)
+                     (recur (add acc k (subs body* pos (.start matcher)))
+                            (derive-slug (.group matcher 1))
+                            (.end matcher))
+                     (add acc k (subs body* pos))))]
+    (cond-> sections
+      (str/blank? (get sections "")) (dissoc ""))))
+
 (def ^:private notes-heading "## Notes")
 
 (defn- note-block

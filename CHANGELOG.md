@@ -12,7 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added/Changed/Fixed/Removed
+### Added
+
+- **`show --json` splits the body into `sections`.** The payload gains a `sections` object mapping each `## ` heading, slugified the way ticket filenames are, to the raw markdown below it; text before the first heading lands under `""`. An agent that needs the design notes can now read `jq -r '.data.sections.design'` instead of a full render. `body` is untouched and `acceptance` still passes through as the same `[{title, done}]` list `list --json` emits, so existing consumers keep working.
 
 ## [0.10.0] - 2026-08-13
 

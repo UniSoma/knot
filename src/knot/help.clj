@@ -220,8 +220,11 @@
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of text."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}]
+    :notes       ["--json adds `sections` — the body split by `## ` heading slug (description, design, user-stories, notes, ...), preamble under \"\" — alongside the unchanged `body` string, plus `acceptance` as the structured [{title, done}] list. Take one section with `jq -r '.data.sections.design'` instead of re-reading the whole render."]
     :examples    [{:cmd "knot show kno-01abc"
-                   :note "Render the ticket whose id starts with 01abc."}]}
+                   :note "Render the ticket whose id starts with 01abc."}
+                  {:cmd "knot show kno-01abc --json | jq -r '.data.sections.description'"
+                   :note "Pull a single body section instead of the full render."}]}
 
    :list
    {:group       :listing

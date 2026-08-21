@@ -310,3 +310,40 @@
     (let [body "## Notes\n\n**Not a date**\n\nbody for the bogus header\n\n**2026-04-30T10:00:00Z**\n\nreal close summary\n"]
       (is (= "real close summary" (ticket/latest-note-content body))
           "non-ISO bold strings are ignored; the real timestamp wins"))))
+
+(deftest body-sections-test
+  (testing "each `## ` heading becomes a slug key holding the markdown below it"
+    (let [body "## Description\n\nWhat it does.\n\n## Design\n\nHow it does it.\n"]
+      (is (= {"description" "\n\nWhat it does.\n\n"
+              "design"      "\n\nHow it does it.\n"}
+             (ticket/body-sections body)))))
+  (testing "headings slugify like titles do"
+    (let [body "## User Stories\n\n- one\n"]
+      (is (= ["user-stories"] (keys (ticket/body-sections body))))))
+  (testing "preamble before the first heading lands under the empty-string key"
+    (let [body "Intro line.\n\n## Notes\n\nA note.\n"]
+      (is (= {""      "Intro line.\n\n"
+              "notes" "\n\nA note.\n"}
+             (ticket/body-sections body)))))
+  (testing "a body with no headings is all preamble"
+    (is (= {"" "Just prose.\n"} (ticket/body-sections "Just prose.\n"))))
+  (testing "a blank preamble is omitted rather than emitted empty"
+    (is (= ["description"]
+           (keys (ticket/body-sections "## Description\n\nX.\n")))))
+  (testing "empty and nil bodies produce an empty map"
+    (is (= {} (ticket/body-sections "")))
+    (is (= {} (ticket/body-sections nil))))
+  (testing "`### ` subheadings stay inside their parent section"
+    (let [body "## Design\n\n### Step one\n\nDo it.\n"]
+      (is (= {"design" "\n\n### Step one\n\nDo it.\n"}
+             (ticket/body-sections body)))))
+  (testing "repeated headings concatenate rather than clobber"
+    (let [body "## Notes\n\nfirst\n\n## Notes\n\nsecond\n"]
+      (is (= {"notes" "\n\nfirst\n\n\n\nsecond\n"}
+             (ticket/body-sections body)))))
+  (testing "sections keep body order"
+    (let [body "## Zed\n\nz\n\n## Alpha\n\na\n"]
+      (is (= ["zed" "alpha"] (keys (ticket/body-sections body))))))
+  (testing "a heading with no slug-able characters folds into the preamble key"
+    (let [body "## !!!\n\nstray\n"]
+      (is (= {"" "\n\nstray\n"} (ticket/body-sections body))))))
