@@ -234,12 +234,12 @@
          (remove str/blank?)
          vec)))
 
-(defn- normalize-ac-delta-values
-  "Normalize a vector of values from `--add-ac` / `--remove-ac` (and the
-   external-ref deltas, which have the same shape): trim
-   surrounding whitespace and reject blanks. Unlike tag deltas, comma
-   characters are allowed (AC titles legitimately contain commas; there
-   is no comma-list replace flag to round-trip against). Throws
+(defn- normalize-delta-values
+  "Normalize a vector of repeated flag values — the AC deltas and the
+   external-ref deltas, which share a shape: trim surrounding whitespace
+   and reject blanks. Unlike tag deltas, comma characters are allowed
+   (AC titles legitimately contain commas, and neither flag has a
+   comma-list replace form to round-trip against). Throws
    `ex-info` so `update-handler`'s catch surfaces the error as `die`
    (stderr + exit 1) or `{ok:false, error:{code:\"invalid_argument\", …}}`
    under `--json`."
@@ -1093,26 +1093,26 @@
                     ;; there is no round-trip to protect as with tags.
                     (contains? merged :add-external-ref)
                     (assoc :add-external-ref
-                           (normalize-ac-delta-values
+                           (normalize-delta-values
                             :add-external-ref (:add-external-ref merged)))
 
                     (contains? merged :remove-external-ref)
                     (assoc :remove-external-ref
-                           (normalize-ac-delta-values
+                           (normalize-delta-values
                             :remove-external-ref (:remove-external-ref merged)))
 
                     ;; AC-delta normalization: blank-reject only (no
                     ;; comma-reject — AC titles can contain commas, and
                     ;; there is no comma-list replace flag to round-trip).
                     (contains? merged :ac)
-                    (assoc :ac (normalize-ac-delta-values :ac (:ac merged)))
+                    (assoc :ac (normalize-delta-values :ac (:ac merged)))
 
                     (contains? merged :add-ac)
-                    (assoc :add-ac (normalize-ac-delta-values
+                    (assoc :add-ac (normalize-delta-values
                                     :add-ac (:add-ac merged)))
 
                     (contains? merged :remove-ac)
-                    (assoc :remove-ac (normalize-ac-delta-values
+                    (assoc :remove-ac (normalize-delta-values
                                        :remove-ac (:remove-ac merged))))
             out   (cli/update-cmd (discover-ctx) opts*)]
         (cond

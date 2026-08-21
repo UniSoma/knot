@@ -61,6 +61,14 @@
                      (mapv (fn [t] {:title t :done false})))]
     (when (seq entries) entries)))
 
+(defn ordinal?
+  "True when `arg` addresses a criterion by position rather than by
+   title. All digits is an ordinal; anything else is a title. The single
+   home of that rule — every caller that discriminates the two readings
+   asks here."
+  [arg]
+  (boolean (re-matches #"\d+" (str arg))))
+
 (defn resolve-index
   "Resolve `arg` against `acceptance` to a 0-based index. An all-digits
    `arg` is a 1-based ordinal into the list; anything else is an exact,
@@ -72,7 +80,7 @@
    Rename it to address it by name."
   [acceptance arg]
   (let [vec* (vec (or acceptance []))]
-    (if (re-matches #"\d+" (str arg))
+    (if (ordinal? arg)
       (let [i (dec (parse-long arg))]
         (when (and (nat-int? i) (< i (count vec*))) i))
       (->> (map-indexed vector vec*)

@@ -229,7 +229,7 @@
   ;; round-trip test to confirm (a) the walk is wired into that flag's
   ;; handler and (b) its downstream normaliser / persistence path
   ;; accepts the extracted value. Flag-specific normalisers
-  ;; (`normalize-tag-delta-values`, `normalize-ac-delta-values`,
+  ;; (`normalize-tag-delta-values`, `normalize-delta-values`,
   ;; `extract-rel-order`) have their own targeted assertions below.
   (testing "--acceptance survives all four dash-leading shapes"
     (doseq [[label value rendered]
@@ -396,7 +396,7 @@
                 "the dash-leading tag --bar must actually be removed"))))))
   (testing "--remove-ac dash-leading value removes the matching AC entry"
     ;; Mirrors the --add-ac dash-leading test against the remove branch.
-    ;; normalize-ac-delta-values runs over the extracted values and must
+    ;; normalize-delta-values runs over the extracted values and must
     ;; accept dash-leading inputs (it only rejects blanks).
     (with-tmp tmp
       (run-knot tmp "init")

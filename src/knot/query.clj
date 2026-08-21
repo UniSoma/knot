@@ -499,10 +499,10 @@
                 (contains? @memo id)    (get @memo id)
                 :else
                 (let [live-deps (filter live-dep? (deps-of (get index id)))
-                      ;; a missing referent is a live leaf: chain length 0 below it
-                      sub       (map (fn [d]
-                                       (when (get index d)
-                                         (level-of d (conj on-stack id))))
+                      ;; a missing referent is a live leaf: chain length 0
+                      ;; below it, so it counts toward live-deps but has no
+                      ;; subtree to walk
+                      sub       (map #(level-of % (conj on-stack id))
                                      (filter #(get index %) live-deps))
                       value     (cond
                                   (empty? live-deps)  0

@@ -495,24 +495,25 @@
                         {:already-assigned true
                          :current-assignee current}))))))
 
-(defn- apply-external-ref-deltas
-  "Apply `--add-external-ref` / `--remove-external-ref` deltas from
-   `opts` to `fm`'s `:external_refs`, with the same semantics
-   `apply-tag-deltas` gives tags: existing order preserved, removes
-   drop in place, adds append at the end in flag order deduped against
-   the post-remove set, an empty result clearing the key. `close`
-   reuses it with an add-only opts map so the appended ref rides along
-   in the single close write."
-  [fm opts]
-  (let [existing (vec (:external_refs fm))
-        removes  (set (:remove-external-ref opts))
-        kept     (vec (remove removes existing))
-        present  (set kept)
-        appends  (->> (:add-external-ref opts) (remove present) distinct vec)
-        result   (vec (concat kept appends))]
+(defn- apply-list-deltas
+  "Apply add/remove deltas to the list under `fm-key` in `fm`. Existing
+   order is preserved; removes drop in place; adds append at the end in
+   flag order, deduped against the post-remove set. Repeated values
+   within a single direction silently dedupe. An empty resulting list
+   clears the key, consistent with the replace-all flag's `\"\"` form.
+
+   The one shape behind `--add-tag`/`--remove-tag` and
+   `--add-external-ref`/`--remove-external-ref`; `close` passes adds
+   alone so the appended ref rides along in the single close write.
+   Callers guarantee the replace-all flag and the delta flags are not
+   both present."
+  [fm fm-key adds removes]
+  (let [kept    (vec (remove (set removes) (vec (get fm fm-key))))
+        appends (->> adds (remove (set kept)) distinct vec)
+        result  (vec (concat kept appends))]
     (if (empty? result)
-      (dissoc fm :external_refs)
-      (assoc fm :external_refs result))))
+      (dissoc fm fm-key)
+      (assoc fm fm-key result))))
 
 (defn status-cmd
   "Transition the ticket whose id is `(:id opts)` (full or partial) to
@@ -592,8 +593,8 @@
             new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
                        (contains? opts :assignee) (put-assignee assignee)
                        (seq (:external-ref opts))
-                       (apply-external-ref-deltas
-                        {:add-external-ref (:external-ref opts)}))
+                       (apply-list-deltas :external_refs
+                                          (:external-ref opts) nil))
             body*    (if (and (some? summary) (not (str/blank? summary)))
                        (ticket/append-note (:body loaded)
                                            now
@@ -994,22 +995,10 @@
 
 (defn- apply-tag-deltas
   "Apply `--add-tag` / `--remove-tag` deltas from `opts` to `fm`'s
-   `:tags`. Existing order is preserved; removes drop in place; adds
-   append at the end in flag order, deduped against the post-remove
-   set. Repeated values within a single direction silently dedupe.
-   An empty resulting set clears the `:tags` key (consistent with
-   `--tags \"\"`). Caller guarantees `:tags` and `:add-tag`/`:remove-tag`
-   are not both present."
+   `:tags`, through `apply-list-deltas`. Caller guarantees `:tags` and
+   `:add-tag`/`:remove-tag` are not both present."
   [fm opts]
-  (let [existing (vec (:tags fm))
-        removes  (set (:remove-tag opts))
-        kept     (vec (remove removes existing))
-        present  (set kept)
-        appends  (->> (:add-tag opts) (remove present) distinct vec)
-        result   (vec (concat kept appends))]
-    (if (empty? result)
-      (dissoc fm :tags)
-      (assoc fm :tags result))))
+  (apply-list-deltas fm :tags (:add-tag opts) (:remove-tag opts)))
 
 (defn- update-frontmatter
   "Project `opts` onto `fm`. Keys absent from `opts` leave `fm`
@@ -1036,7 +1025,10 @@
       (contains? opts :external-ref) (clear-when :external_refs
                                                  empty? (vec external-ref))
       (or (contains? opts :add-external-ref)
-          (contains? opts :remove-external-ref)) (apply-external-ref-deltas opts))))
+          (contains? opts :remove-external-ref))
+      (apply-list-deltas :external_refs
+                         (:add-external-ref opts)
+                         (:remove-external-ref opts)))))
 
 (defn- update-body
   "Apply the body-mutation flags from `opts` to `body`. `--body`
@@ -1079,51 +1071,31 @@
                            " requires --ac <ordinal|\"title\">")
                       {:offending [(if done? :done :undone)]})))))
 
-(defn- validate-tag-delta-opts!
-  "Validate the `--add-tag` / `--remove-tag` flag pair. Throws `ex-info`
-   when the call mixes `--tags` (replace) with either delta flag, or
-   when the same value appears in both directions on the same call.
-   `update-cmd` surfaces the message as either a `die` or a
+(defn- validate-list-delta-opts!
+  "Validate an add/remove delta flag pair against its replace-all flag.
+   Throws `ex-info` when the call mixes the replace flag with either
+   delta flag, or when the same value appears in both directions on the
+   same call. Flag names in the messages are derived from the keys, so
+   `:tags`/`:add-tag`/`:remove-tag` reads as `--tags is mutually
+   exclusive with --add-tag / --remove-tag`. `update-cmd` surfaces the
+   message as either a `die` or a
    `{ok:false, error:{code:\"invalid_argument\", …}}` envelope under
    `--json`."
-  [opts]
-  (let [delta-keys (filter #(contains? opts %) [:add-tag :remove-tag])]
-    (when (and (contains? opts :tags) (seq delta-keys))
-      (throw (ex-info (str "--tags is mutually exclusive with "
-                           "--add-tag / --remove-tag")
-                      {:offending (vec (cons :tags delta-keys))}))))
-  (let [adds    (set (:add-tag opts))
-        removes (set (:remove-tag opts))
-        overlap (set/intersection adds removes)]
-    (when (seq overlap)
-      (throw (ex-info (str "--add-tag and --remove-tag overlap on: "
-                           (str/join ", " (sort overlap)))
-                      {:offending [:add-tag :remove-tag]
-                       :overlap   (vec (sort overlap))})))))
-
-(defn- validate-external-ref-delta-opts!
-  "Validate the `--add-external-ref` / `--remove-external-ref` flag
-   pair, mirroring `validate-tag-delta-opts!`. Throws `ex-info` when
-   the call mixes the replace-all `--external-ref` with either delta
-   flag, or when the same value appears in both directions on the same
-   call. `update-cmd` surfaces the message as either a `die` or a
-   `{ok:false, error:{code:\"invalid_argument\", …}}` envelope under
-   `--json`."
-  [opts]
-  (let [delta-keys (filter #(contains? opts %)
-                           [:add-external-ref :remove-external-ref])]
-    (when (and (contains? opts :external-ref) (seq delta-keys))
-      (throw (ex-info (str "--external-ref is mutually exclusive with "
-                           "--add-external-ref / --remove-external-ref")
-                      {:offending (vec (cons :external-ref delta-keys))}))))
-  (let [adds    (set (:add-external-ref opts))
-        removes (set (:remove-external-ref opts))
-        overlap (set/intersection adds removes)]
-    (when (seq overlap)
-      (throw (ex-info (str "--add-external-ref and --remove-external-ref "
-                           "overlap on: " (str/join ", " (sort overlap)))
-                      {:offending [:add-external-ref :remove-external-ref]
-                       :overlap   (vec (sort overlap))})))))
+  [opts replace-key add-key remove-key]
+  (let [flag       #(str "--" (name %))
+        delta-keys (filter #(contains? opts %) [add-key remove-key])]
+    (when (and (contains? opts replace-key) (seq delta-keys))
+      (throw (ex-info (str (flag replace-key) " is mutually exclusive with "
+                           (flag add-key) " / " (flag remove-key))
+                      {:offending (vec (cons replace-key delta-keys))})))
+    (let [adds    (set (get opts add-key))
+          removes (set (get opts remove-key))
+          overlap (set/intersection adds removes)]
+      (when (seq overlap)
+        (throw (ex-info (str (flag add-key) " and " (flag remove-key)
+                             " overlap on: " (str/join ", " (sort overlap)))
+                        {:offending [add-key remove-key]
+                         :overlap   (vec (sort overlap))}))))))
 
 (defn- validate-ac-delta-opts!
   "Validate the `--add-ac` / `--remove-ac` flag pair. Throws `ex-info`
@@ -1172,7 +1144,7 @@
    it, so a list with duplicate titles still clears in one call. Throws
    when the value addresses nothing."
   [acceptance arg]
-  (let [hits (if (re-matches #"\d+" (str arg))
+  (let [hits (if (acceptance/ordinal? arg)
                (when-let [i (acceptance/resolve-index acceptance arg)] #{i})
                (set (keep-indexed (fn [i e] (when (= arg (:title e)) i))
                                   acceptance)))]
@@ -1252,8 +1224,9 @@
                          "--description / --design")
                     {:offending (filter #(contains? opts %)
                                         [:description :design])})))
-  (validate-tag-delta-opts! opts)
-  (validate-external-ref-delta-opts! opts)
+  (validate-list-delta-opts! opts :tags :add-tag :remove-tag)
+  (validate-list-delta-opts! opts :external-ref
+                             :add-external-ref :remove-external-ref)
   (validate-ac-delta-opts! opts)
   (validate-ac-flip-opts! opts)
   (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
