@@ -41,10 +41,13 @@ same ticket.
 ### `--parent <id>`
 
 Filters to the **direct children** of a parent on the four listing commands
-(`list` / `ready` / `blocked` / `closed`, *not* `prime`). It is repeatable
+(`list` / `ready` / `blocked` / `closed`) and on `prime`, where it scopes all
+four primer sections at once — the umbrella view of a wave. It is repeatable
 (children of any given parent), and its value resolves like any partial id
 (live+archive) — an unresolvable value fails loudly (stderr die, or a
-`not_found` / `ambiguous_id` envelope under `--json`).
+`not_found` / `ambiguous_id` envelope under `--json`) on the listings. `prime`
+is the exception: it always exits 0, so an unresolvable value degrades to the
+no-project primer instead.
 
 ### `--closure <id>[,<id>…]`
 

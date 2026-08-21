@@ -1327,11 +1327,28 @@
             (print (cli/schema-cmd ctx))
             (flush)))))))
 
+(defn- resolve-prime-parent-filter
+  "Resolve every `--parent` value in `opts` to its canonical full id.
+   Unlike `resolve-parent-filter!`, an unresolvable value throws instead
+   of exiting 1: the `prime-handler` catch turns it into the fallback
+   primer, which keeps the always-exit-0 SessionStart contract. No-op
+   when no `--parent` was given."
+  [ctx opts]
+  (if-let [vs (seq (:parent opts))]
+    (assoc opts :parent
+           (mapv (fn [v]
+                   (get-in (store/resolve-id (:project-root ctx)
+                                             (:tickets-dir ctx) v)
+                           [:frontmatter :id]))
+                 vs))
+    opts))
+
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
-   `knot init`. Argument-parsing errors fall back to a minimal primer
-   so the command stays safe to wire into a global SessionStart hook."
+   `knot init`. Argument-parsing errors — and an unresolvable `--parent`
+   — fall back to a minimal primer so the command stays safe to wire
+   into a global SessionStart hook."
   [argv]
   (let [out (try
               (let [{:keys [value-opts argv]} (extract-value-flags
@@ -1340,8 +1357,10 @@
                     {:keys [opts]}            (bcli/parse-args argv (spec :prime))
                     opts                      (merge opts value-opts)
                     _            (validate-priority-filter! opts)
+                    ctx          (discover-ctx)
+                    opts         (resolve-prime-parent-filter ctx opts)
                     filter-opts  (dissoc (filter-opts-from-cli opts) :mode)]
-                (cli/prime-cmd (discover-ctx)
+                (cli/prime-cmd ctx
                                (merge filter-opts
                                       {:json? (boolean (:json opts))
                                        :mode  (:mode opts)

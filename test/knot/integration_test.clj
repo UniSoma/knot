@@ -1644,6 +1644,51 @@
         (is (not (str/includes? out "A task"))
             "task-type ticket filtered out of recently_closed section")))))
 
+(deftest prime-parent-filter-end-to-end-test
+  (testing "prime --parent scopes the primer to the direct children of the resolved id"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella root")
+            parent-id    (id-of-create p-out)
+            {c-out :out} (run-knot tmp "create" "Child one" "--parent" parent-id)
+            child-id     (id-of-create c-out)]
+        (run-knot tmp "create" "Grandchild deep" "--parent" child-id)
+        (run-knot tmp "create" "Unrelated ticket")
+        (let [{:keys [exit out err]} (run-knot tmp "prime" "--parent" parent-id)]
+          (is (zero? exit) (str "prime --parent err=" err))
+          (is (str/includes? out "Child one"))
+          (is (not (str/includes? out "Grandchild deep"))
+              "grandchildren are not direct children")
+          (is (not (str/includes? out "Unrelated ticket")))
+          (is (not (str/includes? out "Umbrella root"))
+              "the umbrella is not its own direct child")))))
+
+  (testing "prime --parent resolves a partial id (suffix form)"
+    (with-tmp tmp
+      (let [{p-out :out} (run-knot tmp "create" "Umbrella root")
+            parent-id    (id-of-create p-out)
+            suffix       (subs parent-id (inc (str/index-of parent-id "-")))]
+        (run-knot tmp "create" "Child one" "--parent" parent-id)
+        (run-knot tmp "create" "Unrelated ticket")
+        (let [{:keys [exit out err]} (run-knot tmp "prime" "--parent" suffix)]
+          (is (zero? exit) (str "prime --parent <suffix> err=" err))
+          (is (str/includes? out "Child one"))
+          (is (not (str/includes? out "Unrelated ticket")))))))
+
+  ;; The asymmetry, pinned as one artifact: `prime` is wired to SessionStart
+  ;; and must never fail a session, so an unresolvable --parent degrades to
+  ;; the fallback primer at exit 0. Every other listing command exits 1.
+  (testing "an unresolvable --parent degrades prime to the fallback primer (exit 0) but exits 1 on list"
+    (with-tmp tmp
+      (run-knot tmp "create" "Some ticket")
+      (let [{:keys [exit out]} (run-knot tmp "prime" "--parent" "kno-ghost")]
+        (is (zero? exit) "prime never breaks a SessionStart hook")
+        (is (str/includes? out "knot init")
+            "degrades to the same fallback primer prime already emits")
+        (is (not (str/includes? out "Some ticket"))
+            "the primer does not silently drop the filter and list everything"))
+      (let [{:keys [exit]} (run-knot tmp "list" "--parent" "kno-ghost")]
+        (is (= 1 exit) "list --parent still fails loudly on an unresolvable id")))))
+
 (deftest link-unlink-end-to-end-test
   (testing "link writes symmetric :links to both files"
     (with-tmp tmp

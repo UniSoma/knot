@@ -1687,15 +1687,18 @@
    (override the default ready cap of 20; non-positive values fall back
    to the default), `:json?` (emit the actionable bare-object payload
    instead of markdown), and the standard filter set `:status`,
-   `:assignee`, `:tag`, `:type` (each a set of strings from
-   `filter-opts-from-cli`).
+   `:assignee`, `:tag`, `:type`, `:priority`, `:parent` (each a set of
+   values from `filter-opts-from-cli`). `:parent` carries canonical full
+   ids — `main/prime-handler` resolves partial ids before the call —
+   and scopes every section to direct children, so the parent itself is
+   excluded.
 
-   Filters apply uniformly across all three sections (in_progress, ready,
-   recently_closed). For ready, filters apply BEFORE the cap, so
+   Filters apply uniformly across all four sections (in_progress,
+   ready_to_close, ready, recently_closed). For ready, filters apply BEFORE the cap, so
    `--mode afk --limit 5` yields up to 5 afk-mode ready tickets. The
    recently_closed section is filtered before the compact projection so
    the full ticket fields are available for matching."
-  [ctx {:keys [json? mode limit status assignee tag type priority]}]
+  [ctx {:keys [json? mode limit status assignee tag type priority parent]}]
   (if-not (:project-found? ctx)
     (let [data {:project          {:found? false}
                 :in-progress      []
@@ -1721,7 +1724,8 @@
                          (seq assignee)   (assoc :assignee assignee)
                          (seq tag)        (assoc :tag      tag)
                          (seq type)       (assoc :type     type)
-                         (seq priority)   (assoc :priority priority))
+                         (seq priority)   (assoc :priority priority)
+                         (seq parent)     (assoc :parent   parent))
           active*      (query/filter-tickets
                         (prime-in-progress-tickets all active-status now)
                         criteria)

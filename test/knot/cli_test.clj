@@ -5159,6 +5159,105 @@ Restart the daemon.
         (is (not (str/includes? section "Hitl active"))
             "hitl-mode in-progress ticket filtered from In Progress under --mode afk")))))
 
+(defn- prime-parent-fixture
+  "Umbrella with one direct child per primer section, plus a parallel set
+   of grandchildren under the ready child. The umbrella itself is live and
+   dep-free, so it qualifies for the Ready section — which is what makes
+   \"the umbrella is not its own direct child\" observable."
+  [tmp]
+  (let [c  (ctx tmp)
+        mk (fn [title slug opts]
+             (id-of-created (cli/create-cmd c (merge {:title title} opts)) slug))
+        u  (mk "Umbrella root"   "umbrella-root"   {})
+        c1 (mk "Alpha active"    "alpha-active"    {:parent u})
+        c2 (mk "Bravo sealing"   "bravo-sealing"   {:parent u :acceptance ["a"]})
+        c3 (mk "Charlie waiting" "charlie-waiting" {:parent u})
+        c4 (mk "Delta shipped"   "delta-shipped"   {:parent u})
+        g1 (mk "Echo active"     "echo-active"     {:parent c3})
+        g2 (mk "Foxtrot sealing" "foxtrot-sealing" {:parent c3 :acceptance ["a"]})
+        _  (mk "Golf waiting"    "golf-waiting"    {:parent c3})
+        g4 (mk "Hotel shipped"   "hotel-shipped"   {:parent c3})]
+    (cli/start-cmd  c {:id c1})
+    (cli/start-cmd  c {:id c2})
+    (cli/update-cmd c {:id c2 :ac ["a"] :done true})
+    (cli/close-cmd  c {:id c4})
+    (cli/start-cmd  c {:id g1})
+    (cli/start-cmd  c {:id g2})
+    (cli/update-cmd c {:id g2 :ac ["a"] :done true})
+    (cli/close-cmd  c {:id g4})
+    {:umbrella u :children [c1 c2 c3 c4]}))
+
+(def ^:private prime-parent-outsiders
+  ["Echo active" "Foxtrot sealing" "Golf waiting" "Hotel shipped" "Umbrella root"])
+
+(deftest prime-cmd-parent-filter-test
+  (testing ":parent restricts all four markdown sections to direct children"
+    (with-tmp tmp
+      (let [{:keys [umbrella]} (prime-parent-fixture tmp)
+            out   (cli/prime-cmd (prime-ctx tmp) {:parent #{umbrella}})
+            ip-i  (str/index-of out "## In Progress")
+            rtc-i (str/index-of out "## Ready to close")
+            rd-i  (str/index-of out "## Ready\n")
+            rc-i  (str/index-of out "## Recently Closed")]
+        (is (and ip-i rtc-i rd-i rc-i) "all four sections render")
+        (is (str/includes? (subs out ip-i rtc-i) "Alpha active"))
+        (is (str/includes? (subs out rtc-i rd-i) "Bravo sealing"))
+        (is (str/includes? (subs out rd-i rc-i) "Charlie waiting"))
+        (is (str/includes? (subs out rc-i (count out)) "Delta shipped"))
+        (doseq [title prime-parent-outsiders]
+          (is (not (str/includes? out title))
+              (str "grandchildren and the umbrella itself are excluded: " title))))))
+
+  (testing ":parent restricts all four --json sections to direct children"
+    (with-tmp tmp
+      (let [{:keys [umbrella]} (prime-parent-fixture tmp)
+            parsed (cheshire/parse-string
+                    (cli/prime-cmd (prime-ctx tmp) {:parent #{umbrella} :json? true})
+                    true)
+            titles (fn [k] (set (map :title (get-in parsed [:data k]))))]
+        (is (contains? (titles :in_progress) "Alpha active"))
+        (is (contains? (titles :ready_to_close) "Bravo sealing"))
+        (is (contains? (titles :ready) "Charlie waiting"))
+        (is (contains? (titles :recently_closed) "Delta shipped"))
+        (let [all (reduce into #{} (map titles [:in_progress :ready_to_close
+                                                :ready :recently_closed]))]
+          (doseq [title prime-parent-outsiders]
+            (is (not (contains? all title))
+                (str "excluded from every JSON section: " title)))))))
+
+  (testing ":parent is repeatable — the sections union the direct children of each id"
+    (with-tmp tmp
+      (let [c  (ctx tmp)
+            mk (fn [title slug opts]
+                 (id-of-created (cli/create-cmd c (merge {:title title} opts)) slug))
+            u1 (mk "First umbrella"  "first-umbrella"  {})
+            u2 (mk "Second umbrella" "second-umbrella" {})
+            _  (mk "Kid of first"    "kid-of-first"    {:parent u1})
+            _  (mk "Kid of second"   "kid-of-second"   {:parent u2})
+            _  (mk "Orphan kid"      "orphan-kid"      {})
+            out (cli/prime-cmd (prime-ctx tmp) {:parent #{u1 u2}})]
+        (is (str/includes? out "Kid of first"))
+        (is (str/includes? out "Kid of second"))
+        (is (not (str/includes? out "Orphan kid"))
+            "a parentless ticket matches no --parent value")))))
+
+(deftest prime-cmd-parent-composes-with-mode-test
+  (testing ":parent and :mode intersect — afk children of the umbrella only"
+    (with-tmp tmp
+      (let [c  (ctx tmp)
+            mk (fn [title slug opts]
+                 (id-of-created (cli/create-cmd c (merge {:title title} opts)) slug))
+            u  (mk "Composed umbrella" "composed-umbrella" {})
+            _  (mk "Afk kid"     "afk-kid"     {:parent u :mode "afk"})
+            _  (mk "Hitl kid"    "hitl-kid"    {:parent u :mode "hitl"})
+            _  (mk "Afk outsider" "afk-outsider" {:mode "afk"})
+            out (cli/prime-cmd (prime-ctx tmp) {:parent #{u} :mode "afk"})]
+        (is (str/includes? out "Afk kid"))
+        (is (not (str/includes? out "Hitl kid"))
+            "--mode afk still applies inside the parent scope")
+        (is (not (str/includes? out "Afk outsider"))
+            "--parent still applies to afk tickets outside the umbrella")))))
+
 (deftest info-cmd-text-shape-test
   (testing "info-cmd returns a string with all five fixed section headings"
     (with-tmp tmp

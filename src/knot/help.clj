@@ -191,11 +191,16 @@
                   {:name :assignee :coerce [] :desc "Filter all sections by assignee (repeatable). Pass \"\" to match unassigned tickets."}
                   {:name :tag      :coerce [] :desc "Filter all sections by tag (repeatable)."}
                   {:name :type     :coerce [] :desc "Filter all sections by type (repeatable)."}
-                  {:name :priority :coerce [:long] :desc "Filter all sections by priority 0-4 (repeatable)."}]
+                  {:name :priority :coerce [:long] :desc "Filter all sections by priority 0-4 (repeatable)."}
+                  {:name :parent   :coerce []
+                   :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}]
+    :notes       ["Unlike list/ready/blocked, an unresolvable --parent does not exit 1 — prime is wired to SessionStart and always exits 0, so it degrades to the no-project primer instead."]
     :examples    [{:cmd "knot prime"
                    :note "Print the markdown primer for the current project."}
                   {:cmd "knot prime --type bug --mode afk"
-                   :note "Show only afk-mode bug tickets across all primer sections."}]
+                   :note "Show only afk-mode bug tickets across all primer sections."}
+                  {:cmd "knot prime --parent kno-01abc"
+                   :note "Scope every primer section to the direct children of an umbrella ticket."}]
     :exit-codes  [{:code 0 :when "always (degrades to a no-project preamble)"}]}
 
    :create
