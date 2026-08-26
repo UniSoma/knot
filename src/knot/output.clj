@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [knot.acceptance :as acceptance]
             [knot.config :as config]
+            [knot.listing :as listing]
             [knot.ticket :as ticket]))
 
 (defn- ticket-title
@@ -203,28 +204,17 @@
    hash-map past 8 entries and scramble the order. Missing
    `json-vector-default-keys` are appended as `[]` at the end of the map
    (JSON object key order is non-semantic) so consumers can iterate
-   without `null[]` errors."
-  [{:keys [frontmatter body children-progress leverage coupling cc level] :as ticket} {:keys [include-body?]
-                                                                                 :or {include-body? true}}]
-  (let [[term total] children-progress
-        ;; `:leverage`/`:coupling`/`:cc`/`:level` are attached top-level only
-        ;; by list/ready/blocked; show, touched-mutators and closed never
-        ;; attach them, so those outputs stay byte-unchanged. `:cc` may be nil
-        ;; (singleton) and `:level` may be nil (live deps cycle, or a closed
-        ;; row) — both still emit `null` for a uniform JSON shape.
-        has-leverage? (contains? ticket :leverage)
-        has-coupling? (contains? ticket :coupling)
-        has-cc?       (contains? ticket :cc)
-        has-level?    (contains? ticket :level)]
-    (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
-                    frontmatter
-                    json-vector-default-keys)
-      include-body?     (assoc :body body)
-      children-progress (assoc :children_total total :children_terminal term)
-      has-leverage?     (assoc :leverage leverage)
-      has-coupling?     (assoc :coupling coupling)
-      has-cc?           (assoc :cc cc)
-      has-level?        (assoc :level level))))
+   without `null[]` errors. Each computed column then contributes the
+   fields its `:json` declares — nothing when the view did not attach it,
+   so show, touched-mutators and closed stay byte-unchanged."
+  [{:keys [frontmatter body] :as ticket} {:keys [include-body?]
+                                          :or {include-body? true}}]
+  (reduce (fn [m {:keys [json]}] (merge m (json ticket)))
+          (cond-> (reduce (fn [m k] (if (contains? m k) m (assoc m k [])))
+                          frontmatter
+                          json-vector-default-keys)
+            include-body? (assoc :body body))
+          listing/columns))
 
 (defn- jsonify-inverse-entry
   "Project an inverse-section entry into the JSON shape: resolved entries
@@ -323,91 +313,39 @@
    {:key :age       :header "AGE"      :align :left}
    {:key :title     :header "TITLE"    :align :left}])
 
-(def ^:private ls-ac-column
-  {:key :acceptance :header "AC" :align :left})
-
-(def ^:private ls-chld-column
-  {:key :children :header "CHLD" :align :left})
-
-(def ^:private ls-lev-column
-  {:key :leverage :header "LEV" :align :right})
-
-(def ^:private ls-cpl-column
-  {:key :coupling :header "CPL" :align :right})
-
-(def ^:private ls-lvl-column
-  {:key :level :header "LVL" :align :right})
-
-(def ^:private ls-cc-column
-  {:key :cc :header "CC" :align :left})
-
 (defn- ls-columns-for
-  "Return the column list for `tickets`. AGE is always present. The AC,
-   CHLD, LEV, CPL and LVL columns are independently spliced in immediately
-   before TITLE — AC when at least one ticket carries `(seq :acceptance)`,
-   CHLD when at least one ticket is an umbrella (carries
-   `:children-progress`), LEV when at least one ticket carries an attached
-   `:leverage` value, CPL when at least one ticket carries an attached
-   `:coupling` value, LVL when at least one ticket carries an attached
-   `:level` key. LVL keys on PRESENCE, not on a non-nil value: `level` is
-   legitimately nil for a member of a live deps cycle and that dash is
-   information.
-
-   CC is prepended as the LEADING column (before ID) on a stricter gate:
-   present only when at least one visible row carries a NON-NIL `:cc`
-   ordinal. Unlike LEV/CPL, key-presence is not enough — every
-   list/ready/blocked row carries `:cc` (often nil for singletons), so an
-   all-singleton view would otherwise show an all-dash column.
-
-   Layout is `[CC], ID, …, AGE, [AC], [CHLD], [LEV], [CPL], [LVL], TITLE`; any
-   omitted column makes its header and slot disappear, so quiet projects
-   see none."
+  "Return the column list for `tickets`: the base columns plus every
+   `listing/columns` declaration whose `:shown?` holds for these rows.
+   A `:leading` column goes before ID; the others are spliced in
+   immediately before TITLE, in declaration order. Any omitted column
+   makes its header and slot disappear, so quiet projects see none."
   [tickets]
-  (let [ac?       (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)
-        umbrella? (some :children-progress tickets)
-        lev?      (some #(contains? % :leverage) tickets)
-        cpl?      (some #(contains? % :coupling) tickets)
-        lvl?      (some #(contains? % :level) tickets)
-        cc?       (some #(some? (:cc %)) tickets)
-        head      (vec (butlast ls-columns-base))
-        title-col (last ls-columns-base)
-        extra     (cond-> []
-                    ac?       (conj ls-ac-column)
-                    umbrella? (conj ls-chld-column)
-                    lev?      (conj ls-lev-column)
-                    cpl?      (conj ls-cpl-column)
-                    lvl?      (conj ls-lvl-column))
-        cols      (if (seq extra)
-                    (conj (into head extra) title-col)
-                    ls-columns-base)]
-    (cond->> cols
-      cc? (into [ls-cc-column]))))
+  (let [shown   (filter (fn [{:keys [shown?]}] (shown? tickets)) listing/columns)
+        leading (filter #(= :leading (:position %)) shown)
+        middle  (remove #(= :leading (:position %)) shown)]
+    (-> (vec leading)
+        (into (butlast ls-columns-base))
+        (into middle)
+        (conj (last ls-columns-base)))))
 
 (def ^:private col-sep "  ")
 (def ^:private col-sep-len (count col-sep))
 
 (declare format-age-days)
 
+(def ^:private cell-fns
+  (into {} (map (juxt :key :cell)) listing/columns))
+
 (defn- value-of
   "Plain string for a single ls cell — no padding, no color."
   [ticket k]
-  (case k
-    :title (ticket-title ticket)
-    :acceptance (let [ac (get-in ticket [:frontmatter :acceptance])]
-                  (if (seq ac)
-                    (let [[d t] (acceptance/progress ac)]
-                      (str d "/" t))
-                    "-"))
-    :children (if-let [[term total] (:children-progress ticket)]
-                (str term "/" total)
-                "-")
-    :leverage (if-let [n (:leverage ticket)] (str n) "-")
-    :coupling (if-let [n (:coupling ticket)] (str n) "-")
-    :level (if-let [n (:level ticket)] (str n) "-")
-    :cc (if-let [n (:cc ticket)] (str n) "-")
-    :age (format-age-days (:age-days ticket))
-    (let [v (get (:frontmatter ticket) k)]
-      (if (some? v) (str v) ""))))
+  (if-let [cell (get cell-fns k)]
+    (cell ticket)
+    (case k
+      :title (ticket-title ticket)
+      :age (format-age-days (:age-days ticket))
+      (let [v (get (:frontmatter ticket) k)]
+        (if (some? v) (str v) "")))))
 
 (defn- pad
   [s width align]

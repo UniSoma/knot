@@ -511,34 +511,6 @@
             (emit-ambiguous-envelope! e data)
             (throw e)))))))
 
-(defn- ls-handler [argv]
-  (let [{:keys [value-opts argv]} (extract-value-flags
-                                   argv
-                                   (value-flag-map (get help/registry :list)))
-        {:keys [opts]}            (bcli/parse-args argv (spec :list))
-        opts                      (merge opts value-opts)
-        _        (validate-priority-filter! opts)
-        json?    (boolean (:json opts))
-        ctx      (discover-ctx)
-        opts     (resolve-parent-filter! ctx opts json?)
-        opts     (resolve-closure-filter! ctx opts json?)
-        opts     (resolve-component-filter! ctx opts json?)
-        tty?     (output/tty?)
-        color?   (output/color-enabled?
-                  {:tty?         tty?
-                   :no-color?    (boolean (:no-color opts))
-                   :no-color-env (System/getenv "NO_COLOR")})
-        ls-opts  (cond-> (merge (filter-opts-from-cli opts)
-                                {:json?  json?
-                                 :tty?   tty?
-                                 :color? color?})
-                   (:limit opts)     (assoc :limit (:limit opts))
-                   (:closure opts)   (assoc :closure (:closure opts) :via (:via opts))
-                   (:component opts) (assoc :component (:component opts))
-                   tty?              (assoc :width (output/terminal-width)))
-        out      (cli/ls-cmd ctx ls-opts)]
-    (println-out out)))
-
 (defn- init-handler [argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
@@ -1484,7 +1456,7 @@
         "check"  (check-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
-        ("list" "ls") (ls-handler rest-argv)
+        ("list" "ls") (list-handler :list cli/ls-cmd rest-argv)
         "status"  (transition-handler "status" :status 2 cli/status-cmd rest-argv)
         "start"   (transition-handler "start"  :start  1 cli/start-cmd  rest-argv)
         "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)

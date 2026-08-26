@@ -1,31 +1,32 @@
 ---
 id: kno-01m0zvrrs7ct
 title: 'Deepen listing: one view interface from corpus to rows'
-status: open
+status: closed
 type: chore
 priority: 3
 mode: afk
 created: '2026-08-26T20:21:45.894921449Z'
-updated: '2026-08-26T20:24:26.905830824Z'
+updated: '2026-08-26T21:21:27.219124390Z'
+closed: '2026-08-26T21:21:27.219124390Z'
 tags:
 - listing
 - columns
 - refactor
 acceptance:
 - title: knot.listing exposes one fn from corpus to rows, and list/ready/blocked/closed-cmd are each a call to it plus render
-  done: false
+  done: true
 - title: Every computed column is one declaration in listing; output and help iterate the declarations and hold no per-column cond branches
-  done: false
+  done: true
 - title: prime-cmd builds its criteria through listing/criteria, not by hand
-  done: false
+  done: true
 - title: main/ls-handler is gone; list dispatches through list-handler
-  done: false
+  done: true
 - title: listing_test.clj covers source, scope, filter, limit and column attachment from a vector corpus with no temp dir
-  done: false
+  done: true
 - title: bb test and clj-kondo are green with every pre-existing cli_test listing test unchanged
-  done: false
+  done: true
 - title: CONTEXT.md carries the View entry
-  done: false
+  done: true
 ---
 
 ## Description
@@ -41,3 +42,7 @@ New namespace knot.listing with one interface: corpus + terminal-statuses + {:so
 **2026-08-26T20:24:26.905830824Z**
 
 Design was grilled with the maintainer on 2026-08-26; every open choice is settled in the Design section. The CONTEXT.md View entry (AC 7) is already written in the working tree, uncommitted — include it in the refactor commit, do not redraft it. Bug kno-01m0jkmpnkk4 depends on this ticket and is a separate follow-up commit on the new seam.
+
+**2026-08-26T21:21:27.219124390Z**
+
+knot.listing now owns the view: listing/rows runs source -> closure -> component -> filters -> sort -> limit -> columns from a corpus, and listing/columns declares AC, CHLD, LEV, CPL, LVL and CC once each. list/ready/blocked/closed-cmd are one view-cmd call each; output's table and JSON and help's NOTES iterate the declarations (help_test fails on a column without a note); prime-cmd projects its filters through listing/criteria; main/ls-handler collapsed into list-handler :list. listing_test.clj covers source, scope, filter, limit and attachment from a six-ticket vector. Pipeline order and every output are unchanged: 473 tests green with cli_test untouched. Metrics still attach to closed rows on live views — that is bug kno-01m0jkmpnkk4, next on this seam.

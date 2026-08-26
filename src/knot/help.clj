@@ -2,6 +2,7 @@
   "Help system: command registry (source of truth for parse + display)
    and renderers for top-level and per-command help."
   (:require [clojure.string :as str]
+            [knot.listing :as listing]
             [knot.output :as output]
             [knot.version :as version]))
 
@@ -144,20 +145,27 @@
                      (str "  " code "  " reason)))
          "\n")))
 
-(def ^:private listing-column-notes
-  "Definitions for the computed columns `list`, `ready` and `blocked`
-   render, shared by all three registry entries. The pull surface owns
+(def ^:private column-notes
+  "Definition of each computed column `list`, `ready` and `blocked`
+   render, keyed by its `listing/columns` `:key`. The pull surface owns
    these (ADR 0017) — no prose document should cache them. A column added
-   to `output/ls-columns-for` adds a line here; `help-test` fails until it
-   does."
-  ["Computed columns are live-induced: a closed ticket is neither counted nor conductive, so a chain running through one is severed."
-   "AGE  time since the ticket's `updated` stamp, bucketed as Nd / Nw / Nm, or `-` when there is no usable stamp. No --json field of its own: read the raw `updated` timestamp."
-   "AC  done/total acceptance criteria, `-` when the ticket has none. The column appears only when some row in the view carries criteria. --json carries the full `acceptance` list instead."
-   "CHLD  terminal/total direct children, `-` for a ticket that is not an umbrella. The column appears only when the view holds an umbrella. --json adds `children_total` and `children_terminal`, on umbrella rows only."
-   "LEV  leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. --json field `leverage`, always an integer on these three commands."
-   "CPL  coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. --json field `coupling`, always an integer on these three commands."
-   "LVL  level: how many rounds of closes away the ticket is — the length of the longest chain of live blockers beneath it through deps, `0` exactly when the ticket is ready. Whole-graph, never scoped to a --parent view: a blocker under another umbrella still gates. `-` when the ticket sits on, or depends through, a live deps cycle — a data error `knot check` reports, not a schedule. --json field `level` on every row; `group_by(.level)` turns a blocked listing into waves."
-   "CC  connected component: which cluster of the live graph (parent, deps and links, undirected) the row sits on. The number is a throwaway within-snapshot ordinal — largest cluster 1, `-` for a singleton — and membership ignores your filters. --json field `cc` on every row, null for a singleton. Use --component to work one cluster."])
+   to `listing/columns` needs an entry here; `help-test` fails until it
+   has one."
+  {:acceptance "AC  done/total acceptance criteria, `-` when the ticket has none. The column appears only when some row in the view carries criteria. --json carries the full `acceptance` list instead."
+   :children   "CHLD  terminal/total direct children, `-` for a ticket that is not an umbrella. The column appears only when the view holds an umbrella. --json adds `children_total` and `children_terminal`, on umbrella rows only."
+   :leverage   "LEV  leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. --json field `leverage`, always an integer on these three commands."
+   :coupling   "CPL  coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. --json field `coupling`, always an integer on these three commands."
+   :level      "LVL  level: how many rounds of closes away the ticket is — the length of the longest chain of live blockers beneath it through deps, `0` exactly when the ticket is ready. Whole-graph, never scoped to a --parent view: a blocker under another umbrella still gates. `-` when the ticket sits on, or depends through, a live deps cycle — a data error `knot check` reports, not a schedule. --json field `level` on every row; `group_by(.level)` turns a blocked listing into waves."
+   :cc         "CC  connected component: which cluster of the live graph (parent, deps and links, undirected) the row sits on. The number is a throwaway within-snapshot ordinal — largest cluster 1, `-` for a singleton — and membership ignores your filters. --json field `cc` on every row, null for a singleton. Use --component to work one cluster."})
+
+(def ^:private listing-column-notes
+  "NOTES shared by the `list`, `ready` and `blocked` registry entries: the
+   live-induced preamble, AGE (a base column, not a computed one), then one
+   line per `listing/columns` declaration in layout order."
+  (into ["Computed columns are live-induced: a closed ticket is neither counted nor conductive, so a chain running through one is severed."
+         "AGE  time since the ticket's `updated` stamp, bucketed as Nd / Nw / Nm, or `-` when there is no usable stamp. No --json field of its own: read the raw `updated` timestamp."]
+        (map (fn [{:keys [key]}] (get column-notes key)))
+        listing/columns))
 
 (def registry
   "Source of truth for every CLI command. Keys are registry IDs:

@@ -9,6 +9,7 @@
             [knot.check :as check]
             [knot.config :as config]
             [knot.git :as git]
+            [knot.listing :as listing]
             [knot.output :as output]
             [knot.query :as query]
             [knot.schema :as schema]
@@ -259,75 +260,6 @@
       (warn! (str "knot: " src-id ": " (name kind)
                   " reference " id " is missing")))))
 
-(defn- annotate-children-progress
-  "Attach `:children-progress [terminal total]` to each umbrella ticket in
-   `tickets` — those with at least one direct child anywhere in `corpus`
-   (the full live+archive set, so closed children in the archive still
-   count). Non-umbrellas are left untouched, so `:children-progress`
-   absence doubles as the umbrella predicate the renderers and JSON
-   projection key on."
-  [tickets corpus terminal-statuses]
-  (mapv (fn [t]
-          (let [[_ total :as cp] (query/children-progress
-                                  corpus (get-in t [:frontmatter :id]) terminal-statuses)]
-            (cond-> t
-              (pos? total) (assoc :children-progress cp))))
-        tickets))
-
-(defn- annotate-leverage
-  "Attach `:leverage <int>` to each ticket in `tickets` — the count of live
-   tickets that transitively depend on it through `:deps`, computed over the
-   live-induced deps subgraph of `corpus`. Used by list/ready/blocked only,
-   so the top-level `:leverage` key drives both the LEV column and the
-   `leverage` JSON field while leaving closed/show byte-unchanged."
-  [tickets corpus terminal-statuses]
-  (mapv (fn [t]
-          (assoc t :leverage
-                 (query/leverage corpus (get-in t [:frontmatter :id]) terminal-statuses)))
-        tickets))
-
-(defn- annotate-coupling
-  "Attach `:coupling <int>` to each ticket in `tickets` — the count of
-   distinct live tickets it is directly connected to through `:deps` (either
-   direction) or `:links`, computed over the live-induced graph of `corpus`.
-   Used by list/ready/blocked only, so the top-level `:coupling` key drives
-   both the CPL column and the `coupling` JSON field while leaving
-   closed/show byte-unchanged."
-  [tickets corpus terminal-statuses]
-  (mapv (fn [t]
-          (assoc t :coupling
-                 (query/coupling corpus (get-in t [:frontmatter :id]) terminal-statuses)))
-        tickets))
-
-(defn- annotate-level
-  "Attach `:level <int-or-nil>` to each ticket in `tickets` — the length of
-   the longest chain of live blockers beneath it through `:deps`, computed
-   ONCE over the whole live-induced deps graph of `corpus`, so a blocker
-   outside the current filter (or outside the umbrella) still counts. `nil`
-   for a ticket on or behind a live deps cycle, and for a closed row, which
-   is not a node of the live-induced subgraph. Used by list/ready/blocked
-   only, so the top-level `:level` key drives both the LVL column and the
-   `level` JSON field while leaving closed/show byte-unchanged."
-  [tickets corpus terminal-statuses]
-  (let [level-map (query/levels corpus terminal-statuses)]
-    (mapv (fn [t]
-            (assoc t :level (get level-map (get-in t [:frontmatter :id]))))
-          tickets)))
-
-(defn- annotate-cc
-  "Attach `:cc <ordinal-or-nil>` to each ticket in `tickets` — the global
-   connected-component ordinal of its live-induced component in `corpus`
-   (`nil` for singletons). The partition is computed ONCE over the full live
-   corpus, so a ticket's component and ordinal are filter-independent: the
-   `--tag`/`--type`/`--limit` view never changes them. Used by
-   list/ready/blocked only, so the top-level `:cc` key drives both the CC
-   column and the `cc` JSON field while leaving closed/show byte-unchanged."
-  [tickets corpus terminal-statuses]
-  (let [cc-map (query/connected-components corpus terminal-statuses)]
-    (mapv (fn [t]
-            (assoc t :cc (get cc-map (get-in t [:frontmatter :id]))))
-          tickets)))
-
 (defn show-cmd
   "Load the ticket whose id is `(:id opts)` from the project's tickets-dir
    and return its rendered text. `:id` may be partial — `store/resolve-id`
@@ -344,7 +276,7 @@
     (when loaded
       (let [all       (store/load-all project-root tickets-dir)
             inverses* (query/inverses loaded all)
-            loaded    (first (annotate-children-progress [loaded] all terminal-statuses))]
+            loaded    (first (listing/attach-children-progress [loaded] all terminal-statuses))]
         (warn-broken-refs! loaded all)
         (if (:json? opts)
           (output/show-json loaded inverses*)
@@ -1298,72 +1230,6 @@
            (archive-meta terminal-statuses target saved))
           saved)))))
 
-(defn- filter-criteria
-  "Project the filter-relevant keys out of `opts` into the criteria map
-   accepted by `query/filter-tickets`. Empty/nil values are dropped so the
-   primitive treats absent flags as no-filter."
-  [opts]
-  (into {}
-        (keep (fn [k]
-                (when-let [v (get opts k)]
-                  (when (seq v) [k v]))))
-        [:status :assignee :tag :type :mode :priority :acceptance-complete
-         :parent]))
-
-(defn- closure-filter
-  "When `opts` carries resolved `:closure` seed ids, restrict `tickets` to
-   members of the undirected transitive closure of those seeds over the
-   `:via` axes (default: all three), computed across the full `corpus`.
-   No-op when `:closure` is absent. The corpus, not `tickets`, drives the
-   walk so membership stays graph-faithful regardless of each command's
-   display filter."
-  [tickets corpus opts]
-  (if-let [seeds (seq (:closure opts))]
-    (let [members (query/closure-set corpus seeds
-                                     (or (:via opts) #{:parent :deps :links}))]
-      (filter #(contains? members (get-in % [:frontmatter :id])) tickets))
-    tickets))
-
-(defn- component-filter
-  "When `opts` carries a resolved `:component` seed id, restrict `tickets`
-   to members of the seed's LIVE-INDUCED connected component (over
-   `:parent` ∪ `:deps` ∪ `:links`, closed non-conductive), computed across
-   the full `corpus`. No-op when `:component` is absent. Like
-   `closure-filter`, the corpus drives membership so the set stays the
-   partition the `CC` column promises, independent of each command's
-   display filter.
-
-   A closed (terminal-status) seed is a fail-fast error: it is not a node
-   in the live-induced graph, so its component is undefined. Returning an
-   empty list silently would leave the user's 'show me this cluster' model
-   broken with no explanation (ADR 0014)."
-  [tickets corpus terminal-statuses opts]
-  (if-let [seed (:component opts)]
-    (do
-      (when (some #(and (= seed (get-in % [:frontmatter :id]))
-                        (contains? (or terminal-statuses #{})
-                                   (get-in % [:frontmatter :status])))
-                  corpus)
-        (throw (ex-info (str "--component seed " seed
-                             " is closed; it has no live component")
-                        {:component seed})))
-      (let [members (query/live-component corpus seed terminal-statuses)]
-        (filter #(contains? members (get-in % [:frontmatter :id])) tickets)))
-    tickets))
-
-(defn- apply-limit
-  "Take the first `n` items of `xs` when `n` is a positive integer. `nil`
-   means no limit — return `xs` unchanged. Any other value (including 0
-   and negatives) throws: `--limit 0` silently meaning 'no limit' surprised
-   users coming from CLIs where 0 means 'zero results'."
-  [xs n]
-  (cond
-    (nil? n)                    xs
-    (and (integer? n) (pos? n)) (vec (take n xs))
-    :else
-    (throw (ex-info (str "--limit must be a positive integer; got " n)
-                    {:limit n}))))
-
 (def ^:private prime-default-limit 20)
 (def ^:private prime-recently-closed-limit 3)
 (def ^:private prime-stale-days 14)
@@ -1422,38 +1288,31 @@
          (select-keys resolved [:statuses :terminal-statuses :active-status
                                 :modes :default-mode :afk-mode])))
 
-(defn ls-cmd
-  "List live tickets — those whose status is not in `:terminal-statuses`.
-   With `:json? true`, returns a bare JSON array. Otherwise returns the
-   rendered text table. Pass `:tty?` and `:color?` to control the table
-   format; pass `:width` to constrain TITLE truncation when on a TTY.
-
-   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
-   set of strings) compose via `query/filter-tickets`. An explicit
-   `:status` set replaces the default non-terminal filter — so
-   `--status closed` surfaces archived tickets. `:limit` truncates after
-   filtering."
-  [ctx opts]
+(defn- view-cmd
+  "Run the view that starts at `source` and render it: `output/ls-json`
+   under `:json?`, else the text table. `opts` carries the scope
+   (`:closure`/`:via`/`:component`), the filter flags (each a set of
+   values — see `listing/criteria`), `:limit`, and the table options."
+  [source ctx opts]
   (let [resolved (resolve-ctx ctx)
         {:keys [project-root tickets-dir terminal-statuses now]} resolved
-        all      (store/load-all project-root tickets-dir)
-        criteria (filter-criteria opts)
-        base     (if (contains? criteria :status)
-                   all
-                   (query/non-terminal all terminal-statuses))
-        scoped   (component-filter (closure-filter base all opts)
-                                   all terminal-statuses opts)
-        visible  (query/filter-tickets scoped criteria)
-        result   (-> (apply-limit visible (:limit opts))
-                     (annotate-children-progress all terminal-statuses)
-                     (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses)
-                     (annotate-cc all terminal-statuses)
-                     (annotate-level all terminal-statuses))]
+        all    (store/load-all project-root tickets-dir)
+        result (listing/rows all terminal-statuses
+                             {:source  source
+                              :scope   (select-keys opts [:closure :via :component])
+                              :filters (listing/criteria opts)
+                              :limit   (:limit opts)})]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
                        (ls-table-opts resolved opts)))))
+
+(defn ls-cmd
+  "List live tickets — those whose status is not in `:terminal-statuses`.
+   An explicit `:status` set replaces the default non-terminal filter — so
+   `--status closed` surfaces archived tickets. See `view-cmd`."
+  [ctx opts]
+  (view-cmd :list ctx opts))
 
 (defn- tree-tickets
   "Walk a dep-tree node and return the unique full tickets it contains, in
@@ -1567,100 +1426,21 @@
 
 (defn ready-cmd
   "List tickets that are non-terminal AND whose `:deps` are all in
-   terminal status. With `:json? true`, returns a bare JSON array.
-   Otherwise returns the rendered text table. Pass `:tty?`/`:color?`
-   to control table formatting (same conventions as `ls-cmd`).
-
-   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
-   set of strings) compose via `query/filter-tickets`. Filters apply
-   BEFORE `:limit` truncation so `--mode afk --limit 5` returns up to
-   five afk-mode ready tickets, not five from the unfiltered set."
+   terminal status. See `view-cmd`."
   [ctx opts]
-  (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses now]} resolved
-        all      (store/load-all project-root tickets-dir)
-        ready*   (query/ready all terminal-statuses)
-        scoped   (component-filter (closure-filter ready* all opts)
-                                   all terminal-statuses opts)
-        filtered (query/filter-tickets scoped (filter-criteria opts))
-        result   (-> (apply-limit filtered (:limit opts))
-                     (annotate-children-progress all terminal-statuses)
-                     (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses)
-                     (annotate-cc all terminal-statuses)
-                     (annotate-level all terminal-statuses))]
-    (if (:json? opts)
-      (output/ls-json result)
-      (output/ls-table (annotate-age-days result now)
-                       (ls-table-opts resolved opts)))))
-
-(defn- closed?
-  "True when the ticket's `:status` is in `terminal-statuses`."
-  [terminal-statuses t]
-  (contains? (or terminal-statuses #{})
-             (get-in t [:frontmatter :status])))
-
-(defn- by-closed-desc
-  "Sort comparator: tickets with a `:closed` timestamp first (newest to
-   oldest), then tickets without a stamp last in stable input order."
-  [a b]
-  (let [ca (get-in a [:frontmatter :closed])
-        cb (get-in b [:frontmatter :closed])]
-    (cond
-      (and ca cb)       (compare cb ca)
-      (and ca (nil? cb)) -1
-      (and cb (nil? ca)) 1
-      :else              0)))
+  (view-cmd :ready ctx opts))
 
 (defn closed-cmd
   "List terminal-status (closed) tickets, sorted by `:closed` descending —
-   newest first. Optional `:limit` truncates after filter+sort. With
-   `:json? true`, returns a bare JSON array; otherwise a rendered text
-   table. Tickets missing a `:closed` stamp sort last.
-
-   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
-   set of strings) compose via `query/filter-tickets`, applied before sort."
+   newest first, stamp-less tickets last. See `view-cmd`."
   [ctx opts]
-  (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses now]} resolved
-        all      (store/load-all project-root tickets-dir)
-        terminal (filter (partial closed? terminal-statuses) all)
-        filtered (query/filter-tickets (closure-filter terminal all opts)
-                                       (filter-criteria opts))
-        sorted   (sort by-closed-desc filtered)
-        result   (annotate-children-progress (apply-limit sorted (:limit opts))
-                                             all terminal-statuses)]
-    (if (:json? opts)
-      (output/ls-json result)
-      (output/ls-table (annotate-age-days result now)
-                       (ls-table-opts resolved opts)))))
+  (view-cmd :closed ctx opts))
 
 (defn blocked-cmd
   "List non-terminal tickets that have at least one non-terminal `:deps`
-   entry (or a missing referent). With `:json? true`, returns a bare
-   JSON array. Otherwise returns the rendered text table.
-
-   Filter flags `:status`, `:assignee`, `:tag`, `:type`, `:mode` (each a
-   set of strings) compose via `query/filter-tickets`, applied after
-   computing the blocked set. `:limit` truncates after filtering."
+   entry (or a missing referent). See `view-cmd`."
   [ctx opts]
-  (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses now]} resolved
-        all      (store/load-all project-root tickets-dir)
-        blocked* (query/blocked all terminal-statuses)
-        scoped   (component-filter (closure-filter blocked* all opts)
-                                   all terminal-statuses opts)
-        filtered (query/filter-tickets scoped (filter-criteria opts))
-        result   (-> (apply-limit filtered (:limit opts))
-                     (annotate-children-progress all terminal-statuses)
-                     (annotate-leverage all terminal-statuses)
-                     (annotate-coupling all terminal-statuses)
-                     (annotate-cc all terminal-statuses)
-                     (annotate-level all terminal-statuses))]
-    (if (:json? opts)
-      (output/ls-json result)
-      (output/ls-table (annotate-age-days result now)
-                       (ls-table-opts resolved opts)))))
+  (view-cmd :blocked ctx opts))
 
 (defn- recently-closed-tickets
   "Project the top-N most recently closed tickets into the compact shape
@@ -1669,8 +1449,8 @@
    the close --summary). Tickets without `:closed` sort last."
   [tickets terminal-statuses]
   (->> tickets
-       (filter (partial closed? terminal-statuses))
-       (sort by-closed-desc)
+       (filter (partial listing/closed? terminal-statuses))
+       (sort listing/by-closed-desc)
        (take prime-recently-closed-limit)
        (mapv (fn [t]
                (let [fm (:frontmatter t)]
@@ -1743,7 +1523,7 @@
    `--mode afk --limit 5` yields up to 5 afk-mode ready tickets. The
    recently_closed section is filtered before the compact projection so
    the full ticket fields are available for matching."
-  [ctx {:keys [json? mode limit status assignee tag type priority parent]}]
+  [ctx {:keys [json? mode limit] :as opts}]
   (if-not (:project-found? ctx)
     (let [data {:project          {:found? false}
                 :in-progress      []
@@ -1761,16 +1541,9 @@
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
-          ;; Unified criteria map — mode is a scalar here (backward compat
-          ;; with existing callers), converted to a set for filter-tickets.
-          criteria     (cond-> {}
-                         (some? mode)     (assoc :mode     #{mode})
-                         (seq status)     (assoc :status   status)
-                         (seq assignee)   (assoc :assignee assignee)
-                         (seq tag)        (assoc :tag      tag)
-                         (seq type)       (assoc :type     type)
-                         (seq priority)   (assoc :priority priority)
-                         (seq parent)     (assoc :parent   parent))
+          ;; Mode is a scalar here (backward compat with existing callers);
+          ;; wrap it so the view's criteria projection sees a set.
+          criteria     (listing/criteria (assoc opts :mode (when (some? mode) #{mode})))
           active*      (query/filter-tickets
                         (prime-in-progress-tickets all active-status now)
                         criteria)
