@@ -6,7 +6,7 @@ type: bug
 priority: 3
 mode: afk
 created: '2026-08-21T16:49:36.434934994Z'
-updated: '2026-08-21T16:49:49.709050755Z'
+updated: '2026-08-26T20:21:50.087583509Z'
 tags:
 - listing
 - columns
@@ -22,6 +22,8 @@ acceptance:
   done: false
 links:
 - kno-01m0jbrvd2be
+deps:
+- kno-01m0zvrrs7ct
 ---
 
 ## Description
