@@ -6,7 +6,7 @@ type: feature
 priority: 2
 mode: afk
 created: '2026-05-06T00:56:00.992161805Z'
-updated: '2026-05-06T01:39:14.199103362Z'
+updated: '2026-08-26T22:31:16.973538306Z'
 closed: '2026-05-06T01:39:14.199103362Z'
 tags:
 - refine
@@ -16,19 +16,19 @@ links:
 - kno-01kqxd0amhnb
 acceptance:
 - title: '`knot update --help` documents `--add-ac` and `--remove-ac` with semantics matching `--add-tag` / `--remove-tag` (repeatable, idempotent, exact-match).'
-  done: true
+  done: false
 - title: '`knot update <id> --add-ac "A" --add-ac "B"` appends both criteria with `done: false`, dedupes by exact title, preserves first-occurrence order.'
-  done: true
+  done: false
 - title: '`knot update <id> --remove-ac "A"` removes the matching criterion; a missing match is a no-op (exit 0).'
-  done: true
+  done: false
 - title: '`--add-ac` / `--remove-ac` compose with `--ac --done/--undone` in a single call; documented apply order is add → flip → remove.'
-  done: true
+  done: false
 - title: '`--body`''s help text warns the `## Acceptance Criteria` markdown section is display-only on write.'
-  done: true
+  done: false
 - title: '`--ac`''s help text points to `--add-ac` / `--remove-ac` for non-flip operations.'
-  done: true
+  done: false
 - title: Coverage in `cli_test.clj` (option-spec/unit) and `integration_test.clj` (end-to-end via `bb`).
-  done: true
+  done: false
 ---
 
 ## Description
@@ -68,16 +68,6 @@ Secondary fixes (bundled into the same ticket; small, doc-level):
 - `--ac`'s help text gains a pointer: "use `--add-ac` / `--remove-ac` to add or remove criteria."
 
 Out of scope: bidirectional body↔frontmatter AC sync (a separate design call about which side is canonical when they disagree).
-
-## Acceptance Criteria
-
-- [ ] `knot update --help` documents `--add-ac` and `--remove-ac` with semantics matching `--add-tag` / `--remove-tag` (repeatable, idempotent, exact-match).
-- [ ] `knot update <id> --add-ac "A" --add-ac "B"` appends both criteria with `done: false`, dedupes by exact title, preserves first-occurrence order.
-- [ ] `knot update <id> --remove-ac "A"` removes the matching criterion; a missing match is a no-op (exit 0).
-- [ ] `--add-ac` / `--remove-ac` compose with `--ac --done/--undone` in a single call; documented apply order is add → flip → remove.
-- [ ] `--body`'s help text warns the `## Acceptance Criteria` markdown section is display-only on write.
-- [ ] `--ac`'s help text points to `--add-ac` / `--remove-ac` for non-flip operations.
-- [ ] Coverage in `cli_test.clj` (option-spec/unit) and `integration_test.clj` (end-to-end via `bb`).
 
 ## Notes
 
