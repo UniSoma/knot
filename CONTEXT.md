@@ -72,6 +72,16 @@ _Avoid_: conflating it with **Closure** ("live closure", "`--closure --live`" �
 One of the four listings — `list`, `ready`, `blocked`, `closed` — as a whole: the set of tickets it starts from (live, **Ready**, **Blocked**, or terminal), narrowed by a scope (**Closure**, **Component filter**, or parent) and by the display filters, then truncated by `--limit`. The four views share one shape and differ only in where they start; every flag they accept means the same thing on each. A view is *live* when it starts from live tickets (`list`, `ready`, `blocked`) and *terminal* when it starts from the archive (`closed`). The computed graph metrics — **Leverage**, **Coupling**, **Level**, **Connected components** — are attached only by live views, and within a live view only to live rows: a closed row that a live view surfaces (`list --status closed`) carries no metric, because it is not a node of the live-induced graph. **Umbrella progress** is not a graph metric and appears on every view.
 _Avoid_: "source" (the code's name for where a view starts, not the view itself), "listing" as a countable noun ("the four listings" — say "the four views"; "listing" is the act), "report" / "query" (a view is a command's output shape, not an ad-hoc question), "the closed list" (say "the closed view" — "list" is a different view).
 
+### Ticket lifecycle
+
+**Transition gate**:
+A check a status transition must pass before it is written: the *acceptance gate* on active→terminal (every frontmatter criterion checked) and the *open-children gate* on active→terminal and *→active (no child in a non-terminal status). A gate is *cleared* by satisfying it or *bypassed* with `--force`, and it fires on the transition, not the command — `close`, `start`, `status`, and `update --status` all meet the same gate. Distinct from **Deps**, which block readiness rather than transitions, and from the release verification gates above, which gate merges and releases rather than tickets.
+_Avoid_: "gates" for what deps do to readiness (say "blocks"); "validation" for a gate (that's `check`, which reads and never blocks a write); "lock".
+
+**Override record**:
+The `--summary` a bypassed **Transition gate** demands on a terminal transition — the reason the gate was overridden, landing as the closing summary note. It is the summary in a second role, not a second field: a close that bypasses nothing owes no record, and `--force` on a start leaves only a stderr trace because start is provisional.
+_Avoid_: "force reason" / "override reason" (say "override record"); treating `--force` as requiring a summary by itself.
+
 ### Ticket timestamps
 
 **Close time**:

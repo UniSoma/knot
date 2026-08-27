@@ -497,10 +497,12 @@
    transitions when at least one frontmatter `:acceptance` entry has
    `:done false`. The open-children gate fires on the same transition
    when at least one child (a ticket whose `:parent` is this id) has
-   a non-terminal status. `(:force? opts)` bypasses both gates but
-   requires a non-blank `:summary` (the summary becomes the override
-   record). When both gates would fire, a single `--force` bypasses
-   both and stderr emits one warning per gate.
+   a non-terminal status. `(:force? opts)` bypasses both gates, and
+   when a gate actually fires it requires a non-blank `:summary` (the
+   summary becomes the override record); with no gate to bypass,
+   `:force?` is a no-op and the summary stays optional. When both gates
+   would fire, a single `--force` bypasses both and stderr emits one
+   warning per gate.
 
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the post-mutation ticket under `:data` instead of the saved

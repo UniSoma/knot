@@ -286,7 +286,7 @@
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates. On active→terminal transitions, --summary is required (the override leaves a record); on *→active transitions, --summary is not required."}
+                   :desc "Bypass the acceptance and open-children gates. When a gate fires on an active→terminal transition, --summary is required (the override leaves a record); on *→active transitions, --summary is not required. With no gate to bypass, --force is a no-op."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
                    :note "Move a ticket into in_progress."}
@@ -324,7 +324,7 @@
                   {:name :external-ref :coerce []
                    :desc "Record an external reference alongside the ones already on the ticket (repeatable; idempotent). Never replaces. A blank value is rejected."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates; requires --summary."}
+                   :desc "Bypass the acceptance and open-children gates; requires --summary when a gate fires. With no gate to bypass, --force is a no-op."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :notes       ["--external-ref appends here, unlike `knot update --external-ref`, which replaces the whole list. The status change, the --summary note and the ref land in one write."
                   "git:<sha> is the convention for the commit that closed the ticket. knot stores the string verbatim: it does not parse it, verify the sha, or read git HEAD for you."
@@ -534,7 +534,7 @@
                   {:name :status       :desc "Transition the status. Acceptance gate fires on active→terminal."}
                   {:name :summary      :desc "Closing summary recorded on the ticket (terminal transitions only)."}
                   {:name :force        :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates on a --status transition. On terminal targets, --summary is required; on active-status targets, --summary is not required."}
+                   :desc "Bypass the acceptance and open-children gates on a --status transition. When a gate fires on a terminal target, --summary is required; on active-status targets, --summary is not required. With no gate to bypass, --force is a no-op."}
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
                   {:name :mode         :desc "Replace the mode (afk|hitl)."}
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}
