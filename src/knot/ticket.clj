@@ -214,12 +214,24 @@
     (str "<!-- " (if inverse? "inverse of other tickets' " "from frontmatter ")
          field "; edit with " writer " -->")))
 
+(def ^:private children-progress-suffix-pat
+  ;; The ` (d/t)` rollup `show` appends to `## Children`. Stripped before
+  ;; a heading is compared with the reserved names, so the rendered form
+  ;; an agent pastes back is caught along with the bare one.
+  #" \(\d+/\d+\)$")
+
 (defn reserved-sections
   "The `reserved-section-names` `body` carries as `## ` headings, in
-   `reserved-section-names` order. Matches the heading text exactly, the
-   same text `body-sections` slugs on."
+   `reserved-section-names` order. Compares the heading text exactly —
+   not its slug — after stripping the ` (d/t)` progress suffix `show`
+   renders on `Children`, so `## Children (2/3)` is reserved and
+   `## Children of X` is not. `body-sections` keys on the slug of the
+   full text instead; the two agree for every reserved name and differ
+   only on case, punctuation and that suffix."
   [body]
-  (let [present (set (map second (re-seq body-heading-pat (or body ""))))]
+  (let [present (into #{}
+                      (map #(str/replace (second %) children-progress-suffix-pat ""))
+                      (re-seq body-heading-pat (or body "")))]
     (filterv present reserved-section-names)))
 
 (def ^:private section-breaking-heading-pat
@@ -238,15 +250,23 @@
 
 (defn duplicate-sections
   "The `## ` headings `body` carries more than once, in first-appearance
-   order. Matches the heading text exactly, the same text `body-sections`
-   splits on, so a heading repeated at `### ` or deeper is not one: it
-   never started a section. `body-sections` concatenates the copies
-   rather than clobbering, which is what makes the duplication invisible
-   downstream."
+   order, each reported by its first spelling. Compares `derive-slug` of
+   the heading text — the key `body-sections` files each section under —
+   so `## Description` and `## description` are one duplicated section:
+   `body-sections` concatenates them rather than clobbering, which is
+   what makes the duplication invisible downstream. A heading repeated at
+   `### ` or deeper is not one: it never started a section."
   [body]
   (let [headings (mapv second (re-seq body-heading-pat (or body "")))
-        freqs    (frequencies headings)]
-    (filterv #(< 1 (freqs %)) (distinct headings))))
+        freqs    (frequencies (map derive-slug headings))]
+    (second
+     (reduce (fn [[seen out :as acc] heading]
+               (let [slug (derive-slug heading)]
+                 (if (or (seen slug) (= 1 (freqs slug)))
+                   acc
+                   [(conj seen slug) (conj out heading)])))
+             [#{} []]
+             headings))))
 
 (def ^:private notes-heading "## Notes")
 

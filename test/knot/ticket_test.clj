@@ -385,3 +385,42 @@
   (testing "nil and empty fragments carry no heading"
     (is (nil? (ticket/section-breaking-heading nil)))
     (is (nil? (ticket/section-breaking-heading "")))))
+
+(deftest reserved-sections-test
+  (testing "a bare reserved heading is found, in table order"
+    (is (= ["Blockers" "Children"]
+           (ticket/reserved-sections "## Children\n\n- a\n\n## Blockers\n\n- b\n"))))
+  (testing "show's (d/t) progress suffix on Children is stripped before matching"
+    (is (= ["Children"]
+           (ticket/reserved-sections "## Children (2/3)\n\n- a\n")))
+    (is (= ["Children"]
+           (ticket/reserved-sections "## Children (0/12)  \n\n- a\n"))))
+  (testing "a heading merely containing a reserved name is not reserved"
+    (is (= [] (ticket/reserved-sections "## Children of the revolution\n\ntext\n")))
+    (is (= [] (ticket/reserved-sections "## Known Blockers\n\ntext\n")))
+    (is (= [] (ticket/reserved-sections "## Children (draft)\n\ntext\n"))))
+  (testing "### and deeper never start a section, so they are not reserved"
+    (is (= [] (ticket/reserved-sections "## Design\n\n### Children\n\n- a\n"))))
+  (testing "nil and empty bodies carry nothing"
+    (is (= [] (ticket/reserved-sections nil)))
+    (is (= [] (ticket/reserved-sections "")))))
+
+(deftest duplicate-sections-test
+  (testing "a heading repeated verbatim is reported once, in first-appearance order"
+    (is (= ["Design" "Description"]
+           (ticket/duplicate-sections
+            "## Design\n\na\n\n## Description\n\nb\n\n## Design\n\nc\n\n## Description\n\nd\n"))))
+  (testing "headings that slugify alike are duplicates: body-sections concatenates them"
+    (is (= ["Description"]
+           (ticket/duplicate-sections "## Description\n\na\n\n## description\n\nb\n")))
+    (is (= ["User Stories"]
+           (ticket/duplicate-sections "## User Stories\n\na\n\n## User  stories\n\nb\n")))
+    (is (= ["User Stories"]
+           (ticket/duplicate-sections "## User Stories\n\na\n\n## User-Stories\n\nb\n"))))
+  (testing "headings that slugify differently are not duplicates"
+    (is (= [] (ticket/duplicate-sections "## Design\n\na\n\n## Design notes\n\nb\n"))))
+  (testing "a heading repeated at ### or deeper never started a section"
+    (is (= [] (ticket/duplicate-sections "## Design\n\n### Notes\n\na\n\n### Notes\n\nb\n"))))
+  (testing "nil and empty bodies carry nothing"
+    (is (= [] (ticket/duplicate-sections nil)))
+    (is (= [] (ticket/duplicate-sections "")))))

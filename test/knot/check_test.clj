@@ -600,6 +600,21 @@
       (is (= 1 (count issues)))
       (is (= ["a"] (:ids (first issues))))))
 
+  (testing "the (d/t) progress suffix show renders on Children does not hide it"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Children (1/2)\n\n- d\n")]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 1 (count issues)))
+      (is (re-find #"'## Children'" (:message (first issues)))
+          "the message names the bare reserved heading")
+      (is (re-find #"other tickets' parent" (:message (first issues))))))
+
+  (testing "a heading that merely contains a reserved name is not reserved"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Children of the plan\n\n- d\n\n## Known Blockers\n\n- e\n")]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 0 (count issues)))))
+
   (testing "a body with no reserved heading emits nothing"
     (let [tickets [(assoc (ticket "a" "open" [] :title "T")
                           :body "## Description\n\n### Blockers\n\nnot an H2.\n")]
@@ -653,6 +668,15 @@
       (is (= 2 (count issues)))
       (is (= #{"Description" "Design"}
              (set (map #(second (re-find #"'## (.+?)'" (:message %))) issues))))))
+
+  (testing "headings that slugify alike are one duplicated section, named by the first spelling"
+    (let [body    (str "## Description\n\nFirst copy.\n\n"
+                       "## description\n\nSecond copy.\n")
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :duplicate_section)]
+      (is (= 1 (count issues))
+          "body-sections keys both under \"description\" and concatenates them")
+      (is (re-find #"'## Description'" (:message (first issues))))))
 
   (testing "a heading repeated at ### or deeper is not a duplicate section"
     (let [body    "## Description\n\n### Notes\n\none\n\n### Notes\n\ntwo\n"

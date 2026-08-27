@@ -3634,6 +3634,18 @@
           (is (str/includes? shown "Old.")
               "refused before any write — the old body stands")))))
 
+  (testing "the Children heading as show renders it, progress suffix and all, is refused too"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--description" "Old.")
+            id (id-of out "t")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--body" "## Children (1/2)\n\n- kno-1\n")]
+        (is (= 1 exit) (str "expected exit 1; err=" err))
+        (is (str/includes? err "## Children"))
+        (is (str/includes? err "--parent"))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "Old."))))))
+
   (testing "--json refuses with the invalid_argument envelope and no data slot"
     (with-tmp tmp
       (let [{:keys [out]} (run-knot tmp "create" "T")
