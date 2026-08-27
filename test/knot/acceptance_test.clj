@@ -199,3 +199,17 @@
   (testing "empty/nil acceptance resolves nothing"
     (is (nil? (acceptance/resolve-index nil "1")))
     (is (nil? (acceptance/resolve-index [] "anything")))))
+
+(deftest resolve-indices-test
+  (let [ac [{:title "dup" :done false}
+            {:title "b" :done false}
+            {:title "dup" :done true}]]
+    (testing "a title names every entry carrying it, in list order"
+      (is (= [0 2] (acceptance/resolve-indices ac "dup")))
+      (is (= [1] (acceptance/resolve-indices ac "b"))))
+    (testing "an ordinal names at most one entry"
+      (is (= [2] (acceptance/resolve-indices ac "3")))
+      (is (= [] (acceptance/resolve-indices ac "4"))))
+    (testing "nothing matched is empty, not nil"
+      (is (= [] (acceptance/resolve-indices ac "ghost")))
+      (is (= [] (acceptance/resolve-indices nil "1"))))))

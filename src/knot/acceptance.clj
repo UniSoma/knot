@@ -64,19 +64,18 @@
                      (mapv (fn [t] {:title t :done false})))]
     (when (seq entries) entries)))
 
-(defn ordinal?
+(defn- ordinal?
   "True when `arg` addresses a criterion by position rather than by
-   title. All digits is an ordinal; anything else is a title. The single
-   home of that rule — every caller that discriminates the two readings
-   asks here."
+   title. All digits is an ordinal; anything else is a title."
   [arg]
   (boolean (re-matches #"\d+" (str arg))))
 
-(defn resolve-index
-  "Resolve `arg` against `acceptance` to a 0-based index. An all-digits
-   `arg` is a 1-based ordinal into the list; anything else is an exact,
-   case-sensitive title match (first match wins). Returns nil when
-   nothing matches — an out-of-range ordinal, or an unknown title.
+(defn resolve-indices
+  "Every 0-based index in `acceptance` that `arg` addresses, in list
+   order. An all-digits `arg` is a 1-based ordinal and names at most one
+   entry; anything else is an exact, case-sensitive title and names
+   every entry carrying it. Empty when nothing matches — an out-of-range
+   ordinal, or an unknown title.
 
    The ordinal reading wins outright: an entry whose title is all
    digits is not reachable by that title, only by its own ordinal.
@@ -85,9 +84,14 @@
   (let [vec* (vec (or acceptance []))]
     (if (ordinal? arg)
       (let [i (dec (parse-long arg))]
-        (when (and (nat-int? i) (< i (count vec*))) i))
-      (->> (map-indexed vector vec*)
-           (some (fn [[i e]] (when (= arg (:title e)) i)))))))
+        (if (and (nat-int? i) (< i (count vec*))) [i] []))
+      (vec (keep-indexed (fn [i e] (when (= arg (:title e)) i)) vec*)))))
+
+(defn resolve-index
+  "The first index `arg` addresses in `acceptance` (see
+   `resolve-indices`), or nil when it addresses none."
+  [acceptance arg]
+  (first (resolve-indices acceptance arg)))
 
 (def ^:private section-heading "## Acceptance Criteria")
 

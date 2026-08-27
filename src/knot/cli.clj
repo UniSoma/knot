@@ -1100,19 +1100,6 @@
   (throw (ex-info (str "no acceptance criterion matching " (pr-str arg))
                   {:ac-not-found arg})))
 
-(defn- removal-indices
-  "Indices in `acceptance` addressed by one `--remove-ac` value. An
-   all-digits value is a 1-based ordinal and names at most one entry;
-   any other value is an exact title and names *every* entry carrying
-   it, so a list with duplicate titles still clears in one call. Throws
-   when the value addresses nothing."
-  [acceptance arg]
-  (let [hits (if (acceptance/ordinal? arg)
-               (when-let [i (acceptance/resolve-index acceptance arg)] #{i})
-               (set (keep-indexed (fn [i e] (when (= arg (:title e)) i))
-                                  acceptance)))]
-    (if (seq hits) hits (ac-not-found! arg))))
-
 (defn- apply-ac-removes
   "Apply `--remove-ac` from `opts` to `fm`'s `:acceptance`. Each value is
    an exact title (dropping every entry that carries it) or a 1-based
@@ -1124,7 +1111,10 @@
   (if-not (contains? opts :remove-ac)
     fm
     (let [existing (vec (or (:acceptance fm) []))
-          drop-idx (into #{} (mapcat #(removal-indices existing %))
+          drop-idx (into #{}
+                         (mapcat (fn [arg]
+                                   (let [hits (acceptance/resolve-indices existing arg)]
+                                     (if (seq hits) hits (ac-not-found! arg)))))
                          (:remove-ac opts))
           kept     (vec (keep-indexed (fn [i e] (when-not (drop-idx i) e))
                                       existing))]
