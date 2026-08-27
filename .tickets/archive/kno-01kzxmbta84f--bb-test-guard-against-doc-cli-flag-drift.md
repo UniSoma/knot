@@ -6,7 +6,7 @@ type: chore
 priority: 3
 mode: afk
 created: '2026-08-13T13:18:10.746284458Z'
-updated: '2026-08-27T17:00:22.418449370Z'
+updated: '2026-08-27T17:55:45.069622267Z'
 closed: '2026-08-27T17:00:22.418449370Z'
 tags:
 - tooling
@@ -25,8 +25,6 @@ deps:
 - kno-01kzxmbd81de
 - kno-01kzyefq5cxv
 ---
-
-## Description
 
 ## Description
 

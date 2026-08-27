@@ -6,7 +6,7 @@ type: chore
 priority: 2
 mode: afk
 created: '2026-08-13T13:17:57.377547683Z'
-updated: '2026-08-13T14:54:39.680022063Z'
+updated: '2026-08-27T17:55:44.943192496Z'
 closed: '2026-08-13T14:54:39.680022063Z'
 tags:
 - docs
@@ -23,8 +23,6 @@ acceptance:
 - title: Every knot invocation shown in docs/agents/*.md executes as written
   done: true
 ---
-
-## Description
 
 ## Description
 

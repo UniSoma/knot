@@ -6,7 +6,7 @@ type: bug
 priority: 2
 mode: hitl
 created: '2026-08-13T13:17:43.513700659Z'
-updated: '2026-08-13T13:57:26.847599715Z'
+updated: '2026-08-27T17:55:44.820315546Z'
 closed: '2026-08-13T13:57:26.847599715Z'
 tags:
 - cli
@@ -21,8 +21,6 @@ acceptance:
 links:
 - kno-01kzxp508wej
 ---
-
-## Description
 
 ## Description
 

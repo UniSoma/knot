@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: afk
 created: '2026-04-30T04:22:08.036135912Z'
-updated: '2026-05-14T02:28:38.788737542Z'
+updated: '2026-08-27T17:55:44.697991603Z'
 closed: '2026-05-14T02:28:38.788737542Z'
 links:
 - kno-01kqgqa1jj1s
@@ -58,22 +58,6 @@ Extend the AGE column from `knot prime`'s `## In Progress` section to the four l
 
 - Splice an `Age` column into the list buffer's `tabulated-list-format` between `Assignee` and `AC` (Title case `Age` to match neighbours).
 - Age is computed client-side from the JSON `:updated` field (the CLI ships no derived value — see "JSON" above). A pure elisp port of the bucketing rule renders the cell so output matches the CLI exactly.
-- Make `Age` sortable, but alias the header to the `updated` sort key in `knot-list--column->sort-key`. Default tabulated-list string-sort on rendered cells would order `1m < 1w < 2w` — wrong; sorting by the underlying ISO timestamp produces correct order.
-- Update `emacs/README.md` if it documents the column layout.
-
-## Settled design
-
-- **Source:** `:updated` (matches prime). One mental model, one bucketing rule, one column meaning across the family. Touching a ticket resets the clock.
-- **Scope:** `list / ready / blocked / closed` only. `prime`'s `## Ready` and `## Recently Closed` sections are out of scope — those want different semantics (creation- vs close-anchored) and belong in a separate ticket.
-- **Slot:** AGE sits immediately before AC (when AC is shown) and before TITLE on every listing — same as prime's In Progress row shape.
-- **JSON:** unchanged. No new fields, no schema_version bump. `:updated` is already in the payload; consumers compute age client-side. The `\"stale\": true` flag stays scoped to `prime`'s in-progress entries.
-- **Stale text styling:** none in this slice. AGE renders bare (`Nd / Nw / Nm`); coloring the cell at ≥14d is deferred to \`kno-01kqdaxz86nv\`.
-- **Helper rename:** the per-ticket day-count currently injected as `:prime-age-days` (cli pipeline) becomes a neutral `:age-days`, fed by a single shared helper used by all five listing pipelines (`prime` included).
-
-## Emacs (emacs/knot.el)
-
-- Splice an `Age` column into the list buffer's `tabulated-list-format` between `Assignee` and `AC` (Title case `Age` to match neighbours).
-- Age is computed client-side from the JSON `:updated` field (the CLI ships no derived value — see \"JSON\" above). A pure elisp port of the bucketing rule renders the cell so output matches the CLI exactly.
 - Make `Age` sortable, but alias the header to the `updated` sort key in `knot-list--column->sort-key`. Default tabulated-list string-sort on rendered cells would order `1m < 1w < 2w` — wrong; sorting by the underlying ISO timestamp produces correct order.
 - Update `emacs/README.md` if it documents the column layout.
 
