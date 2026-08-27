@@ -6,7 +6,7 @@ type: bug
 priority: 3
 mode: afk
 created: '2026-08-21T16:49:36.434934994Z'
-updated: '2026-08-26T20:21:50.087583509Z'
+updated: '2026-08-27T00:27:49.178392077Z'
 tags:
 - listing
 - columns
@@ -14,11 +14,13 @@ tags:
 acceptance:
 - title: A closed row under list --status closed renders - for LEV and CPL, matching LVL
   done: false
-- title: A listing mixing live and closed rows keeps computed numbers on the live rows
+- title: A listing under --status open --status closed renders - on closed rows and computed numbers on live rows
   done: false
-- title: leverage and coupling emit null for closed rows in --json, and the contract pins cover it
+- title: leverage and coupling are null on closed rows in --json, with a json-contract pin for the list --status closed route; existing live-row and closed-command pins unchanged
   done: false
-- title: help notes for list/ready/blocked and references/json-protocol.md state that the three graph metrics are live-only
+- title: The LEV/CPL help notes and .claude/skills/knot/references/json-protocol.md state the two metrics are null/- on a closed row, matching level
+  done: false
+- title: ADR 0018's consequence naming the LEV/CPL divergence carries a note that this ticket resolved it
   done: false
 links:
 - kno-01m0jbrvd2be
@@ -26,23 +28,14 @@ deps:
 - kno-01m0zvrrs7ct
 ---
 
-## Description
+## What to build
 
-ADR 0011 declared leverage absent from `closed`, but that covered the `closed` *command*. The other route to a closed row — `knot list --status closed` — still renders LEV and CPL, and they print numbers.
+`knot list --status closed` renders LEV and CPL with computed numbers on closed rows while LVL renders `-`. Leverage and coupling are defined over the live-induced subgraph (ADRs 0011, 0012); a closed ticket is not a node of it, so a number there is a category error — reporting LEV 2 on a finished ticket invites reading it as a keystone. ADR 0018 records the divergence and leaves it open.
 
-Reproduced on a three-ticket chain A <- B <- C with A closed:
+Bring LEV and CPL into line with LVL: on any row whose ticket is closed, the two cells render `-` and the `--json` fields `leverage` and `coupling` are `null`. Blank per row, not per table — `--status` is repeatable, so a listing can mix live and closed rows, and the live rows keep their computed numbers. The `closed` command is untouched: it still omits the fields entirely (ADR 0011).
 
-    ID                STATUS  ...  LEV  CPL  LVL  TITLE
-    tst-01m0jkhjphfp  closed  ...    2    1    -  A leaf
+This is a `--json` shape change: `leverage` and `coupling` become nullable, exactly as `level` already is. The JSON protocol reference and the json-contract pins move in the same commit — existing pins (integers on live rows, fields absent on `closed`-command rows) still hold; the `list --status closed` route gains its own pin. The help notes for the two columns currently promise "always an integer" and must say the metrics are live-only; the column notes are shared across list/ready/blocked, so one edit covers all three. ADR 0018's consequence that names this wart gets a one-line note that it is resolved.
 
-Leverage answers "if I close this, how much downstream work stops waiting?" — a question already settled for a closed ticket, and B is `ready` the moment A closes. Reporting 2 invites a reader to treat a finished ticket as a keystone. Both metrics are defined over the live-induced subgraph (ADRs 0011 and 0012) and a closed ticket is not a node of it, so a number there is not a smaller truth, it is a category error.
+## Blocked by
 
-`level` already takes the honest position: it is keyed only by live tickets, so a closed row reads `-` / `null` (ADR 0018, which records this divergence and explicitly does not fix it). This ticket is about bringing LEV and CPL into line with LVL, not the reverse.
-
-## Design
-
-Decide first whether the fix is to blank the cells (matching LVL) or to drop the columns entirely when a listing carries no live rows. Blanking is likely right: `list --status closed` can be mixed with other filters, so a listing may hold live and closed rows at once, and per-row blanking handles that where per-table column dropping does not.
-
-Touch points: the `annotate-*` enrichment in `cli.clj` for `ls-cmd`, and the `jsonify-ticket` key-presence gates in `output.clj`. `query/levels` is the model — it keys the map by live tickets only and lets `annotate-level` read it with `get`.
-
-JSON is a shape change: `leverage` and `coupling` become nullable on closed rows, so `references/json-protocol.md` and the json-contract pins move with it.
+None - can start immediately. kno-01m0zvrrs7ct (listing deepening) has landed.
