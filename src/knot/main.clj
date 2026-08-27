@@ -609,21 +609,22 @@
     (let [id    (first args)
           base  (if (= arg-count 2)
                   {:id id :status (second args)}
-                  {:id id})
-          opts* (cond-> (assoc base :json? json?)
-                  (contains? merged :summary) (assoc :summary (:summary merged))
-                  (contains? merged :assignee) (assoc :assignee (:assignee merged))
-                  ;; `--external-ref ""` yields [""] from babashka.cli's
-                  ;; `:coerce []`; drop blanks so a stray empty value is a
-                  ;; no-op append rather than a literal blank ref (mirrors
-                  ;; update-handler's normalization of the replace-all flag).
-                  (contains? merged :external-ref)
-                  (assoc :external-ref
-                         (vec (remove str/blank? (:external-ref merged))))
-                  (:if-unassigned opts)       (assoc :if-unassigned? true)
-                  (:force opts)               (assoc :force? true))]
+                  {:id id})]
       (try
-        (let [out (transition-fn (discover-ctx) opts*)]
+        ;; opts* is built inside the `try` so the blank-reject throw from
+        ;; `normalize-delta-values` reaches the catch below and surfaces
+        ;; as the `invalid_argument` envelope under `--json`, the same
+        ;; way `update --add-external-ref ""` reports it.
+        (let [opts* (cond-> (assoc base :json? json?)
+                      (contains? merged :summary) (assoc :summary (:summary merged))
+                      (contains? merged :assignee) (assoc :assignee (:assignee merged))
+                      (contains? merged :external-ref)
+                      (assoc :external-ref
+                             (normalize-delta-values
+                              :external-ref (:external-ref merged)))
+                      (:if-unassigned opts)       (assoc :if-unassigned? true)
+                      (:force opts)               (assoc :force? true))
+              out   (transition-fn (discover-ctx) opts*)]
           (cond
             out   (println-out (str out))
             json? (emit-not-found-envelope! id)

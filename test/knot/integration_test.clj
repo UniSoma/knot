@@ -2663,6 +2663,7 @@
         (is (zero? exit) (str "external-ref deltas err=" err))
         (is (= ["git:abc"] (vec (get-in parsed [:data :external_refs])))))))
 
+
   (testing "--external-ref with --add-external-ref exits 1 invalid_argument"
     (with-tmp tmp
       (let [{:keys [out]} (run-knot tmp "create" "T")
@@ -2676,6 +2677,69 @@
         (is (= false (:ok parsed)))
         (is (= "invalid_argument" (get-in parsed [:error :code])))
         (is (re-find #"mutually exclusive" (get-in parsed [:error :message])))))))
+
+(deftest close-external-ref-blank-test
+  (testing "close --external-ref \"\" exits 1 invalid_argument under --json and does not close"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "close" id "--summary" "S"
+                      "--external-ref" "" "--json")
+            parsed (json/parse-string (str/trim out) true)
+            shown  (json/parse-string
+                    (str/trim (:out (run-knot tmp "show" id "--json"))) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (= "--external-ref value must not be blank"
+               (get-in parsed [:error :message])))
+        (is (= "open" (get-in shown [:data :status])) "no write happened")
+        (is (not (str/includes? (get-in shown [:data :body]) "S"))
+            "the summary did not land either"))))
+
+  (testing "close --external-ref \"\" without --json exits 1 with the message on stderr"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]}
+            (run-knot tmp "close" id "--summary" "S" "--external-ref" "")]
+        (is (= 1 exit))
+        (is (str/includes? err "--external-ref value must not be blank")))))
+
+  (testing "close --external-ref \"   \" (whitespace-only) is rejected as blank"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out]}
+            (run-knot tmp "close" id "--summary" "S"
+                      "--external-ref" "   " "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (= "invalid_argument" (get-in parsed [:error :code]))))))
+
+  (testing "close --external-ref \"  git:abc \" trims and records git:abc"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]}
+            (run-knot tmp "close" id "--summary" "S"
+                      "--external-ref" "  git:abc " "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit) (str "err=" err))
+        (is (= ["git:abc"] (vec (get-in parsed [:data :external_refs])))))))
+
+  (testing "update --add-external-ref \"\" still exits 1 invalid_argument (the two paths agree)"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out]}
+            (run-knot tmp "update" id "--add-external-ref" "" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (= "--add-external-ref value must not be blank"
+               (get-in parsed [:error :message])))))))
 
 (deftest create-body-flag-not-consumed-end-to-end-test
   ;; Regression guard for kno-01kqgqcqmy19 review: --body is `update`'s

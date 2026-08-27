@@ -255,8 +255,8 @@
          :code     :duplicate_section
          :ids      [id]
          :message  (str "duplicate '## " heading "' body section found; "
-                        "keep one copy with `knot update --body` or "
-                        "`knot edit` — git is the undo path")}))))
+                        "keep one copy with `knot update --body` — "
+                        "git is the undo path")}))))
 
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries

@@ -438,6 +438,15 @@
       (is (= [] (get flags :remove-tag))
           ":update must declare --remove-tag with :coerce [] for repeatability"))))
 
+(deftest close-external-ref-blank-help-test
+  ;; `close --external-ref ""` is rejected (kno-01m0jkm29371); the help
+  ;; used to say a blank value is ignored.
+  (testing "close help says a blank --external-ref is rejected, not ignored"
+    (let [out (help/command-help-text "close" (get help/registry :close)
+                                      {:color? false})]
+      (is (str/includes? out "A blank value is rejected."))
+      (is (not (str/includes? out "a blank value is ignored"))))))
+
 (deftest update-ac-delta-flags-registered-test
   (testing ":update declares --add-ac and --remove-ac with :coerce []"
     (let [flags (->> (get-in help/registry [:update :flags])

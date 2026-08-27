@@ -322,13 +322,13 @@
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary recorded on the ticket."}
                   {:name :external-ref :coerce []
-                   :desc "Record an external reference alongside the ones already on the ticket (repeatable; idempotent). Never replaces."}
+                   :desc "Record an external reference alongside the ones already on the ticket (repeatable; idempotent). Never replaces. A blank value is rejected."}
                   {:name :force :coerce :boolean :default false
                    :desc "Bypass the acceptance and open-children gates; requires --summary."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :notes       ["--external-ref appends here, unlike `knot update --external-ref`, which replaces the whole list. The status change, the --summary note and the ref land in one write."
                   "git:<sha> is the convention for the commit that closed the ticket. knot stores the string verbatim: it does not parse it, verify the sha, or read git HEAD for you."
-                  "Re-recording a ref the ticket already carries is a no-op; a blank value is ignored. Use `knot update --remove-external-ref` to take one back."]
+                  "Re-recording a ref the ticket already carries is a no-op. Use `knot update --remove-external-ref` to take one back."]
     :examples    [{:cmd "knot close kno-01abc --summary \"Shipped in v1.2\""
                    :note "Close with a summary."}
                   {:cmd "knot close kno-01abc --summary \"Shipped in v1.2\" --external-ref git:9f2c1ab"

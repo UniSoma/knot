@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **`knot close --external-ref ""` is rejected instead of silently dropped.** A blank or whitespace-only value now exits 1 with `--external-ref value must not be blank` (an `invalid_argument` envelope under `--json`) and nothing is written — the ticket stays open and the `--summary` does not land. This is the answer `knot update --add-external-ref ""` already gave; the two flags record the same field and used to disagree only because of where each handler happened to build its options. Surrounding whitespace on a real value is trimmed. The replace-all `knot update --external-ref ""` keeps its own meaning: a single blank clears the list.
+
 ### Added
 
 - **Listings carry `LVL`: how many rounds of closes away a ticket is.** `list`, `ready` and `blocked` gain an always-on `LVL` column and a `level` field in `--json` — the length of the longest chain of still-open blockers beneath the ticket, so `0` is exactly the set `knot ready` returns and `2` means two rounds of closing must happen first. The count is whole-graph, not scoped to the view: a blocker under another umbrella still gates, and a closed ticket in the middle of a chain severs it, the same live-induced rule `LEV` and `CPL` already follow. A missing referent counts as a live leaf blocker, which keeps `ready` and level 0 the same set. A ticket on a live deps cycle has no schedule at all and reads `-` / `null`. This is the whole of wave planning: `knot blocked --parent <id> --json | jq 'group_by(.level)'` gives an orchestrator its run order, so there is no `waves` command, no flag and no sort to learn. `closed` is unchanged — a closed ticket is not a node of the live graph.
