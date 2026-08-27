@@ -6,6 +6,7 @@ allowed-tools:
   - Bash
   - Glob
   - Grep
+  - Skill
 ---
 
 # Release Workflow
@@ -87,10 +88,15 @@ knot list --tag vX.Y.Z --status closed
 git log --oneline $(git describe --tags --abbrev=0)..HEAD
 ```
 
+Before writing any bullet, call the Skill tool with "writing-for-humans".
+Every bullet is exposition register; the same standard governs the release
+notes in Step 6, so one call covers both.
+
 For each closed ticket and each commit, verify a corresponding bullet exists
 under `[Unreleased]`. Backfill any missing entries **while the section is
 still `[Unreleased]`** — once it's renamed in Step 5, the section is dated
-and effectively sealed.
+and effectively sealed. Audit the existing bullets too: they were written
+mid-cycle, before the section was reread as a whole.
 
 The `git log` cross-check is the safety net: it catches slices that landed
 without the `vX.Y.Z` ticket tag.
@@ -122,12 +128,13 @@ Categorize entries:
 
 Write to `release-notes-vX.Y.Z.txt` at repo root (gitignored). This single
 file feeds both the annotated tag message (Step 8) and the GitHub Release
-body (Step 11).
+body (Step 11). Exposition register, under the writing-for-humans skill
+loaded in Step 4; the file is done when its mechanical scan passes.
 
-Canonical structure (modeled on v0.3.0's shipped tag message):
+Canonical structure:
 
 ~~~
-Release vX.Y.Z — <one-line theme>
+Release vX.Y.Z: <one-line theme>
 
 <1-3 sentence lead: breaking? headline change?>
 
@@ -149,7 +156,7 @@ Release vX.Y.Z — <one-line theme>
 
 ## Known follow-ups        # optional — omit when empty
 
-- <ticket id> — <one-liner>
+- <ticket id>: <one-liner>
 ~~~
 
 ### Step 7: Commit release preparation
