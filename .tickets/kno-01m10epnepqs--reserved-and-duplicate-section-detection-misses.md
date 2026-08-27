@@ -6,7 +6,7 @@ type: bug
 priority: 3
 mode: afk
 created: '2026-08-27T01:52:39.894425592Z'
-updated: '2026-08-27T01:52:39.894425592Z'
+updated: '2026-08-27T02:19:36.616876333Z'
 tags:
 - write-guard
 acceptance:
@@ -18,6 +18,8 @@ acceptance:
   done: false
 - title: Tests pin both forms, and pin that a heading merely containing a reserved name as a substring is still not caught
   done: false
+deps:
+- kno-01m10g6yep8s
 ---
 
 ## Description
