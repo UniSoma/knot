@@ -578,7 +578,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "First ticket"})
       (cli/create-cmd (ctx tmp) {:title "Second ticket"})
-      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+      (let [out (cli/view-cmd :list (ctx tmp) {:tty? false :color? false})]
         (is (string? out))
         (is (str/includes? out "ID"))
         (is (str/includes? out "STATUS"))
@@ -590,7 +590,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "First"})
       (cli/create-cmd (ctx tmp) {:title "Second"})
-      (let [out (cli/ls-cmd (ctx tmp) {:json? true})]
+      (let [out (cli/view-cmd :list (ctx tmp) {:json? true})]
         (is (string? out))
         (is (str/starts-with? out "{"))
         (is (str/includes? out "\"schema_version\":1"))
@@ -613,7 +613,7 @@
                               :mode "hitl"}
                 :body        ""}
                {:now "2026-04-28T10:00:00Z" :terminal-statuses #{"closed"}}))
-      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+      (let [out (cli/view-cmd :list (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "Live one"))
         (is (str/includes? out "Live two"))
         (is (not (str/includes? out "Closed ticket"))
@@ -622,7 +622,7 @@
   (testing "ls returns an empty-table (header only) when there are no live tickets"
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
-      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+      (let [out (cli/view-cmd :list (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "ID"))
         (is (str/includes? out "TITLE"))))))
 
@@ -631,7 +631,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Afk task"  :mode "afk"})
       (cli/create-cmd (ctx tmp) {:title "Hitl task" :mode "hitl"})
-      (let [out (cli/ls-cmd (ctx tmp)
+      (let [out (cli/view-cmd :list (ctx tmp)
                             {:tty? false :color? false :mode #{"afk"}})]
         (is (str/includes? out "Afk task"))
         (is (not (str/includes? out "Hitl task"))))))
@@ -640,7 +640,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "A bug"     :type "bug"})
       (cli/create-cmd (ctx tmp) {:title "A feature" :type "feature"})
-      (let [out (cli/ls-cmd (ctx tmp)
+      (let [out (cli/view-cmd :list (ctx tmp)
                             {:tty? false :color? false :type #{"bug"}})]
         (is (str/includes? out "A bug"))
         (is (not (str/includes? out "A feature"))))))
@@ -649,7 +649,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "For alice" :assignee "alice"})
       (cli/create-cmd (ctx tmp) {:title "For bob"   :assignee "bob"})
-      (let [out (cli/ls-cmd (ctx tmp)
+      (let [out (cli/view-cmd :list (ctx tmp)
                             {:tty? false :color? false :assignee #{"alice"}})]
         (is (str/includes? out "For alice"))
         (is (not (str/includes? out "For bob"))))))
@@ -658,7 +658,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Urgent one" :tags ["urgent"]})
       (cli/create-cmd (ctx tmp) {:title "Other one"  :tags ["calm"]})
-      (let [out (cli/ls-cmd (ctx tmp)
+      (let [out (cli/view-cmd :list (ctx tmp)
                             {:tty? false :color? false :tag #{"urgent"}})]
         (is (str/includes? out "Urgent one"))
         (is (not (str/includes? out "Other one"))))))
@@ -669,7 +669,7 @@
             b (cli/create-cmd (ctx tmp) {:title "Hitl open" :mode "hitl"})
             _ b
             _ a
-            out (cli/ls-cmd (ctx tmp)
+            out (cli/view-cmd :list (ctx tmp)
                             {:tty? false :color? false
                              :status #{"open"} :mode #{"afk"}})]
         (is (str/includes? out "Afk open"))
@@ -683,7 +683,7 @@
                         (re-matches #"(.+)--will-close\.md")
                         second)
             _      (cli/close-cmd (ctx tmp) {:id a-id})
-            out    (cli/ls-cmd (ctx tmp)
+            out    (cli/view-cmd :list (ctx tmp)
                                {:tty? false :color? false :status #{"closed"}})]
         (is (str/includes? out "Will close"))
         (is (not (str/includes? out "Live one")))))))
@@ -705,7 +705,7 @@
                         second)
             _      (cli/start-cmd custom-ctx {:id a-id})
             _      (cli/status-cmd custom-ctx {:id b-id :status "review"})
-            out    (cli/ls-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out    (cli/view-cmd :list custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[33mactive" out)
             "active-status lane (\"active\") wraps in :yellow SGR (33)")
         (is (not (re-find #"\[33min_progress" out))
@@ -729,7 +729,7 @@
                         (re-matches #"(.+)--ready-active-ticket\.md")
                         second)
             _      (cli/start-cmd custom-ctx {:id a-id})
-            out    (cli/ready-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out    (cli/view-cmd :ready custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[33mactive" out)
             "ready-cmd colors the :active-status row yellow")
         (is (not (re-find #"\[33min_progress" out))
@@ -749,7 +749,7 @@
                         (re-matches #"(.+)--done-ticket\.md")
                         second)
             _      (cli/close-cmd custom-ctx {:id a-id})
-            out    (cli/closed-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out    (cli/view-cmd :closed custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[2mdone" out)
             "closed-cmd colors a custom terminal status (\"done\") dim"))))
 
@@ -769,7 +769,7 @@
                         second)
             _      (cli/dep-cmd custom-ctx {:from b-id :to a-id})
             _      (cli/start-cmd custom-ctx {:id b-id})
-            out    (cli/blocked-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out    (cli/view-cmd :blocked custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[33mactive" out)
             "blocked-cmd colors the :active-status row yellow")
         (is (not (re-find #"\[33min_progress" out))
@@ -787,7 +787,7 @@
                               :default-mode "human"
                               :afk-mode     "agent")
             _ (cli/create-cmd custom-ctx {:title "Agent ticket" :mode "agent"})
-            out (cli/ls-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out (cli/view-cmd :list custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[34magent" out)
             "ls-cmd colors a custom :afk-mode (\"agent\") row blue")
         (is (not (re-find #"\[2magent" out))
@@ -800,7 +800,7 @@
                               :default-mode "human"
                               :afk-mode     "agent")
             _ (cli/create-cmd custom-ctx {:title "Agent ticket" :mode "agent"})
-            out (cli/ready-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out (cli/view-cmd :ready custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[34magent" out)
             "ready-cmd colors a custom :afk-mode (\"agent\") row blue"))))
 
@@ -815,7 +815,7 @@
                       (re-matches #"(.+)--agent-ticket\.md")
                       second)
             _    (cli/close-cmd custom-ctx {:id id})
-            out  (cli/closed-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out  (cli/view-cmd :closed custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[34magent" out)
             "closed-cmd colors a custom :afk-mode (\"agent\") row blue"))))
 
@@ -834,7 +834,7 @@
                       (re-matches #"(.+)--agent-blocked\.md")
                       second)
             _ (cli/dep-cmd custom-ctx {:from b-id :to a-id})
-            out (cli/blocked-cmd custom-ctx {:tty? false :color? true :width 200})]
+            out (cli/view-cmd :blocked custom-ctx {:tty? false :color? true :width 200})]
         (is (re-find #"\[34magent" out)
             "blocked-cmd colors a custom :afk-mode (\"agent\") row blue")))))
 
@@ -2189,7 +2189,7 @@
             ;; depend Alpha on Beta, then close Beta — Alpha becomes ready
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
             _    (cli/close-cmd (ctx tmp) {:id b-id})
-            out  (cli/ready-cmd (ctx tmp) {:tty? false :color? false})]
+            out  (cli/view-cmd :ready (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "Alpha task")
             "ready ticket Alpha task appears in the table")
         (is (not (str/includes? out "Beta task"))
@@ -2203,14 +2203,14 @@
             b-id (id-of-created b "beta-task")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
             ;; Beta is open ⇒ Alpha is blocked
-            out  (cli/ready-cmd (ctx tmp) {:tty? false :color? false})]
+            out  (cli/view-cmd :ready (ctx tmp) {:tty? false :color? false})]
         (is (not (str/includes? out "Alpha task")) "blocked Alpha excluded")
         (is (str/includes? out "Beta task") "Beta has no deps, is ready"))))
 
   (testing "ready-cmd with :json? returns a v0.3 success-envelope JSON string"
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
-      (let [out (cli/ready-cmd (ctx tmp) {:json? true})]
+      (let [out (cli/view-cmd :ready (ctx tmp) {:json? true})]
         (is (str/starts-with? out "{"))
         (is (str/includes? out "\"schema_version\":1"))
         (is (str/includes? out "\"ok\":true"))
@@ -2221,7 +2221,7 @@
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Afk job"  :mode "afk"})
       (cli/create-cmd (ctx tmp) {:title "Hitl job" :mode "hitl"})
-      (let [out (cli/ready-cmd (ctx tmp)
+      (let [out (cli/view-cmd :ready (ctx tmp)
                                {:tty? false :color? false :mode #{"afk"}})]
         (is (str/includes? out "Afk job"))
         (is (not (str/includes? out "Hitl job"))))))
@@ -2237,7 +2237,7 @@
       (cli/create-cmd (ctx tmp) {:title "Afk one"    :mode "afk"})
       (cli/create-cmd (ctx tmp) {:title "Afk two"    :mode "afk"})
       (cli/create-cmd (ctx tmp) {:title "Afk three"  :mode "afk"})
-      (let [out (cli/ready-cmd (ctx tmp)
+      (let [out (cli/view-cmd :ready (ctx tmp)
                                {:tty? false :color? false
                                 :mode #{"afk"} :limit 2})
             afk-hits (count (re-seq #"Afk " out))
@@ -2252,7 +2252,7 @@
       (cli/create-cmd (ctx tmp) {:title "Job alpha"})
       (cli/create-cmd (ctx tmp) {:title "Job beta"})
       (cli/create-cmd (ctx tmp) {:title "Job gamma"})
-      (let [out (cli/ready-cmd (ctx tmp)
+      (let [out (cli/view-cmd :ready (ctx tmp)
                                {:tty? false :color? false :limit 2})
             hits (count (re-seq #"Job " out))]
         (is (= 2 hits))))))
@@ -2325,7 +2325,7 @@ Restart the daemon.
             _    (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z") {:id a-id})
             _    (cli/close-cmd (assoc c :now "2026-04-28T12:00:00Z") {:id b-id})
             _    (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id d-id})
-            out  (cli/closed-cmd c {:tty? false :color? false})
+            out  (cli/view-cmd :closed c {:tty? false :color? false})
             ;; Beta is alphabetically before alpha and gamma — title order
             ;; can't accidentally produce the right ordering, so the order
             ;; of titles in the rendered table proves the :closed sort.
@@ -2348,7 +2348,7 @@ Restart the daemon.
             _    (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z") {:id a-id})
             _    (cli/close-cmd (assoc c :now "2026-04-28T12:00:00Z") {:id b-id})
             _    (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id d-id})
-            out  (cli/closed-cmd c {:tty? false :color? false :limit 2})]
+            out  (cli/view-cmd :closed c {:tty? false :color? false :limit 2})]
         (is (str/includes? out "Gamma") "newest closed kept")
         (is (str/includes? out "Beta")  "second-newest kept")
         (is (not (str/includes? out "Alpha"))
@@ -2363,7 +2363,7 @@ Restart the daemon.
             b-id (id-of-created b "beta")
             _    (cli/close-cmd c {:id a-id})
             _    (cli/close-cmd c {:id b-id})
-            out  (cli/closed-cmd c {:tty? false :color? false})]
+            out  (cli/view-cmd :closed c {:tty? false :color? false})]
         (is (str/includes? out "Alpha"))
         (is (str/includes? out "Beta")))))
 
@@ -2375,7 +2375,7 @@ Restart the daemon.
             _ a
             b-id (id-of-created b "will-close")
             _    (cli/close-cmd c {:id b-id})
-            out  (cli/closed-cmd c {:tty? false :color? false})]
+            out  (cli/view-cmd :closed c {:tty? false :color? false})]
         (is (str/includes? out "Will close"))
         (is (not (str/includes? out "Live one"))))))
 
@@ -2385,7 +2385,7 @@ Restart the daemon.
             a (cli/create-cmd c {:title "Alpha"})
             a-id (id-of-created a "alpha")
             _    (cli/close-cmd c {:id a-id})
-            out  (cli/closed-cmd c {:json? true})]
+            out  (cli/view-cmd :closed c {:json? true})]
         (is (str/starts-with? out "{"))
         (is (str/includes? out "\"schema_version\":1"))
         (is (str/includes? out "\"ok\":true"))
@@ -2396,7 +2396,7 @@ Restart the daemon.
     (with-tmp tmp
       (fs/create-dirs (fs/path tmp ".tickets"))
       (cli/create-cmd (ctx tmp) {:title "Live"})
-      (let [out (cli/closed-cmd (ctx tmp) {:tty? false :color? false})]
+      (let [out (cli/view-cmd :closed (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "ID"))
         (is (not (str/includes? out "Live"))))))
 
@@ -2429,7 +2429,7 @@ Restart the daemon.
                                 "created: 2025-01-01T00:00:00Z\n"
                                 "updated: 2025-01-01T00:00:00Z\n"
                                 "---\n"))
-            out      (cli/closed-cmd c {:tty? false :color? false})
+            out      (cli/view-cmd :closed c {:tty? false :color? false})
             stamped-i (str/index-of out "Stamped")
             legacy-i  (str/index-of out "Legacy")]
         (is (and stamped-i legacy-i)
@@ -2459,7 +2459,7 @@ Restart the daemon.
             zeta-id  (id-of-created stamped "zeta")
             _        (cli/close-cmd (assoc c :now "2026-04-28T11:00:00Z")
                                     {:id zeta-id})
-            out      (cli/closed-cmd c {:tty? false :color? false})
+            out      (cli/view-cmd :closed c {:tty? false :color? false})
             zeta-i   (str/index-of out "Zeta")
             unst-i   (str/index-of out "Unstamped")]
         (is (and zeta-i unst-i))
@@ -2474,12 +2474,12 @@ Restart the daemon.
       (let [c (ctx tmp)]
         (cli/create-cmd c {:title "Live"})
         (doseq [n [0 -1 -42]
-                cmd-fn [cli/closed-cmd cli/ready-cmd]]
+                source [:closed :ready]]
           (is (thrown-with-msg?
                clojure.lang.ExceptionInfo
                #"--limit must be a positive integer"
-               (cmd-fn c {:tty? false :color? false :limit n}))
-              (str cmd-fn " with limit " n " should throw"))))))
+               (cli/view-cmd source c {:tty? false :color? false :limit n}))
+              (str source " with limit " n " should throw"))))))
 
   (testing "closed-cmd / ready-cmd accept nil :limit (no-flag case)"
     ;; Sanity: the explicit-non-positive rejection above must not have
@@ -2487,8 +2487,8 @@ Restart the daemon.
     (with-tmp tmp
       (let [c (ctx tmp)
             _ (cli/create-cmd c {:title "Live"})]
-        (is (string? (cli/closed-cmd c {:tty? false :color? false})))
-        (is (string? (cli/ready-cmd  c {:tty? false :color? false})))))))
+        (is (string? (cli/view-cmd :closed c {:tty? false :color? false})))
+        (is (string? (cli/view-cmd :ready c {:tty? false :color? false})))))))
 
 (deftest blocked-cmd-test
   (testing "blocked-cmd lists tickets with non-terminal deps"
@@ -2498,7 +2498,7 @@ Restart the daemon.
             a-id (id-of-created a "alpha-task")
             b-id (id-of-created b "beta-task")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
-            out  (cli/blocked-cmd (ctx tmp) {:tty? false :color? false})]
+            out  (cli/view-cmd :blocked (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "Alpha task") "blocked Alpha appears")
         (is (not (str/includes? out "Beta task")) "Beta has no deps, not blocked"))))
 
@@ -2509,7 +2509,7 @@ Restart the daemon.
             a-id (id-of-created a "alpha")
             b-id (id-of-created b "beta")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
-            out  (cli/blocked-cmd (ctx tmp) {:json? true})]
+            out  (cli/view-cmd :blocked (ctx tmp) {:json? true})]
         (is (str/starts-with? out "{"))
         (is (str/includes? out "\"schema_version\":1"))
         (is (str/includes? out "\"ok\":true"))
@@ -5184,7 +5184,7 @@ Restart the daemon.
     (with-tmp tmp
       (cli/create-cmd (ctx tmp) {:title "Solo ready"})
       (let [advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
-            out      (cli/ready-cmd advanced {:tty? false :color? false})
+            out      (cli/view-cmd :ready advanced {:tty? false :color? false})
             row      (some (fn [l] (when (str/includes? l "Solo ready") l))
                            (str/split-lines out))]
         (is (some? row))
@@ -5199,7 +5199,7 @@ Restart the daemon.
             b-id (id-of-created b "blocker")
             _    (cli/dep-cmd (ctx tmp) {:from a-id :to b-id})
             advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
-            out  (cli/blocked-cmd advanced {:tty? false :color? false})
+            out  (cli/view-cmd :blocked advanced {:tty? false :color? false})
             row  (some (fn [l] (when (str/includes? l "Blocked task") l))
                        (str/split-lines out))]
         (is (some? row))
@@ -5212,7 +5212,7 @@ Restart the daemon.
             a-id (id-of-created a "closed-task")
             _    (cli/close-cmd (ctx tmp) {:id a-id})
             advanced (assoc (ctx tmp) :now "2026-05-05T10:00:00Z")
-            out      (cli/closed-cmd advanced {:tty? false :color? false})
+            out      (cli/view-cmd :closed advanced {:tty? false :color? false})
             row      (some (fn [l] (when (str/includes? l "Closed task") l))
                            (str/split-lines out))]
         (is (some? row))
@@ -5225,7 +5225,7 @@ Restart the daemon.
       (cli/create-cmd (ctx tmp) {:title "Touched today"})
       ;; ctx :now is 2026-04-28; advance ctx for ls to 2026-05-10 → 12 days
       (let [advanced (assoc (ctx tmp) :now "2026-05-10T10:00:00Z")
-            out      (cli/ls-cmd advanced {:tty? false :color? false})
+            out      (cli/view-cmd :list advanced {:tty? false :color? false})
             row      (some (fn [l] (when (str/includes? l "Touched today") l))
                            (str/split-lines out))]
         (is (some? row) "ticket row is present")
@@ -5250,7 +5250,7 @@ Restart the daemon.
                          "---\n\n")]
         (spit (str (fs/path tmp ".tickets" "kno-noupdate0001--no-updated.md"))
               content))
-      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})
+      (let [out (cli/view-cmd :list (ctx tmp) {:tty? false :color? false})
             row (some (fn [l] (when (str/includes? l "kno-noupdate0001") l))
                       (str/split-lines out))]
         (is (some? row))
@@ -5263,7 +5263,7 @@ Restart the daemon.
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (cli/create-cmd (ctx tmp) {:title "Beta"})
       (cli/create-cmd (ctx tmp) {:title "Gamma"})
-      (let [out  (cli/ls-cmd (ctx tmp) {:tty? false :color? false :limit 2})
+      (let [out  (cli/view-cmd :list (ctx tmp) {:tty? false :color? false :limit 2})
             rows (->> (str/split-lines out)
                       (filter #(str/starts-with? % "kno-")))]
         (is (= 2 (count rows)) "exactly 2 rows with :limit 2"))))
@@ -5273,7 +5273,7 @@ Restart the daemon.
       (cli/create-cmd (ctx tmp) {:title "Alpha"})
       (cli/create-cmd (ctx tmp) {:title "Beta"})
       (cli/create-cmd (ctx tmp) {:title "Gamma"})
-      (let [out (cli/ls-cmd (ctx tmp) {:tty? false :color? false})]
+      (let [out (cli/view-cmd :list (ctx tmp) {:tty? false :color? false})]
         (is (str/includes? out "Alpha"))
         (is (str/includes? out "Beta"))
         (is (str/includes? out "Gamma"))))))
@@ -5289,7 +5289,7 @@ Restart the daemon.
             blocker-id (id-of-created blocker "blocker")
             _ (cli/dep-cmd (ctx tmp) {:from a-id :to blocker-id})
             _ (cli/dep-cmd (ctx tmp) {:from b-id :to blocker-id})
-            out (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :mode #{"afk"}})]
+            out (cli/view-cmd :blocked (ctx tmp) {:tty? false :color? false :mode #{"afk"}})]
         (is (str/includes? out "Afk blocked"))
         (is (not (str/includes? out "Hitl blocked"))
             "hitl-mode blocked ticket filtered out"))))
@@ -5304,7 +5304,7 @@ Restart the daemon.
             dep-id (id-of-created dep "common-dep")
             _ (cli/dep-cmd (ctx tmp) {:from a-id :to dep-id})
             _ (cli/dep-cmd (ctx tmp) {:from b-id :to dep-id})
-            out (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :type #{"bug"}})]
+            out (cli/view-cmd :blocked (ctx tmp) {:tty? false :color? false :type #{"bug"}})]
         (is (str/includes? out "Bug blocked"))
         (is (not (str/includes? out "Task blocked"))
             "task-type blocked ticket filtered out"))))
@@ -5322,7 +5322,7 @@ Restart the daemon.
             _ (cli/dep-cmd (ctx tmp) {:from a-id :to dep-id})
             _ (cli/dep-cmd (ctx tmp) {:from b-id :to dep-id})
             _ (cli/dep-cmd (ctx tmp) {:from c-id :to dep-id})
-            out  (cli/blocked-cmd (ctx tmp) {:tty? false :color? false :limit 2})
+            out  (cli/view-cmd :blocked (ctx tmp) {:tty? false :color? false :limit 2})
             ;; these blocked tickets share a live dep → a multi-member live
             ;; component → the leading CC column appears, so rows no longer
             ;; START with the id; match on its presence instead.
@@ -5343,8 +5343,8 @@ Restart the daemon.
             blocker-id   (id-of-created blocker   "keystone")
             dependent-id (id-of-created dependent "waiter")
             _ (cli/dep-cmd c {:from dependent-id :to blocker-id})
-            ready-out   (cli/ready-cmd   c {:tty? false :color? false})
-            blocked-out (cli/blocked-cmd c {:tty? false :color? false})
+            ready-out   (cli/view-cmd :ready c {:tty? false :color? false})
+            blocked-out (cli/view-cmd :blocked c {:tty? false :color? false})
             ready-hdr   (first (str/split-lines ready-out))
             blocked-hdr (first (str/split-lines blocked-out))
             cc-cell     (fn [out id]
@@ -5361,7 +5361,7 @@ Restart the daemon.
             "dependent's row leads with the SAME ordinal 1 on blocked")
 
         (let [solo-id (id-of-created solo "lonely")
-              data    (-> (cli/ready-cmd c {:json? true})
+              data    (-> (cli/view-cmd :ready c {:json? true})
                           (cheshire/parse-string true)
                           :data)
               by-id   (into {} (map (juxt :id identity)) data)]
@@ -5379,7 +5379,7 @@ Restart the daemon.
             b-id (id-of-created b "hitl-closed")
             _ (cli/close-cmd c {:id a-id})
             _ (cli/close-cmd c {:id b-id})
-            out (cli/closed-cmd c {:tty? false :color? false :mode #{"afk"}})]
+            out (cli/view-cmd :closed c {:tty? false :color? false :mode #{"afk"}})]
         (is (str/includes? out "Afk closed"))
         (is (not (str/includes? out "Hitl closed"))
             "hitl-mode closed ticket filtered out"))))
@@ -5393,7 +5393,7 @@ Restart the daemon.
             b-id (id-of-created b "task-done")
             _ (cli/close-cmd c {:id a-id})
             _ (cli/close-cmd c {:id b-id})
-            out (cli/closed-cmd c {:tty? false :color? false :type #{"bug"}})]
+            out (cli/view-cmd :closed c {:tty? false :color? false :type #{"bug"}})]
         (is (str/includes? out "Bug done"))
         (is (not (str/includes? out "Task done"))
             "task-type closed ticket filtered out"))))
@@ -5413,7 +5413,7 @@ Restart the daemon.
             _ (cli/close-cmd (assoc c :now "2026-04-28T13:00:00Z") {:id a-id})
             _ (cli/close-cmd (assoc c :now "2026-04-28T14:00:00Z") {:id b-id})
             _ (cli/close-cmd (assoc c :now "2026-04-28T15:00:00Z") {:id d-id})
-            out (cli/closed-cmd c {:tty? false :color? false :type #{"bug"} :limit 1})]
+            out (cli/view-cmd :closed c {:tty? false :color? false :type #{"bug"} :limit 1})]
         (is (str/includes? out "Bug C") "most-recently closed bug retained")
         (is (not (str/includes? out "Bug A")) "second-newest bug dropped by limit")
         (is (not (str/includes? out "Task B")) "task-type excluded by filter")))))
@@ -5934,7 +5934,7 @@ Restart the daemon.
             a-id     (id-of-created a "island-a")
             b-id     (id-of-created b "island-b")
             _ (cli/dep-cmd c {:from a-id :to b-id})
-            out (cli/ls-cmd c {:component a-id :tty? false :color? false})]
+            out (cli/view-cmd :list c {:component a-id :tty? false :color? false})]
         (is (str/includes? out "Island A"))
         (is (str/includes? out "Island B") "the dep neighbor is in the component")
         (is (not (str/includes? out "Lonely solo"))
@@ -5946,7 +5946,7 @@ Restart the daemon.
             solo  (cli/create-cmd c {:title "All alone"})
             _othr (cli/create-cmd c {:title "Someone else"})
             solo-id (id-of-created solo "all-alone")
-            out   (cli/ls-cmd c {:component solo-id :tty? false :color? false})]
+            out   (cli/view-cmd :list c {:component solo-id :tty? false :color? false})]
         (is (str/includes? out "All alone"))
         (is (not (str/includes? out "Someone else"))))))
 
@@ -5958,7 +5958,7 @@ Restart the daemon.
             a-id (id-of-created a "tagged-member")
             b-id (id-of-created b "untagged-member")
             _ (cli/dep-cmd c {:from a-id :to b-id})
-            out (cli/ls-cmd c {:component a-id :tag #{"p0"}
+            out (cli/view-cmd :list c {:component a-id :tag #{"p0"}
                                :tty? false :color? false})]
         (is (str/includes? out "Tagged member"))
         (is (not (str/includes? out "Untagged member"))
@@ -5972,4 +5972,4 @@ Restart the daemon.
             _ (cli/close-cmd c {:id x-id :summary "done"})]
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"closed"
-             (cli/ls-cmd c {:component x-id :tty? false :color? false})))))))
+             (cli/view-cmd :list c {:component x-id :tty? false :color? false})))))))

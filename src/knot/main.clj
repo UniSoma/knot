@@ -719,9 +719,9 @@
    filter set (`--status --assignee --tag --type --mode`). `cmd-key`
    selects the per-command `spec` from the help registry — every
    listing spec carries the full filter set, so the difference is
-   purely the upstream source of tickets each `list-fn` walks. Filters
-   that survive parsing apply BEFORE `--limit` truncation."
-  [cmd-key list-fn argv]
+   purely the view source `cli/view-cmd` starts from. Filters that
+   survive parsing apply BEFORE `--limit` truncation."
+  [cmd-key argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
                                    (value-flag-map (get help/registry cmd-key)))
@@ -746,7 +746,7 @@
                    (:closure opts)   (assoc :closure (:closure opts) :via (:via opts))
                    (:component opts) (assoc :component (:component opts))
                    tty?              (assoc :width (output/terminal-width)))
-        out      (list-fn ctx cmd-opts)]
+        out      (cli/view-cmd cmd-key ctx cmd-opts)]
     (println-out out)))
 
 (defn- link-handler
@@ -1408,7 +1408,7 @@
         "check"  (check-handler rest-argv)
         "create" (create-handler rest-argv)
         "show"   (show-handler rest-argv)
-        ("list" "ls") (list-handler :list cli/ls-cmd rest-argv)
+        ("list" "ls") (list-handler :list rest-argv)
         "status"  (transition-handler "status" :status 2 cli/status-cmd rest-argv)
         "start"   (transition-handler "start"  :start  1 cli/start-cmd  rest-argv)
         "close"   (transition-handler "close"  :close  1 cli/close-cmd  rest-argv)
@@ -1418,9 +1418,9 @@
         "undep"    (edge-handler "undep" :undep cli/undep-cmd rest-argv)
         "link"     (link-handler   rest-argv)
         "unlink"   (unlink-handler rest-argv)
-        "ready"    (list-handler :ready   cli/ready-cmd   rest-argv)
-        "blocked"  (list-handler :blocked cli/blocked-cmd rest-argv)
-        "closed"   (list-handler :closed  cli/closed-cmd  rest-argv)
+        "ready"    (list-handler :ready   rest-argv)
+        "blocked"  (list-handler :blocked rest-argv)
+        "closed"   (list-handler :closed  rest-argv)
         "add-note" (add-note-handler rest-argv)
         "edit"     (edit-handler rest-argv)
         "update"   (update-handler rest-argv)

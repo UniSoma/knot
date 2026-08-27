@@ -1322,9 +1322,10 @@
          (select-keys resolved [:statuses :terminal-statuses :active-status
                                 :modes :default-mode :afk-mode])))
 
-(defn- view-cmd
-  "Run the view that starts at `source` and render it: `output/ls-json`
-   under `:json?`, else the text table. `opts` carries the scope
+(defn view-cmd
+  "Run the view that starts at `source` (`:list` `:ready` `:blocked`
+   `:closed`) and render it: `output/ls-json` under `:json?`, else the
+   text table. `opts` carries the scope
    (`:closure`/`:via`/`:component`), the filter flags (each a set of
    values — see `listing/criteria`), `:limit`, and the table options."
   [source ctx opts]
@@ -1340,13 +1341,6 @@
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
                        (ls-table-opts resolved opts)))))
-
-(defn ls-cmd
-  "List live tickets — those whose status is not in `:terminal-statuses`.
-   An explicit `:status` set replaces the default non-terminal filter — so
-   `--status closed` surfaces archived tickets. See `view-cmd`."
-  [ctx opts]
-  (view-cmd :list ctx opts))
 
 (defn- tree-tickets
   "Walk a dep-tree node and return the unique full tickets it contains, in
@@ -1458,34 +1452,15 @@
                        foot
                        (str table "\n" foot))))}))))
 
-(defn ready-cmd
-  "List tickets that are non-terminal AND whose `:deps` are all in
-   terminal status. See `view-cmd`."
-  [ctx opts]
-  (view-cmd :ready ctx opts))
-
-(defn closed-cmd
-  "List terminal-status (closed) tickets, sorted by `:closed` descending —
-   newest first, stamp-less tickets last. See `view-cmd`."
-  [ctx opts]
-  (view-cmd :closed ctx opts))
-
-(defn blocked-cmd
-  "List non-terminal tickets that have at least one non-terminal `:deps`
-   entry (or a missing referent). See `view-cmd`."
-  [ctx opts]
-  (view-cmd :blocked ctx opts))
-
 (defn- recently-closed-tickets
   "Project the top-N most recently closed tickets into the compact shape
-   prime renders. Filters by terminal status, sorts by `:closed`
-   descending, and extracts the latest body note as `:summary` (typically
-   the close --summary). Tickets without `:closed` sort last."
+   prime renders: the `:closed` view (terminal status, `:closed`
+   descending, stamp-less last) capped at `prime-recently-closed-limit`,
+   with the latest body note extracted as `:summary` (typically the close
+   --summary)."
   [tickets terminal-statuses]
-  (->> tickets
-       (filter (partial listing/closed? terminal-statuses))
-       (sort listing/by-closed-desc)
-       (take prime-recently-closed-limit)
+  (->> (listing/rows tickets terminal-statuses
+                     {:source :closed :limit prime-recently-closed-limit})
        (mapv (fn [t]
                (let [fm (:frontmatter t)]
                  {:id      (:id fm)

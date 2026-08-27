@@ -9,12 +9,12 @@
 
 (defn- id [t] (get-in t [:frontmatter :id]))
 
-(defn closed?
+(defn- closed?
   "True when the ticket's `:status` is in `terminal-statuses`."
   [terminal-statuses t]
   (contains? (or terminal-statuses #{}) (get-in t [:frontmatter :status])))
 
-(defn by-closed-desc
+(defn- by-closed-desc
   "Sort comparator: tickets with a `:closed` timestamp first (newest to
    oldest), then tickets without a stamp last in stable input order."
   [a b]
