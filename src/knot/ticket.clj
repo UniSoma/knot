@@ -134,7 +134,7 @@
       (if (<= (count trimmed) slug-max-len)
         trimmed
         (let [head (subs trimmed 0 slug-max-len)
-              cut  (str/last-index-of head \-)]
+              cut  (str/last-index-of head "-")]
           (if cut
             (subs head 0 cut)
             head))))))
@@ -286,9 +286,9 @@
   (let [m (re-matcher #"(?m)^## Notes[ \t]*$" body)]
     (when (.find m)
       (let [after  (.end m)
-            next-m (re-matcher #"(?m)^## " body)
-            end    (if (.find next-m after)
-                     (.start next-m)
+            next-m (re-matcher #"(?m)^## " (subs body after))
+            end    (if (.find next-m)
+                     (+ after (.start next-m))
                      (count body))]
         {:start (.start m) :end end}))))
 

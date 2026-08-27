@@ -913,10 +913,10 @@
                              "[ \\t]*$"))
         m   (re-matcher pat body)]
     (when (.find m)
-      (let [next-m (re-matcher #"(?m)^## " body)
-            after  (.end m)
-            end    (if (.find next-m after)
-                     (.start next-m)
+      (let [after  (.end m)
+            next-m (re-matcher #"(?m)^## " (subs body after))
+            end    (if (.find next-m)
+                     (+ after (.start next-m))
                      (count body))]
         {:start (.start m) :end end}))))
 
@@ -1601,7 +1601,7 @@
     0
     (count (filter #(and (fs/regular-file? %)
                          (str/ends-with? (str (fs/file-name %)) ".md"))
-                   (fs/list-dir dir)))))
+                   (fs/glob dir "*.md")))))
 
 (defn- info-data
   "Build the snake_case data map used by both `output/info-text` and

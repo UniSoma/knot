@@ -105,10 +105,10 @@
                                "[ \\t]*$"))
         m     (re-matcher pat body*)]
     (when (.find m)
-      (let [next-m (re-matcher #"(?m)^## " body*)
-            after  (.end m)
-            end    (if (.find next-m after)
-                     (.start next-m)
+      (let [after  (.end m)
+            next-m (re-matcher #"(?m)^## " (subs body* after))
+            end    (if (.find next-m)
+                     (+ after (.start next-m))
                      (count body*))]
         {:start (.start m) :end end}))))
 

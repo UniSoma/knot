@@ -9,3 +9,8 @@
 release-notes-v*.txt
 /wip/
 /.revu/
+
+# jolt build outputs
+jolt/.jolt/
+jolt/knot
+jolt/knot.build/

@@ -49,6 +49,10 @@
            (require '[knot.main])
            (apply (resolve 'knot.main/-main) *command-line-args*))}
 
+  build:jolt
+  {:doc "Compile a standalone knot binary with jolt (writes jolt/knot)"
+   :task (p/shell {:dir "jolt"} "jolt" "build" "--opt" "--tree-shake" "-m" "knot.main" "-o" "knot")}
+
   gen:schema
   {:doc "Regenerate knot.schema.json from the current `knot info` allowed values"
    :task
