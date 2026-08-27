@@ -12,9 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Fixed
+### Added/Changed/Fixed/Removed
 
-- **`knot close --external-ref ""` is rejected instead of silently dropped.** A blank or whitespace-only value now exits 1 with `--external-ref value must not be blank` (an `invalid_argument` envelope under `--json`) and nothing is written — the ticket stays open and the `--summary` does not land. This is the answer `knot update --add-external-ref ""` already gave; the two flags record the same field and used to disagree only because of where each handler happened to build its options. Surrounding whitespace on a real value is trimmed. The replace-all `knot update --external-ref ""` keeps its own meaning: a single blank clears the list.
+## [0.11.0] - 2026-08-27
 
 ### Added
 
@@ -34,7 +34,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Conditional claim: `--if-unassigned` on `start` and `update`, plus `--assignee ""` on the listings.** `knot start <id> --assignee me --if-unassigned` takes a ticket only when nobody holds it; if someone got there first, nothing is written, the exit code is 1, and `--json` reports `{ok: false, error: {code: "already_assigned", current_assignee: "..."}}`. `knot update` honours the same flag with the same semantics, dropping every other flag in the losing call. `start` also gains `--assignee` so the claim and the transition are one write. On the read side, `--assignee ""` now means unassigned on `list`/`ready`/`blocked`/`closed`/`prime` — it used to match nothing — so `knot ready --assignee ""` is the frontier query that pairs with the claim. This is a courtesy protocol, not a lock: the read-modify-write window is accepted on a single host.
 
+- **Sectional write paths refuse H1/H2 headings.** A ticket body is H2-delimited, so content handed to `--description`, `--design`, or `add-note` carrying its own `## ` line used to open sibling sections instead of nesting: `show --json .sections.description` returned only the prefix, and a re-run of `update --description` replaced only up to the first foreign heading, leaving two copies behind. One validation now runs before any file is touched — on `create` and `update` for the two sectional flags, and on `add-note` across its text argument, stdin, and editor branches. The message names the offending heading and the rule: headings inside a section are `###` or deeper, whole sections go through `--body`. Under `--json` the refusal is an `invalid_argument` envelope. `--body` stays unguarded.
+
+- **`show` marks the sections it derives, and `--body` refuses their names.** `knot show` synthesizes Acceptance Criteria, Children, Blocking, Blocked By and Related from frontmatter and the graph, and used to append them with nothing marking them as computed — so agents copied the headings back into bodies, where they duplicated the field they name and drifted from it. Each derived section now carries an HTML provenance comment naming its source field and the flag that writes it, one blank line separates the stored body from the derived block, and `update --body` refuses all five reserved names before any write. `knot check` gains two warnings that run over live and archived tickets: `reserved_section` for a graph heading stored in a body, and `duplicate_section` for a `## ` heading a body carries more than once. Neither offers an automatic fix — which copy survives is a judgment the tool cannot make. `--json` output of `show` is untouched.
+
+### Changed
+
+- **The bundled `knot` skill is pruned to the judgment help cannot carry (ADR 0017).** `SKILL.md` drops from 314 to 221 lines: the lifecycle and graph command blocks, heading-refusal rules, `git:<sha>` mechanics, and cached copies of `knot <cmd> --help` notes are gone, along with stale version stamps and pointers to this repo's tests and ADRs that resolve nowhere in the projects the skill is copied into. What remains is placement judgment — deps versus links, which listing number to act on, autonomous-mode conduct. The `--help` and `knot prime` surfaces already carried the rest.
+
 ### Fixed
+
+- **`knot close --external-ref ""` is rejected instead of silently dropped.** A blank or whitespace-only value now exits 1 with `--external-ref value must not be blank` (an `invalid_argument` envelope under `--json`) and nothing is written — the ticket stays open and the `--summary` does not land. This is the answer `knot update --add-external-ref ""` already gave; the two flags record the same field and used to disagree only because of where each handler happened to build its options. Surrounding whitespace on a real value is trimmed. The replace-all `knot update --external-ref ""` keeps its own meaning: a single blank clears the list.
+
+- **`--force` demands `--summary` only when a transition gate actually fires.** `knot close <id> --force` on a ticket with no firing gate has always closed it summary-less, but the `--force` descriptions on `close`, `status` and `update`, the `transition-status!` docstring, ADR 0003 and the bundled reference all stated the demand unconditionally. The summary is the override record — the reason a gate was bypassed — and a `--force` that bypasses nothing owes nothing, consistent with a plain close never demanding one. Behaviour is unchanged; every surface now says so.
+
+- **`LEV` and `CPL` render `-` and `null` on closed rows, matching `LVL`.** Leverage and coupling are defined over the live-induced graph, and a closed ticket surfaced by `list --status closed` is not a node of it. Live rows in a mixed `--status` listing keep their numbers; `knot closed` still omits the fields. Help notes and the JSON protocol reference move with it.
+
+- **`check` catches the pasted `## Children (2/3)` heading and slug-equal duplicates.** The reserved-section rule strips `show`'s progress suffix before comparing, so the rendered Children heading an agent copies back is refused by `update --body` and flagged by `check` like the bare name. `duplicate_section` groups headings by the same slug `show --json` files them under, so `## Description` and `## description` — which concatenate into one section — are reported as the duplicate they are. The `duplicate_section` warning now points only at `knot update --body`, the one path that can carry a duplicate in.
 
 - **A `--remove-ac` that matches nothing now exits 1.** It used to report success and write the file unchanged, so a typo in a criterion title looked like a removal. Any non-matching value — unknown title or out-of-range ordinal — now fails with the same "no acceptance criterion matching …" message `--ac` emits, and nothing is written.
 
