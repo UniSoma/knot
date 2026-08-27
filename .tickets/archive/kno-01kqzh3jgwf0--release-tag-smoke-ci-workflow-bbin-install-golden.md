@@ -6,7 +6,7 @@ type: feature
 priority: 4
 mode: hitl
 created: '2026-05-06T20:54:09.174084540Z'
-updated: '2026-05-17T00:38:29.720490108Z'
+updated: '2026-08-27T20:41:14.112974689Z'
 closed: '2026-05-17T00:38:29.720490108Z'
 tags:
 - ci
@@ -26,6 +26,7 @@ acceptance:
   done: true
 links:
 - kno-01kqgqfwk4h1
+- kno-01m12f94nctd
 parent: kno-01krhwcy0zdy
 ---
 
