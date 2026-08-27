@@ -4,7 +4,7 @@
 
 A CLI ticket tracker for solo developers.
 Tickets are markdown files with YAML frontmatter under `.tickets/`; closed tickets auto-move to `.tickets/archive/`.
-Built for one human on one machine, with first-class support for handing autonomous work to an AI agent.
+Built for one human on one machine, and for handing autonomous work to an AI agent.
 
 See [`docs/prd/knot-v0.md`](docs/prd/knot-v0.md) for the full design rationale and the v0 acceptance criteria.
 
@@ -13,10 +13,10 @@ See [`docs/prd/knot-v0.md`](docs/prd/knot-v0.md) for the full design rationale a
 Knot is for solo developers who want tickets to live with the code, outside a hosted issue tracker or a hidden database.
 Each ticket is a markdown file you can edit, grep, diff, review, and commit with the work it describes.
 
-It keeps the useful properties of a plain-file tracker (readable files, git-native history, no server)
-and adds the pieces that matter for a local, AI-agent-friendly workflow:
-built-in JSON output, configurable project schema, sortable collision-resistant IDs, dependency queries,
-and a first-class `afk`/`hitl` mode for deciding what an agent can run alone.
+It keeps the properties of a plain-file tracker (readable files, git-native history, no server)
+and adds what a local, agent-driven workflow needs:
+built-in JSON output, a configurable project schema, sortable collision-resistant IDs, dependency queries,
+and an `afk`/`hitl` mode field that marks what an agent can run alone.
 
 Knot is written in Clojure and distributed as a babashka script,
 but it can track work for any project:
@@ -48,7 +48,7 @@ bbin uninstall knot
 ```
 
 `knot` requires babashka 1.3.0 or later.
-Runtime dependencies ship bundled with bb, so no `:deps` resolution happens at install time.
+bb bundles the runtime dependencies, so install resolves no `:deps`.
 
 ## Quick tour
 
@@ -72,10 +72,10 @@ knot start  <id>               # to in_progress, bumps :updated
 knot close  <id> --summary "shipped in #482"  # to closed + appended note
 knot reopen <id>               # restores from archive
 
-# Acceptance criteria are load-bearing on terminal transitions: closing
-# (or transitioning active to terminal) is blocked while any --acceptance
-# entry is unchecked. Mark them done with `knot update <id> --ac "<title>"
-# --done`, or override the gate with `--force --summary "<reason>"`.
+# Acceptance criteria gate terminal transitions: knot refuses to close
+# (or move active to terminal) while any --acceptance entry is unchecked.
+# Mark them done with `knot update <id> --ac "<title>" --done`, or
+# override the gate with `--force --summary "<reason>"`.
 
 # Find what to pick up
 knot ready                     # non-terminal + non-blocked, sorted by priority
@@ -102,7 +102,7 @@ knot check --json              # envelope + sorted issues, exit 0/1/2
 
 Listing tables (`ls`, `ready`, `blocked`, `closed`) include a conditional `AC` column rendered as `d/t` (e.g. `2/5`)
 when any ticket in the result set has acceptance criteria.
-The column is omitted entirely from quiet projects so width stays tight; tickets without AC render as `-`.
+Projects with no acceptance criteria get no column, so the table stays narrow; tickets without AC render as `-`.
 `ls --json` is unchanged: raw `:acceptance` already passes through.
 
 Every read command (`show`, `ls`, `ready`, `blocked`, `closed`, `dep tree`, `check`, `prime`) accepts `--json`
@@ -138,9 +138,9 @@ Pass `--no-color` or set `NO_COLOR` to any non-empty value to force plain output
 | `:modes`             | `["afk" "hitl"]`                          | `afk` = agent-runnable; `hitl` = needs a human.                                                                                                           |
 | `:default-mode`      | `"hitl"`                                  | Must be a member of `:modes`.                                                                                                                             |
 
-Project root is discovered by walking up from cwd looking for `.knot.edn` or `.tickets/`.
-When `.knot.edn` is found, its `:tickets-dir` controls where tickets live.
-Unknown keys warn and are dropped; invalid values fail at command start with a clear message.
+Knot finds the project root by walking up from cwd until it meets `.knot.edn` or `.tickets/`.
+When it finds `.knot.edn`, that file's `:tickets-dir` controls where tickets live.
+Unknown keys warn and are dropped; invalid values fail at command start.
 
 ## AI-agent integration
 
@@ -152,9 +152,9 @@ so the agent recognizes the project, knows current state, and has the canonical 
 2. **SessionStart hook** running `knot prime`, which injects live + ready tickets at the start of each session.
 3. **Skill** (`.claude/skills/knot/SKILL.md`), the canonical reference, loaded on demand by the agent.
 
-Each layer carries different content because they have different costs (per-turn tokens vs. per-session vs. on-demand).
-Skip any one layer and Claude will fall back to reading `.tickets/` files directly,
-which silently drifts from the CLI's invariants.
+Each layer carries different content because each costs differently (per-turn tokens, per-session, on-demand).
+Skip any one layer and Claude falls back to reading `.tickets/` files directly,
+which drifts from the CLI's invariants without warning.
 
 `knot prime` emits a markdown primer summarizing project state:
 preamble (with the canonical user-says intent table), project metadata, in-progress tickets (with a relative `age` column),
@@ -176,8 +176,8 @@ knot prime --json             # bare object with snake_case keys:
 When any ticket in a section has acceptance criteria,
 the row shape gains a conditional `AC` column rendered as `d/t` (e.g. `2/5`) immediately before the title;
 sections with no AC tickets stay narrow.
-The `Ready to close` section pairs with the `--force --summary` acceptance gate on terminal transitions:
-it surfaces tickets where the gate would be a no-op (every AC is checked),
+The `Ready to close` section pairs with the `--force --summary` acceptance gate on terminal transitions.
+It lists tickets where the gate would be a no-op (every AC is checked),
 so the natural prompt is "close these before grabbing new work."
 
 The staleness flag (`stale: true`, set when an in-progress ticket's `:updated` is 14+ days old)
@@ -189,7 +189,7 @@ To enumerate stalled work, iterate `.in_progress` and filter on `stale`; do not 
 `knot prime` always exits 0,
 including when run from a directory with no Knot project (the preamble in that case directs the user to `knot init`),
 when the project has zero tickets, or when only archived tickets exist.
-This makes it safe to wire into a global session-start hook.
+That makes it safe to wire into a global session-start hook.
 
 ### Session-start hook
 
@@ -219,13 +219,13 @@ or `<project>/.claude/settings.json` (project-local):
 }
 ```
 
-For agent-runnable session presets, run `knot prime --mode afk` to surface only `mode: afk` ready tickets.
+For agent-runnable session presets, run `knot prime --mode afk` to list only `mode: afk` ready tickets.
 
 ### Project rules (`CLAUDE.md` / `AGENTS.md`)
 
 Add a short block to your project's agent rules file so Claude (or another agent) recognizes the tracker on every turn,
 and not only when an intent phrase happens to fire the skill.
-The strongest reason to pay the per-turn token cost is to prevent the dominant failure mode:
+The per-turn token cost buys protection against the most common failure:
 Claude reaching for `Read`, `Write`, `Edit`, or `grep` against `.tickets/` instead of the CLI.
 
 Recommended snippet (paste into `CLAUDE.md` or `AGENTS.md` at the repo root):
@@ -249,17 +249,17 @@ show` / `knot list --json` / `knot create` / `knot add-note` /
 `knot update` / `knot close` instead. `knot edit` opens `$EDITOR`
 (interactive); `knot update <id> --title ... --description ...
 --json` is the non-interactive path agents and scripts should use.
-If a knot command behaves unexpectedly, surface the bug; don't
+If a knot command behaves unexpectedly, report the bug; don't
 bypass.
 
 Hosted-tracker prefixes (`GH-`, `ENG-`, `LIN-`, `JIRA-`) point at
 *other* trackers. Use the matching tool, not knot.
 ```
 
-Why this earns its per-turn tokens:
-the filesystem markers help the agent spot the project even before user intent fires,
-the listed trigger phrases create keyword redundancy with the skill description,
-and the tool-named anti-pattern (`Read`, `Write`, `Edit`, `cat`, `grep`, `sed`, `mv`) maps cleanly onto the agent's actual tool palette.
+Three things in this block earn the per-turn tokens.
+The filesystem markers help the agent spot the project before any user intent fires.
+The listed trigger phrases repeat keywords from the skill description.
+The tool-named anti-pattern (`Read`, `Write`, `Edit`, `cat`, `grep`, `sed`, `mv`) matches the names of the agent's own tools.
 
 ### Skill
 
@@ -304,14 +304,14 @@ There is also no force flag for destructive `update --body` rewrites, because gi
 
 If your workflow puts multiple writers on the same ticket concurrently,
 for example parallel agents that pick up unblocked work without coordinating,
-the last-writer-wins semantics will eventually drop a write.
+last-writer-wins will eventually drop a write.
 The placeholder for an optimistic-concurrency check (read-modify-write with `:updated` as a CAS token) lives at
 [`.tickets/kno-01kqgqaxzx98--future-work-optimistic-concurrency-control-via.md`](.tickets/kno-01kqgqaxzx98--future-work-optimistic-concurrency-control-via.md).
 File a bug against your usage pattern there if you hit the issue in practice; the design space is open until then.
 
 ## Philosophy
 
-Knot is shaped by a few load-bearing assumptions.
+Knot rests on a few assumptions.
 If your situation violates them, a different tool will serve you better.
 
 - **File-based, no synthetic database.** Tickets are markdown files with YAML frontmatter.
@@ -331,7 +331,7 @@ If your situation violates them, a different tool will serve you better.
   and survive rebases, cherry-picks, and hand-edits without a registry.
   Layered prefix matching (`knot show 01jq8p4a`) keeps day-to-day typing short.
 - **AI-agent-aware by design.** The `:mode` field (`afk` vs `hitl`) is a peer dimension to status and priority.
-  `knot ready --mode afk` surfaces unblocked, agent-runnable work in one query,
+  `knot ready --mode afk` lists unblocked, agent-runnable work in one query,
   and `knot prime` keeps a fresh agent session oriented without any hand-written briefing.
 - **Pure data layer.** `knot.ticket` and `knot.query` are pure; `knot.store` isolates filesystem I/O.
   Future query layers can build on these namespaces without touching the CLI.
