@@ -983,6 +983,20 @@
           (is (contains? t :level)
               "blocked rows carry a level key (null only on a live deps cycle)"))))
 
+    (testing "list --status closed --json — closed rows carry null graph metrics"
+      (let [{:keys [out]} (run-knot tmp "list" "--status" "closed" "--json")
+            envelope (parse-envelope out)]
+        (is (vector? (:data envelope)))
+        (is (seq (:data envelope)))
+        (doseq [t (:data envelope)]
+          (assert-ticket-payload-shape!
+           t (str "list --status closed --json " (:id t)) {:body? false})
+          (doseq [k [:leverage :coupling :level]]
+            (is (contains? t k)
+                (str "closed rows under list keep the " (name k) " key — uniform shape"))
+            (is (nil? (get t k))
+                (str "closed rows under list carry " (name k) " null — not a live node"))))))
+
     (testing "closed --json — array of ls-shape ticket objects"
       (let [{:keys [out]} (run-knot tmp "closed" "--json")
             envelope (parse-envelope out)]

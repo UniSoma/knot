@@ -75,6 +75,17 @@
       (is (= 1 (:cc a)))
       (is (= [0 1] (:children-progress a)))
       (is (not (contains? f :children-progress)))))
+  (testing "a closed row under list --status attaches nil for every graph metric, live rows keep numbers"
+    (let [r (rows {:source :list :filters {:status #{"open" "closed"}}})
+          a (by-id r "a")
+          c (by-id r "c")]
+      (is (= 1 (:leverage a)))
+      (is (= 0 (:level a)))
+      (is (contains? c :leverage))
+      (is (nil? (:leverage c)))
+      (is (contains? c :coupling))
+      (is (nil? (:coupling c)))
+      (is (nil? (:level c)))))
   (testing "the closed view attaches umbrella progress but no graph metric"
     (let [c (by-id (rows {:source :closed}) "c")]
       (is (not (contains? c :leverage)))

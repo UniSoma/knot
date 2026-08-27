@@ -282,8 +282,11 @@ Optional keys that may be present:
 - `cc` (integer or `null`) — connected-component ordinal over the
   live-induced graph. Present on **every** `list`/`ready`/`blocked` row
   (`null` for singletons — uniform shape, so don't branch on key presence).
-- `leverage` / `coupling` (integer) — the `LEV` and `CPL` metrics, present on
-  every `list`/`ready`/`blocked` row.
+- `leverage` / `coupling` (integer or `null`) — the `LEV` and `CPL` metrics,
+  present on **every** `list`/`ready`/`blocked` row (uniform shape, so don't
+  branch on key presence). `null` on a closed row surfaced by
+  `list --status closed` — a closed ticket is not a node of the live graph,
+  exactly as `level` reads it.
 - `level` (integer or `null`) — the `LVL` metric, present on **every**
   `list`/`ready`/`blocked` row (uniform shape, so don't branch on key
   presence). `null` when the ticket sits on, or depends through, a live deps

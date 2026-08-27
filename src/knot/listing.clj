@@ -120,10 +120,15 @@
   (fn [row] (when (contains? row k) {k (get row k)})))
 
 (defn- attach-per-row
-  "`:attach` computing `(f corpus id terminal-statuses)` for each row."
+  "`:attach` computing `(f corpus id terminal-statuses)` for each LIVE
+   row; a closed row (one `list --status closed` surfaces) gets `nil`,
+   since it is not a node of the live-induced graph the metric is
+   defined over."
   [k f]
   (fn [rows corpus terminal-statuses]
-    (mapv #(assoc % k (f corpus (id %) terminal-statuses)) rows)))
+    (mapv #(assoc % k (when-not (closed? terminal-statuses %)
+                        (f corpus (id %) terminal-statuses)))
+          rows)))
 
 (defn- attach-from-map
   "`:attach` computing `(f corpus terminal-statuses)` ONCE — an id → value
@@ -191,14 +196,14 @@
     :shown? (fn [rows] (some #(contains? % :leverage) rows))
     :cell   (int-or-dash :leverage)
     :json   (when-attached :leverage)
-    :note   "leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. --json field `leverage`, always an integer on these three commands."}
+    :note   "leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. `-` on a closed row surfaced by --status closed — the metric is defined over the live graph only. --json field `leverage` on every row of these three commands, null exactly on a closed row."}
    {:key :coupling :header "CPL" :align :right
     :sources live-sources
     :attach (attach-per-row :coupling query/coupling)
     :shown? (fn [rows] (some #(contains? % :coupling) rows))
     :cell   (int-or-dash :coupling)
     :json   (when-attached :coupling)
-    :note   "coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. --json field `coupling`, always an integer on these three commands."}
+    :note   "coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. `-` on a closed row surfaced by --status closed — the metric is defined over the live graph only. --json field `coupling` on every row of these three commands, null exactly on a closed row."}
    {:key :level :header "LVL" :align :right
     :sources live-sources
     :attach (attach-from-map :level query/levels)
