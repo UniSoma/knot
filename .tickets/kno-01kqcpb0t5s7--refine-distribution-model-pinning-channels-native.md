@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T13:20:01.861232445Z'
-updated: '2026-05-14T00:05:10.331595066Z'
+updated: '2026-08-27T20:05:36.623946431Z'
 deps:
 - kno-01kqcpw6bzn6
 links:
@@ -42,3 +42,7 @@ Deferred for v0.0.1 — the project has one user and bbin-tracking-main is suffi
 **2026-04-29T14:26:02.746799096Z**
 
 https://github.com/unisoma/aishell has good ideas
+
+**2026-08-27T20:05:36.623946431Z**
+
+Native binary via jolt is proven: jolt/ (deps.edn + cheshire/clj-yaml shims, bb build:jolt) compiles knot to an 18.6 MB self-contained ELF that passes the full bb test suite when the integration tests target the binary. Gaps: knot serve (http-kit is Java), startup ~160 ms vs bb ~110 ms, list/check slower from the Clojure YAML shim. Upstream jolt bugs found: str/last-index-of rejects a char, Matcher.find(int) ignores its offset, vendored babashka.fs/list-dir unbound. See jolt/README.md.
