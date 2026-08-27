@@ -49,6 +49,20 @@
            (require '[knot.main])
            (apply (resolve 'knot.main/-main) *command-line-args*))}
 
+  build:bb
+  {:doc "Bundle knot as an uberjar appended to the bb binary (writes target/knot)"
+   :task
+   (let [bb  (or (System/getenv "BB_BIN") (str (fs/which "bb")))
+         jar "target/knot.jar"
+         out "target/knot"]
+     (fs/create-dirs "target")
+     (p/shell "bb" "uberjar" jar "-m" "knot.main")
+     (with-open [o (java.io.FileOutputStream. out)]
+       (clojure.java.io/copy (fs/file bb) o)
+       (clojure.java.io/copy (fs/file jar) o))
+     (fs/set-posix-file-permissions out "rwxr-xr-x")
+     (println (str "Wrote " out " (bb " (str/trim (:out (p/shell {:out :string} bb "--version"))) " + " jar ")")))}
+
   build:jolt
   {:doc "Compile a standalone knot binary with jolt (writes jolt/knot)"
    :task (p/shell {:dir "jolt"} "jolt" "build" "--opt" "--tree-shake" "-m" "knot.main" "-o" "knot")}

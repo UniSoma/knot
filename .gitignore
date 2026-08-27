@@ -14,3 +14,6 @@ release-notes-v*.txt
 jolt/.jolt/
 jolt/knot
 jolt/knot.build/
+
+# bb uberjar build outputs
+target/

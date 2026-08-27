@@ -28,8 +28,12 @@ Install jolt with `curl -sL https://raw.githubusercontent.com/jolt-lang/jolt/mai
 - `knot serve` does not run: http-kit is a Java library, and `MessageDigest`
   needs jolt's separate crypto library. Every other command passes the full
   `bb test` suite when the integration tests are pointed at the binary.
-- Startup is about 160 ms against bb's 110 ms, and `list`/`check` are slower
-  still because the YAML shim parses tickets in Clojure rather than in Java.
+- It is slower than babashka. `bb build:bb` makes the other kind of standalone
+  binary — knot's uberjar appended to the `bb` executable — and against 149
+  tickets it runs `--help` in 80 ms, `list`/`check`/`create` in 100–120 ms
+  and `show` in 115 ms at 100 MB peak RSS; the jolt binary takes 155 ms,
+  300–350 ms and 440 ms at 160 MB. The gap is the YAML shim parsing tickets
+  in Clojure rather than SnakeYAML. Jolt wins only on size: 18 MB vs 68 MB.
 - Three jolt divergences shaped the source: `clojure.string/last-index-of`
   rejects a char argument, `Matcher.find(int)` ignores its start offset, and
   the vendored `babashka.fs/list-dir` is unbound. Knot avoids all three.
