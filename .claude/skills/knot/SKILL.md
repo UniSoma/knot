@@ -136,6 +136,9 @@ Chaining `knot show <id>` after a write re-reads what you already hold.
 - `--acceptance "<title>"` (repeatable) writes structured criteria into frontmatter and `knot show` renders the
   checklist from them. Author criteria through this flag and `knot update --add-ac` — a hand-written
   `## Acceptance Criteria` body section is display-only and never syncs back.
+- `--description` and `--design` write *inside* one section, which ends at the next `## ` line — content carrying
+  its own `#`/`##` heading is refused rather than silently split into sibling sections. Nest with `###` or deeper,
+  and reach for `knot update --body` when whole sections are the point.
 
 For multi-line prose, a quoted-delimiter heredoc passes `$vars`, backticks, and quotes through literally:
 
@@ -207,6 +210,9 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 
 `update` never appends: `--description` replaces the `## Description` section, and `--body` replaces the entire body
 (destructive, no `--force`, git is the undo). To add to a ticket, reach for `add-note`.
+
+A note lands inside `## Notes` under the same boundary rule as the sectional flags: `add-note` refuses text carrying
+a `#`/`##` heading, from the text arg, stdin, or the editor. Nest with `###` or deeper.
 
 The trap in the middle is set-semantics: `--tags` replaces the whole tag list, so adding one tag by re-sending the list
 drops anything you hadn't read first. `--external-ref` has the same shape. For a one-value change reach for the delta

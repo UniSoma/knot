@@ -799,3 +799,23 @@
             (doseq [field (get computed-column-json-fields key)]
               (is (str/includes? notes (str "`" field "`"))
                   (str header " must name its --json field " field)))))))))
+
+(deftest sectional-inputs-name-the-section-boundary-test
+  (testing "the --description / --design descs say where a section ends"
+    (doseq [cmd  [:create :update]
+            flag [:description :design]]
+      (let [d (->> (get-in help/registry [cmd :flags])
+                   (some #(when (= flag (:name %)) (:desc %))))]
+        (is (string? d))
+        (is (re-find #"###" d)
+            (str cmd " --" (name flag)
+                 " help should say headings inside a section are ### or deeper"))
+        (is (re-find #"--body" d)
+            (str cmd " --" (name flag)
+                 " help should point at --body for whole sections")))))
+
+  (testing "add-note carries the same rule for its text input"
+    (let [notes (get-in help/registry [:add-note :notes])]
+      (is (seq notes) ":add-note should carry a :notes entry for the boundary rule")
+      (is (some #(re-find #"###" %) notes))
+      (is (some #(re-find #"--body" %) notes)))))

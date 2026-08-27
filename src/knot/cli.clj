@@ -54,6 +54,26 @@
       ""
       (str/join "\n" sections))))
 
+(def ^:private section-heading-pat
+  "Matches an H1 or H2 line. `## ` is exactly what the body parser splits
+   sections on; H1 joins it so the rule stays one sentence — the title is
+   the ticket's H1, knot's sections are its H2s."
+  #"(?m)^#{1,2} .*$")
+
+(defn- validate-no-section-headings!
+  "Refuse `content` when it carries a heading that would end the section it
+   is written into. `label` names the offending input in the message
+   (`--description`, `--design`, `note content`). Throws `ex-info` carrying
+   `:offending-heading`, so every sectional write path can refuse before
+   touching a file."
+  [label content]
+  (when-let [heading (some->> content (re-find section-heading-pat) str/trimr)]
+    (throw (ex-info (str label " contains the heading \"" heading
+                         "\": a section ends at the next ## line, so headings "
+                         "inside a section must be ### or deeper. Use "
+                         "update --body to write whole sections.")
+                    {:offending-heading heading}))))
+
 (defn- build-frontmatter
   "Build a frontmatter map with a stable, human-readable key order. Keys
    present in this canonical order: id, title, status, type, priority,
@@ -144,6 +164,8 @@
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping the new ticket under `:data` instead of the saved path."
   [ctx opts]
+  (validate-no-section-headings! "--description" (:description opts))
+  (validate-no-section-headings! "--design" (:design opts))
   (let [{:keys [project-root prefix tickets-dir statuses active-status
                 terminal-statuses default-type default-priority default-mode
                 now assignee]}
@@ -840,6 +862,7 @@
       (let [full-id  (get-in loaded [:frontmatter :id])
             ctx-line (str "Adding a note to " full-id ".")
             content  (resolve-note-content opts ctx-line)]
+        (validate-no-section-headings! "note content" content)
         (when-not (str/blank? content)
           (let [trimmed (str/trim content)
                 body*   (ticket/append-note (:body loaded) now trimmed)
@@ -1156,6 +1179,8 @@
                          "--description / --design")
                     {:offending (filter #(contains? opts %)
                                         [:description :design])})))
+  (validate-no-section-headings! "--description" (:description opts))
+  (validate-no-section-headings! "--design" (:design opts))
   (validate-list-delta-opts! opts :tags :add-tag :remove-tag)
   (validate-list-delta-opts! opts :external-ref
                              :add-external-ref :remove-external-ref)

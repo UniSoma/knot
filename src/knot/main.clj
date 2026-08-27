@@ -946,7 +946,8 @@
   "Handle `knot add-note <id> [text]`. Layered input: text arg wins;
    else stdin if not a TTY; else editor. With `--json`, emits a v0.3
    envelope for the post-mutation ticket on success or an error
-   envelope (`not_found`, `ambiguous_id`) on resolver failure."
+   envelope (`not_found`, `ambiguous_id`) on resolver failure,
+   `invalid_argument` when the note text carries a `#`/`##` heading."
   [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :add-note))
         json? (boolean (:json opts))
@@ -998,6 +999,13 @@
             (cond
               (and json? (= :ambiguous (:kind data)))
               (emit-ambiguous-envelope! e data)
+
+              (and json? (:offending-heading data))
+              (emit-error-envelope! {:code    "invalid_argument"
+                                     :message (.getMessage e)})
+
+              (:offending-heading data)
+              (die (str "knot add-note: " (.getMessage e)))
 
               :else (throw e))))))))
 

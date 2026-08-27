@@ -4128,6 +4128,84 @@ Restart the daemon.
                               (cli/update-cmd (ctx tmp)
                                               {:id id :body "x" :design "y"})))))))
 
+(deftest section-heading-guard-test
+  (testing "create --description refuses content carrying a `## ` heading, before any write"
+    (with-tmp tmp
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"--description.*## Problem.*###.*--body"
+           (cli/create-cmd (ctx tmp) {:title "T"
+                                      :description "## Problem\n\nIt broke.\n"})))
+      (is (empty? (fs/glob tmp ".tickets/*.md"))
+          "refused before any write — no ticket file exists")))
+
+  (testing "create --design refuses a `# ` heading too"
+    (with-tmp tmp
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo
+           #"--design.*# Title"
+           (cli/create-cmd (ctx tmp) {:title "T" :design "# Title\n"})))
+      (is (empty? (fs/glob tmp ".tickets/*.md")))))
+
+  (testing "update --description / --design refuse, leaving the file untouched"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :description "Old."})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"--description.*## Problem.*###.*--body"
+             (cli/update-cmd (ctx tmp) {:id id :description "## Problem\n"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"--design.*## Approach"
+             (cli/update-cmd (ctx tmp) {:id id :design "## Approach\n"})))
+        (is (= before (slurp created))
+            "refused before any write"))))
+
+  (testing "update --body is unguarded — H2 sections are what it is for"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id :body "## Description\n\nD.\n"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (= "## Description\n\nD.\n" (:body loaded))))))
+
+  (testing "content with only `### ` headings is accepted"
+    (with-tmp tmp
+      (let [path   (cli/create-cmd (ctx tmp)
+                                   {:title "T"
+                                    :description "### Step one\n\nDo it.\n"})
+            loaded (ticket/parse (slurp path))]
+        (is (str/includes? (:body loaded) "### Step one")))))
+
+  (testing "add-note refuses a `## ` heading from the text arg, stdin, or the editor"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"note content.*## Findings.*###.*--body"
+             (cli/add-note-cmd (ctx tmp) {:id id :text "## Findings"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"note content.*## Findings"
+             (cli/add-note-cmd (ctx tmp)
+                               {:id id
+                                :stdin-tty? false
+                                :stdin-reader-fn (fn [] "## Findings\n")})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"note content.*## Findings"
+             (cli/add-note-cmd (ctx tmp)
+                               {:id id
+                                :stdin-tty? true
+                                :editor-fn (fn [_] "## Findings\n")})))
+        (is (= before (slurp created))
+            "refused before any write")))))
+
 (deftest update-cmd-ac-flip-test
   (testing "update --ac \"<title>\" --done flips the matching entry to done"
     (with-tmp tmp

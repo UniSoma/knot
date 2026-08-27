@@ -225,8 +225,12 @@
                   {:name :tags        :desc "Comma-separated tag list."}
                   {:name :mode        :desc "Mode (afk|hitl)."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}
-                  {:name :description :alias :d :body? true :desc "Body content for the Description section."}
-                  {:name :design      :body? true :desc "Body content for the Design section."}
+                  {:name :description :alias :d :body? true
+                   :desc (str "Body content for the Description section."
+                              " The section ends at the next ## line: nest headings as ### or deeper, and write whole sections with update --body.")}
+                  {:name :design      :body? true
+                   :desc (str "Body content for the Design section."
+                              " The section ends at the next ## line: nest headings as ### or deeper, and write whole sections with update --body.")}
                   {:name :acceptance  :coerce []
                    :desc "Acceptance criterion title (repeatable). Stored in frontmatter; rendered by `knot show`."}
                   {:name :dep :coerce []
@@ -514,6 +518,7 @@
                   {:name "text" :variadic true}]
     :restrict?   true
     :flags       [{:name :json :coerce :boolean :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}]
+    :notes       ["A note lands inside the ## Notes section, which ends at the next ## line — note text carrying a # or ## heading is refused. Nest headings as ### or deeper; write whole sections with knot update --body."]
     :examples    [{:cmd "knot add-note kno-01abc \"Tested locally\""
                    :note "Append a one-line note."}
                   {:cmd "knot add-note kno-01abc"
@@ -572,9 +577,11 @@
                   {:name :json :coerce :boolean
                    :desc "Emit a JSON envelope (the post-mutation ticket) instead of the saved path."}
                   {:name :description :alias :d :body? true
-                   :desc "Replace the ## Description section."}
+                   :desc (str "Replace the ## Description section."
+                              " The section ends at the next ## line: nest headings as ### or deeper, and replace whole sections with --body.")}
                   {:name :design       :body? true
-                   :desc "Replace the ## Design section."}
+                   :desc (str "Replace the ## Design section."
+                              " The section ends at the next ## line: nest headings as ### or deeper, and replace whole sections with --body.")}
                   {:name :body         :body? true
                    :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design. The ## Acceptance Criteria section is display-only on write — use --add-ac / --remove-ac / --ac to mutate criteria."}]
     :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."

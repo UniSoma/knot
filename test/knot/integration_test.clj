@@ -3542,3 +3542,79 @@
       (let [{:keys [exit err]} (run-knot tmp "list" "--component" "")]
         (is (= 1 exit))
         (is (str/includes? err "--component"))))))
+
+(deftest section-heading-guard-end-to-end-test
+  (testing "create --description with a `## ` heading exits 1 before any write"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit err]} (run-knot tmp "create" "T"
+                                         "--description" "## Problem\n\nIt broke.\n")]
+        (is (= 1 exit) (str "expected exit 1; err=" err))
+        (is (str/includes? err "## Problem"))
+        (is (str/includes? err "###"))
+        (is (str/includes? err "--body"))
+        (is (empty? (fs/glob tmp ".tickets/*.md"))
+            "no ticket file written"))))
+
+  (testing "create --design --json refuses with the invalid_argument envelope"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [{:keys [exit out err]} (run-knot tmp "create" "T"
+                                             "--design" "## Approach\n" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"## Approach" (get-in parsed [:error :message])))
+        (is (nil? (:data parsed))))))
+
+  (testing "update --description refuses; --json uses the error envelope"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--description" "## Problem\n")]
+        (is (= 1 exit) (str "expected exit 1; err=" err))
+        (is (str/includes? err "## Problem"))
+        (let [{:keys [exit out err]} (run-knot tmp "update" id
+                                               "--design" "## Approach\n" "--json")
+              parsed (json/parse-string (str/trim out) true)]
+          (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+          (is (= false (:ok parsed)))
+          (is (= "invalid_argument" (get-in parsed [:error :code])))
+          (is (re-find #"## Approach" (get-in parsed [:error :message]))))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (not (str/includes? shown "## Problem")))
+          (is (not (str/includes? shown "## Approach")))))))
+
+  (testing "update --body still accepts `## ` sections"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--body" "## Description\n\nD.\n")]
+        (is (zero? exit) (str "update --body err=" err))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "## Description"))))))
+
+  (testing "add-note refuses the text arg, piped stdin, and JSON gets the envelope"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit err]} (run-knot tmp "add-note" id "## Findings")]
+        (is (= 1 exit) (str "expected exit 1; err=" err))
+        (is (str/includes? err "## Findings"))
+        (is (str/includes? err "###"))
+        (let [{:keys [exit err]} (run-knot-with-stdin tmp "## Findings\n"
+                                                      "add-note" id)]
+          (is (= 1 exit) (str "expected exit 1; err=" err))
+          (is (str/includes? err "## Findings")))
+        (let [{:keys [exit out err]} (run-knot tmp "add-note" id
+                                               "## Findings" "--json")
+              parsed (json/parse-string (str/trim out) true)]
+          (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+          (is (= false (:ok parsed)))
+          (is (= "invalid_argument" (get-in parsed [:error :code])))
+          (is (re-find #"## Findings" (get-in parsed [:error :message]))))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (not (str/includes? shown "## Findings"))))))))
