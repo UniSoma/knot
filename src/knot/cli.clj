@@ -430,14 +430,12 @@
 
       :else :bypass)))
 
-(defn- put-assignee
-  "Set the frontmatter `:assignee`, or drop the key when `assignee` is
-   blank — the same set-or-clear convention `update-frontmatter` applies
-   to the optional fields."
-  [fm assignee]
-  (if (str/blank? (or assignee ""))
-    (dissoc fm :assignee)
-    (assoc fm :assignee assignee)))
+(defn- clear-when
+  "Set-or-clear convention for the optional frontmatter fields: drop `k`
+   from `fm` when `(pred v)`, else set it to `v`. Shared by `status-cmd`
+   and `update-frontmatter`."
+  [fm k pred v]
+  (if (pred v) (dissoc fm k) (assoc fm k v)))
 
 (defn- guard-unassigned!
   "The conditional-claim predicate behind `--if-unassigned`. A no-op
@@ -553,7 +551,8 @@
                         (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
             new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
-                       (contains? opts :assignee) (put-assignee assignee)
+                       (contains? opts :assignee)
+                       (clear-when :assignee str/blank? assignee)
                        (seq (:external-ref opts))
                        (apply-list-deltas :external_refs
                                           (:external-ref opts) nil))
@@ -956,13 +955,6 @@
             sep  (if (str/blank? head) "" "\n\n")]
         (str head sep "## " heading "\n\n" content "\n")))))
 
-(defn- apply-tag-deltas
-  "Apply `--add-tag` / `--remove-tag` deltas from `opts` to `fm`'s
-   `:tags`, through `apply-list-deltas`. Caller guarantees `:tags` and
-   `:add-tag`/`:remove-tag` are not both present."
-  [fm opts]
-  (apply-list-deltas fm :tags (:add-tag opts) (:remove-tag opts)))
-
 (defn- update-frontmatter
   "Project `opts` onto `fm`. Keys absent from `opts` leave `fm`
    unchanged; keys present with a non-empty value set the field; keys
@@ -972,9 +964,7 @@
    `:type`, `:priority`, `:mode`) are set to whatever value the caller
    passed — clearing those is not a sanctioned operation."
   [fm opts]
-  (let [{:keys [title type priority mode assignee parent tags external-ref]} opts
-        clear-when (fn [m k pred v]
-                     (if (pred v) (dissoc m k) (assoc m k v)))]
+  (let [{:keys [title type priority mode assignee parent tags external-ref]} opts]
     (cond-> fm
       (contains? opts :title)        (assoc :title title)
       (contains? opts :type)         (assoc :type type)
@@ -984,7 +974,9 @@
       (contains? opts :parent)       (clear-when :parent   str/blank? parent)
       (contains? opts :tags)         (clear-when :tags  empty? (vec tags))
       (or (contains? opts :add-tag)
-          (contains? opts :remove-tag)) (apply-tag-deltas opts)
+          (contains? opts :remove-tag)) (apply-list-deltas :tags
+                                                           (:add-tag opts)
+                                                           (:remove-tag opts))
       (contains? opts :external-ref) (clear-when :external_refs
                                                  empty? (vec external-ref))
       (or (contains? opts :add-external-ref)
