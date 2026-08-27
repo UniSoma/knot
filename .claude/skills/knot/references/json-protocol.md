@@ -261,6 +261,7 @@ presence.
 | `frontmatter_parse_error`  | error    | Ticket file has unparseable YAML frontmatter.                                                             |
 | `invalid_active_status`    | error    | `.knot.edn` `:active-status` is not in `:statuses`.                                                       |
 | `acceptance_invalid`       | error    | A frontmatter `:acceptance` entry is malformed (non-map, missing `:title` or `:done`).                    |
+| `legacy_acceptance_section` | warning | A body still carries a `## Acceptance Criteria` section; `knot migrate-ac` lifts it into frontmatter, after which the warning self-clears. |
 | `reserved_section`         | warning  | A body carries a `## Blockers`, `## Blocking`, `## Children`, or `## Linked` heading that `show` renders from fields. |
 | `duplicate_section`        | warning  | A body carries the same `## ` heading more than once; the copies concatenate, so nothing downstream shows it. |
 
