@@ -1,19 +1,20 @@
 ---
 name: knot
-description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`), or on ticket-shaped intent — "what's next?", "what's blocked?", "list/filter the backlog", "show me <id>", "track this", "start <id>", "add a note", "close this" — including an autonomous agent picking up unblocked work. Hosted trackers (GitHub Issues, Linear, Jira, Basecamp, Asana, Trello) and ids prefixed for them (`GH-1234`, `ENG-1234`, `JIRA-PROJ-1234`) belong to other tools.
+description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`), or on ticket-shaped intent — "what's next?", "the backlog", "show me <id>", "track this", "close this" — including an autonomous agent picking up unblocked work. Hosted-tracker ids (`GH-1234`, `ENG-1234`) belong to their own tools.
 ---
 
 # knot — file-based ticket tracker
 
 Tickets are markdown files with YAML frontmatter under `.tickets/`; closing one moves it to `.tickets/archive/`.
 Project config lives in `.knot.edn`, which knot finds by walking up from cwd — run commands from inside the project, or
-an ancestor's knot project answers instead.
+an ancestor's knot project answers instead. With neither marker present, `knot init` starts tracking; run it on an
+explicit ask, since the user may already have a tracker.
 
-`knot <cmd> --help` is the source of truth for flags; this skill carries the judgment the help text can't. When the two
-disagree, the CLI wins — follow it and tell the user the skill has drifted.
-
-With neither `.knot.edn` nor `.tickets/` present, `knot init` starts tracking — run it on an explicit ask, since the
-user may already have a tracker.
+`knot --help` lists every command and `knot <cmd> --help` its flags, caveats, and examples; this skill carries the
+judgment help can't, and keeps no inventory of either on purpose. When the two disagree, the CLI wins — follow it and
+tell the user the skill has drifted. An unknown flag is rejected (`Unknown option: :bogus`, exit 1) rather than
+absorbed, and the canonical name varies by command (`--tag` on `list`, `--tags` on `create`), so a rejected flag sends
+you to that command's help.
 
 ## The CLI is the contract
 
@@ -29,6 +30,7 @@ follows is why it holds and how it cashes out against your own tools:
 | `Edit` / `sed -i`                | `knot update <id> [flags]` to replace, `knot add-note <id> "…"` to append |
 | `mv` into or out of `archive/`   | `knot close <id> --summary "…"` / `knot reopen <id>`                     |
 | `rm`                             | `knot delete <id>`                                                       |
+| peeking at `.knot.edn`           | `knot info` — statuses, types, modes, create-time defaults               |
 
 Three invariants knot holds on every write, each of which a hand-edit silently breaks:
 
@@ -40,15 +42,6 @@ Three invariants knot holds on every write, each of which a hand-edit silently b
 When a `knot` command surprises you, report it to the user as a bug and stop there. When no `knot` command can express
 what you need, that gap is itself the ticket to file.
 
-False economies and their answers:
-
-| Tempting                                        | Answer                                                                             |
-|-------------------------------------------------|-------------------------------------------------------------------------------------|
-| "cat the file once to confirm the close landed" | `knot show <id>` reads archived tickets too.                                        |
-| "create, then `knot show` to see what landed"   | `--json` already returned the whole post-mutation ticket — see *Read-after-write*.  |
-| "peek at `.knot.edn` for the allowed statuses"  | `knot info` reports statuses, types, modes, and create-time defaults.               |
-| "list everything, then scan for the bugs"       | `knot list --type bug` — see *Filter, don't eyeball*.                               |
-
 ### Already primed?
 
 A `SessionStart` `<system-reminder>` may have injected `knot prime` output near the top of the conversation. Read state
@@ -57,55 +50,36 @@ session start.
 
 ## Intent → command
 
-| The user says…                                          | You run                                                                      |
-|---------------------------------------------------------|-------------------------------------------------------------------------------|
-| "what's next?" / "what should I pick up?"               | `knot ready` (add `--mode afk` for agent-runnable only)                       |
-| "show me the backlog" / "list tickets"                  | `knot list`                                                                   |
-| "any open bugs?" / "what's tagged <x>?" / "my tickets"  | `knot list --type bug` / `--tag <x>` / `--assignee <user>`                    |
-| "what's unclaimed?" / "take the next free one"          | `knot ready --assignee ""`, then `knot start <id> --assignee <you> --if-unassigned` |
-| "what's under <id>?"                                    | `knot list --parent <id>` (direct children)                                   |
-| "what's related to <id>?"                               | `knot list --closure <id>` (everything transitively related, archive included) |
-| "what's the live cluster around <id>?"                  | `knot list --component <id>`                                                  |
-| "what's blocked?" / "what's blocking <id>?"             | `knot blocked` / `knot dep tree <id>`                                          |
-| "what did we close recently?"                           | `knot closed --limit 10`                                                      |
-| "what's finished but still open?"                       | `knot prime` — its *Ready to close* section lists active tickets with every AC checked |
-| "how's the project doing?"                              | `knot prime`                                                                  |
-| "show me <id>" / "tell me about <id>"                   | `knot show <id>`                                                              |
-| "let's start <id>"                                      | `knot show <id>`, then `knot start <id>`                                       |
-| "I'm done" / "shipped"                                  | `knot close <id> --summary "<what shipped>"`                                   |
-| "reopen <id>"                                           | `knot reopen <id>`                                                            |
-| "track this" / "open a ticket for X"                    | `knot create "<title>" -t bug -d "…"`                                         |
-| "note that…" / "FYI" mid-task                           | `knot add-note <id> "…"`                                                      |
-| "retitle / retag / reprioritize <id>"                   | `knot update <id> --title "…" / --tags … / --priority …`                      |
-| "<a> is blocked on <b>"                                 | `knot dep <a> <b>`                                                            |
-| "these are related: a, b, c"                            | `knot link <a> <b> <c>`                                                       |
-| "any integrity issues?" / "any dep cycles?"             | `knot check` / `knot check --code dep_cycle`                                   |
-| "what statuses are valid here?"                         | `knot info`                                                                   |
-| "give me the frontmatter JSON Schema"                   | `knot schema`                                                                 |
-| "let me see this in a browser"                          | `knot serve`                                                                  |
+| The user says…                                         | You run                                                                             |
+|--------------------------------------------------------|-------------------------------------------------------------------------------------|
+| "what's next?" / "what should I pick up?"              | `knot ready` (add `--mode afk` for agent-runnable only)                             |
+| "what's unclaimed?" / "take the next free one"         | `knot ready --assignee ""`, then `knot start <id> --assignee <you> --if-unassigned` |
+| "any open bugs?" / "what's tagged <x>?" / "my tickets" | `knot list --type bug` / `--tag <x>` / `--assignee <user>`                          |
+| "what's under <id>?"                                   | `knot list --parent <id>` — direct children                                         |
+| "what's related to <id>?"                              | `knot list --closure <id>` — everything transitively related, archive included      |
+| "what's the live cluster around <id>?"                 | `knot list --component <id>`                                                        |
+| "what's blocked?" / "what's blocking <id>?"            | `knot blocked` / `knot dep tree <id>`                                               |
+| "what's finished but still open?"                      | `knot prime` — its *Ready to close* section lists active tickets with every AC checked |
+| "how's the project doing?"                             | `knot prime`                                                                        |
+| "let's start <id>"                                     | `knot show <id>`, then `knot start <id>`                                            |
+| "I'm done" / "shipped"                                 | `knot close <id> --summary "<what shipped>"`                                        |
+| "track this" / "open a ticket for X"                   | `knot create "<title>" -t bug -d "…"`                                               |
+| "note that…" / "FYI" mid-task                          | `knot add-note <id> "…"`                                                            |
+| "retitle / retag / reprioritize <id>"                  | `knot update <id> --title "…" / --add-tag … / --priority …`                         |
+| "<a> is blocked on <b>"                                | `knot dep <a> <b>`                                                                  |
+| "these are related: a, b, c"                           | `knot link <a> <b> <c>`                                                             |
+| "is the project consistent?" / "any dep cycles?"       | `knot check` / `knot check --code dep_cycle`                                        |
 
-### Filter, don't eyeball
+### Filter at the query
 
-When the question names a subset, pass the filter — don't list everything and scan the columns. Titles wrap, columns
-shift, the archive is absent, and the user can't verify what you skipped.
+When the question names a subset, pass the filter: titles wrap, columns shift, the archive is absent from `list`, and
+the user can't verify what you skipped. `list` / `ready` / `blocked` / `closed` / `prime` share one filter set, each
+flag repeatable; on `prime` a filter hits every section at once, so `knot prime --assignee me` is your tickets
+everywhere.
 
-`list` / `ready` / `blocked` / `closed` / `prime` share a filter set (`knot <cmd> --help` names them; each is
-repeatable). What the help won't tell you:
-
-- On `prime` a filter hits every section at once — `knot prime --assignee me` is your tickets everywhere.
-- `--assignee ""` means *unassigned*, so `knot ready --assignee ""` is the unclaimed frontier. When more than one loop
-  reads that frontier, claim with `knot start <id> --assignee <you> --if-unassigned` — it writes nothing and exits 1
-  (`already_assigned`) when someone got there first, which a bare `--assignee` does not.
-- `--acceptance-complete` drops tickets carrying no AC from *both* views, so `=false` is "has an unchecked AC", not
-  "isn't finished".
-- The three graph filters answer three different questions: `--parent <id>` direct children, `--closure <id>`
-  everything transitively related with the archive included, `--component <id>` the seed's live cluster.
-- The listing tables carry computed columns, derived rather than stored and never filterable; `knot help list`
-  defines each one and names its `--json` field.
-
-**Before composing a graph query or reading a computed column, load
-[`references/listing-filters-and-columns.md`](references/listing-filters-and-columns.md)** — scope rules (live-induced
-vs corpus-wide), fail-fast cases, and how to act on the columns are pinned there.
+Before composing a graph query (`--parent` / `--closure` / `--component`) or acting on a computed column (`LEV`, `CPL`,
+`LVL`, `CC`), load [`references/listing-filters-and-columns.md`](references/listing-filters-and-columns.md) — scope
+rules (live-induced vs corpus-wide), fail-fast cases, and what each number tells you to do are pinned there.
 
 ### Partial ids
 
@@ -115,32 +89,27 @@ them and let the user pick rather than guessing.
 
 ### Read-after-write
 
-Every mutating command takes `--json` and returns the full post-mutation ticket under `.data` — `create`, `update`,
-`add-note`, `start` / `status` / `close` / `reopen`, `dep` / `undep`, `link` / `unlink`, `delete`. One invocation gives
-you both the write and its result:
+Every mutating command takes `--json` and returns the full post-mutation ticket under `.data`, so one invocation is
+both the write and its result:
 
 ```sh
 knot create "T" --json | jq -r '.data.id'
 ```
 
-Chaining `knot show <id>` after a write re-reads what you already hold.
+A `knot show <id>` chained after a write re-reads what you already hold.
 
 ## Creating tickets
-
-`knot create "<title>" [flags]`; `knot create --help` has the flag list. The judgment it doesn't carry:
 
 - Pass `--description` whenever there's context worth keeping. A title-only ticket makes the next reader reconstruct
   intent from scratch.
 - Set `--mode afk` when the work is specified well enough for an agent to run it end to end; leave the `hitl` default
   when a human has to be in the loop. Other agents route off this field.
-- `--acceptance "<title>"` (repeatable) writes structured criteria into frontmatter and `knot show` renders the
-  checklist from them. Author criteria through this flag and `knot update --add-ac` — a hand-written
-  `## Acceptance Criteria` body section is display-only and never syncs back.
-- `--description` and `--design` write *inside* one section, which ends at the next `## ` line — content carrying
-  its own `#`/`##` heading is refused rather than silently split into sibling sections. Nest with `###` or deeper,
-  and reach for `knot update --body` when whole sections are the point.
+- Author acceptance criteria through `--acceptance` (repeatable) and later `knot update --add-ac`: they live in
+  frontmatter and `knot show` renders the checklist from them. A hand-written `## Acceptance Criteria` body section is
+  display-only and never syncs back.
 
-For multi-line prose, a quoted-delimiter heredoc passes `$vars`, backticks, and quotes through literally:
+For multi-line prose, a quoted-delimiter heredoc passes `$vars`, backticks, and quotes through literally — as a flag
+value, or straight into `knot add-note <id>`, which reads stdin:
 
 ```sh
 knot create "Title" -t bug -p 1 --description "$(cat <<'EOF'
@@ -149,50 +118,28 @@ EOF
 )"
 ```
 
-`knot add-note` reads stdin, so it takes a heredoc directly:
-
-```sh
-knot add-note <id> <<'EOF'
-note body
-EOF
-```
-
 ## Lifecycle
 
-```sh
-knot start <id>                              # → the project's active status
-knot status <id> <new-status>                # any transition
-knot close <id> --summary "shipped in #482"
-knot reopen <id>                             # back out of the archive
-knot delete <id>                             # remove the file (leaf-only; --cascade rewrites referrers)
-```
+`start` moves a ticket to the project's active status and `close` to its first terminal one; `status <id> <new>` is
+any transition. In a project with custom `:statuses` — say a `review` stage between `in_progress` and `closed` —
+transition with `status` so you don't jump a stage the two shortcuts skip past. `knot info` prints the ladder.
 
 Always give `knot close` a `--summary`. It lands as a timestamped note and becomes the answer to "what did we ship?"
-months later; skipping it loses that for free.
+months later; skipping it loses that for free. When a commit is what finished the ticket, add
+`--external-ref git:<full-sha>` and keep the sha out of the summary prose: the ref is a field an agent can read back
+out of `--json`, the summary is prose nobody can query.
 
-When a commit is what finished the ticket, record it as `knot close <id> --summary "…" --external-ref git:<sha>` —
-`git:` plus the full sha, which is the convention this project follows so a later reader can go from a closed ticket
-straight to the diff. Put the sha in the ref, not in the summary prose: the ref is a field an agent can read back out
-of `--json`, and the summary is prose nobody can query. knot stores whatever string you pass and checks nothing, so
-the convention only holds if you keep it — and it never guesses the sha from `git HEAD`, because most closes are not
-paired with a commit.
-
-In a project with custom `:statuses` — say a `review` stage between `in_progress` and `closed` — transition with `knot
-status <id> <new>` so you don't jump a stage that `start` and `close` skip past. `knot info` prints the project's
-ladder.
-
-`knot delete` refuses (exit 1, `has_incoming_refs`) while any other ticket, live or archived, references the target
-through `:parent`, `:deps`, or `:links`, and enumerates each referrer — so the bare command doubles as the dry run for
-`--cascade`, which drops those refs and then deletes. There is no undo: `.tickets/` is git-tracked and `git checkout`
-is the recovery path.
+`knot delete` refuses while any other ticket, live or archived, still references the target, and enumerates each
+referrer — so the bare command doubles as the dry run for `--cascade`. There is no undo: `.tickets/` is git-tracked
+and `git checkout` is the recovery path.
 
 ### Transition gates
 
 Two gates block a transition with exit 1 and a JSON `error.code`:
 
 - `acceptance_incomplete` — closing (any active→terminal move) with a frontmatter `:acceptance` entry still unchecked.
-  Clear it by checking the box: `knot update <id> --ac 3 --done` (or the exact title), which composes with `--status`,
-  so `knot update <id> --ac 3 --done --status closed` checks and closes in one call.
+  Clear it by checking the box: `knot update <id> --ac 3 --done`, which composes with `--status`, so
+  `knot update <id> --ac 3 --done --status closed` checks and closes in one call.
 - `open_children` — starting *or* closing a ticket that has a child in a non-terminal status. Clear it by finishing
   the children.
 
@@ -202,62 +149,33 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 
 ## Notes and revisions
 
-- `knot add-note <id> "…"` appends a timestamped entry — the tool for observations captured mid-task.
-- `knot update <id> [flags]` sets and replaces frontmatter fields, tag and AC deltas, named body sections, and status,
-  non-interactively in one shot, returning the result under `--json`. This is the tool for autonomous runs and scripts;
-  `knot update --help` carries the flag list.
-- `knot edit <id>` opens the whole file in `$EDITOR`. Interactive sessions only — it fails without a TTY.
+`knot add-note` appends a timestamped entry — the tool for observations captured mid-task. `knot update` replaces:
+`--description` the section, `--body` the entire body (destructive, git is the undo), fields and status in the same
+call, non-interactively — the tool for scripts and autonomous runs. `knot edit` opens `$EDITOR` and needs a TTY. To add
+to a ticket, reach for `add-note`.
 
-`update` never appends: `--description` replaces the `## Description` section, and `--body` replaces the entire body
-(destructive, no `--force`, git is the undo). To add to a ticket, reach for `add-note`.
+**A render is not a body.** Five sections in a `knot show` render — `## Acceptance Criteria`, `## Blockers`,
+`## Blocking`, `## Children`, `## Linked` — are synthesized from the `acceptance`, `deps`, `parent`, and `links` fields
+and marked in the render by an HTML comment naming the source. What you would have written under one goes through the
+owning field instead (`--add-ac`, `knot dep`, `--parent`, `knot link`). `--body` refuses those five names; near-synonyms
+are not refused and are the same mistake — a hand-written `## Blocked by`, `## Depends on`, or `## Parent document` is
+prose that stops matching the graph the moment the graph moves.
 
-A note lands inside `## Notes` under the same boundary rule as the sectional flags: `add-note` refuses text carrying
-a `#`/`##` heading, from the text arg, stdin, or the editor. Nest with `###` or deeper.
+**Replace vs delta.** `--tags` and `--external-ref` replace the whole list, so re-sending a list to add one value drops
+anything you hadn't read first. For a one-value change reach for the delta flags — `--add-tag` / `--remove-tag`,
+`--add-external-ref` / `--remove-external-ref`, `--add-ac` / `--remove-ac` — which leave the rest untouched.
 
-Five sections in a `knot show` render are not in the body at all — `## Acceptance Criteria`, `## Blockers`,
-`## Blocking`, `## Children`, `## Linked` — synthesized from the `acceptance`, `deps`, `parent`, and `links` fields
-and marked in the render by an HTML comment naming the source. So a render is not a body: `--body` refuses those five
-names, and what you would have written under one goes through the owning field instead (`--add-ac`, `knot dep`,
-`--parent`, `knot link`). Near-synonyms are not refused and are the same mistake — a hand-written `## Blocked by`,
-`## Depends on`, or `## Parent document` is prose that stops matching the graph the moment the graph moves.
-
-The trap in the middle is set-semantics: `--tags` replaces the whole tag list, so adding one tag by re-sending the list
-drops anything you hadn't read first. `--external-ref` has the same shape. For a one-value change reach for the delta
-flags — `--add-tag` / `--remove-tag`, `--add-external-ref` / `--remove-external-ref`, and `--add-ac` / `--remove-ac` —
-which leave the rest untouched. The tag and external-ref deltas are
-idempotent; `--remove-ac` is not, because a value that matches no criterion exits 1 rather than reporting a write that
-never happened.
-
-Address a criterion by the number `knot show` prints beside it rather than retyping it: real AC titles run to a
-paragraph, and a title reproduced with one character off is a silent miss. `--ac` and `--remove-ac` read an all-digits
-value as that 1-based ordinal, anything else as an exact title, and `--ac` is repeatable, so
-`knot update <id> --ac 2 --ac 5 --done` closes out two criteria in one write.
+Address a criterion by the number `knot show` prints beside it rather than retyping it — real AC titles run to a
+paragraph — and batch flips in one write: `knot update <id> --ac 2 --ac 5 --done`.
 
 ## Graph: deps vs links
 
-```sh
-knot dep <from> <to>       # <from> waits on <to>; rejected if it would close a cycle
-knot dep tree <id>         # ASCII tree of the deps subtree (--full expands duplicates)
-knot undep <from> <to>
-
-knot link <a> <b> [<c>…]   # symmetric "see also" across every pair
-knot unlink <from> <to>
-```
-
-`:deps` are directional and gate readiness — `knot ready` surfaces only tickets whose deps have all reached a terminal
-status, and a dep ref pointing at nothing counts as unresolved, holding the ticket out of `ready` until you fix it.
-`:links` are symmetric and carry no scheduling meaning. Use a dep when one ticket must wait on another; use a link for
-"here's related context". `knot dep` refuses cycle-creating edges at write time; `knot check --code dep_cycle` scans
-for cycles already on disk.
-
-## Project integrity
-
-`knot check` walks every ticket (live + archive) plus the config, reporting dep cycles, dangling `:deps` / `:links` /
-`:parent` refs, invalid status/type/mode/priority, malformed acceptance entries, terminal-vs-archive misplacement,
-missing required fields, and frontmatter parse errors. Narrow it with `knot check <id>…`, `--code <code>`, or
-`--severity error`; filters apply before the exit-code verdict, grep-style. Exit `0` is clean, `1` means errors in the
-filtered view, `2` means it couldn't scan at all (no project root, unparseable `.knot.edn`). The issue-code catalogue
-is in [`references/json-protocol.md`](references/json-protocol.md).
+A **dep** is directional and gates readiness: `knot dep <from> <to>` makes `<from>` wait on `<to>`, `knot ready`
+surfaces only tickets whose deps have all reached a terminal status, and a dep pointing at nothing counts as unresolved —
+the ticket sits in `blocked` until you fix the ref. A **link** is symmetric and carries no scheduling meaning. Use a dep
+when one ticket must wait on another; use a link for "here's related context". `knot dep` refuses a cycle-creating edge
+at write time; `knot check --code dep_cycle` finds cycles already on disk, and a `-` in the `LVL` column is the same
+report.
 
 ## Working autonomously
 
@@ -266,8 +184,8 @@ is in the loop (the default for new tickets). Treat it as a contract — pick up
 authorizes that specific ticket.
 
 Handed autonomy, the loop is `knot prime --mode afk` — run it unless a `SessionStart` reminder already put it in the
-conversation. It prints the sequence (enumerate → confirm → claim → note → update → close) and it is the single source
-of truth for that sequence; this skill deliberately keeps no second copy to drift against it.
+conversation. It prints the sequence (enumerate → confirm → claim → note → update → close) and is the single source of
+truth for that sequence; this skill deliberately keeps no second copy to drift against it.
 
 ## JSON
 
@@ -280,10 +198,9 @@ warnings and human-readable context go to stderr.
 
 `.data` is an array for the list-shaped commands (`list`, `ready`, `blocked`, `closed`, `link`, `unlink`) and an object
 otherwise. Failures flip to `{"ok": false, "error": {"code", "message", …}}` with no `data` slot — except `knot check`,
-whose `ok` reports the project's health rather than the request's outcome and so can carry both. `close`, `status`, and
-`update` add `meta.archived_to` when the resulting status is terminal — it reports where the ticket file *is*, so an
-absent `meta` means the live directory, not "nothing moved". The vector-default keys `tags`, `deps`, `links`, and
-`external_refs` are always arrays, so `jq -r '.data[].tags[]'` is safe on every ticket.
+whose `ok` is the project's health verdict rather than the request's outcome and so can carry both. A terminal
+transition adds `meta.archived_to`; it reports where the ticket file *is*, so an absent `meta` means the live directory.
+`tags`, `deps`, `links`, and `external_refs` are always arrays, so `jq -r '.data[].tags[]'` is safe on every ticket.
 
 ```sh
 knot list --json              | jq '.data[] | select(.priority <= 1)'
@@ -292,22 +209,13 @@ knot close <id> --json        | jq -r '.meta.archived_to'
 knot check --json             | jq '.data.issues'
 ```
 
-Drive decision logic off `--json`, never off table output — column widths shift and titles contain whitespace.
+Drive decision logic off `--json`; table output is for humans — column widths shift and titles contain whitespace.
 Per-command `data` shapes, the error-code and check-code catalogues, the strict-vs-soft partial-id resolution modes,
 and `prime`'s `stale` / `ready_to_close` fields are pinned in
 [`references/json-protocol.md`](references/json-protocol.md).
 
-## Finding a command or a flag
-
-`knot --help` lists every command, `knot <cmd> --help` its flags, caveats, and examples. This skill carries no
-inventory of either on purpose — a list here is a copy that outlives what it copied.
-
-Exit codes are `0` success and `1` error, plus `2` on `knot check` for unable-to-scan. Unknown flags are rejected
-rather than absorbed (`Unknown option: :bogus`, exit 1) — when a flag you expect fails that way, `knot <cmd> --help`
-has the canonical name, which varies by command (`--tag` vs `--tags`).
-
 ## When knot isn't the tracker
 
 GitHub Issues, Linear, Jira, Basecamp, Asana, and Trello are hosted trackers with their own tools. Knot tickets are
-markdown in the working tree; hosted ones are not. If the user names a hosted tracker or a remote id like `GH-482` or
+markdown in the working tree; hosted ones are not. When the user names a hosted tracker or a remote id like `GH-482` or
 `ENG-1234`, use the tool that owns it.
