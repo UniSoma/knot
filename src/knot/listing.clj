@@ -156,7 +156,10 @@
    `(fn [rows corpus terminal-statuses])` adding the row key, absent for a
    column read straight off frontmatter; `:shown?` `(fn [rows])` deciding
    whether the column appears at all; `:cell` `(fn [row])` the plain cell
-   string; `:json` `(fn [row])` the fields the row's JSON gains, or nil.
+   string; `:json` `(fn [row])` the fields the row's JSON gains, or nil;
+   `:note` the column's definition for the NOTES of every command that
+   renders it — the pull surface owns it (ADR 0017), so no prose document
+   should cache it. Help prefixes the note with `:header`.
 
    The graph metrics (`:sources` = `live-sources`) are computed over the
    whole live-induced graph of the corpus, so a blocker outside the view
@@ -170,7 +173,8 @@
     :cell   (fn [row] (if-let [ac (seq (get-in row [:frontmatter :acceptance]))]
                         (let [[d t] (acceptance/progress ac)] (str d "/" t))
                         "-"))
-    :json   (constantly nil)}
+    :json   (constantly nil)
+    :note   "done/total acceptance criteria, `-` when the ticket has none. The column appears only when some row in the view carries criteria. --json carries the full `acceptance` list instead."}
    {:key :children :header "CHLD" :align :left
     :sources all-sources
     ;; Only umbrellas gain the key, so its absence doubles as the
@@ -179,31 +183,36 @@
     :shown? (fn [rows] (some :children-progress rows))
     :cell   (fn [row] (if-let [[term total] (:children-progress row)] (str term "/" total) "-"))
     :json   (fn [row] (when-let [[term total] (:children-progress row)]
-                        {:children_total total :children_terminal term}))}
+                        {:children_total total :children_terminal term}))
+    :note   "terminal/total direct children, `-` for a ticket that is not an umbrella. The column appears only when the view holds an umbrella. --json adds `children_total` and `children_terminal`, on umbrella rows only."}
    {:key :leverage :header "LEV" :align :right
     :sources live-sources
     :attach (attach-per-row :leverage query/leverage)
     :shown? (fn [rows] (some #(contains? % :leverage) rows))
     :cell   (int-or-dash :leverage)
-    :json   (when-attached :leverage)}
+    :json   (when-attached :leverage)
+    :note   "leverage: how many live tickets transitively depend on this one through deps — its forward unblocking cone, the ticket itself excluded. Close a high-LEV ticket to move the most other work toward ready. --json field `leverage`, always an integer on these three commands."}
    {:key :coupling :header "CPL" :align :right
     :sources live-sources
     :attach (attach-per-row :coupling query/coupling)
     :shown? (fn [rows] (some #(contains? % :coupling) rows))
     :cell   (int-or-dash :coupling)
-    :json   (when-attached :coupling)}
+    :json   (when-attached :coupling)
+    :note   "coupling: how many distinct live tickets sit one hop away through deps (either direction) or links — its undirected 1-hop degree over those two axes, deduped; parent is excluded. High CPL marks a ticket you must hold a lot of surrounding context to reason about. --json field `coupling`, always an integer on these three commands."}
    {:key :level :header "LVL" :align :right
     :sources live-sources
     :attach (attach-from-map :level query/levels)
     :shown? (fn [rows] (some #(contains? % :level) rows))
     :cell   (int-or-dash :level)
-    :json   (when-attached :level)}
+    :json   (when-attached :level)
+    :note   "level: how many rounds of closes away the ticket is — the length of the longest chain of live blockers beneath it through deps, `0` exactly when the ticket is ready. Whole-graph, never scoped to a --parent view: a blocker under another umbrella still gates. `-` when the ticket sits on, or depends through, a live deps cycle — a data error `knot check` reports, not a schedule. --json field `level` on every row; `group_by(.level)` turns a blocked listing into waves."}
    {:key :cc :header "CC" :align :left :position :leading
     :sources live-sources
     :attach (attach-from-map :cc query/connected-components)
     :shown? (fn [rows] (some #(some? (:cc %)) rows))
     :cell   (int-or-dash :cc)
-    :json   (when-attached :cc)}])
+    :json   (when-attached :cc)
+    :note   "connected component: which cluster of the live graph (parent, deps and links, undirected) the row sits on. The number is a throwaway within-snapshot ordinal — largest cluster 1, `-` for a singleton — and membership ignores your filters. --json field `cc` on every row, null for a singleton. Use --component to work one cluster."}])
 
 (defn- attach-columns
   [rows corpus terminal-statuses source]

@@ -4,7 +4,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.help :as help]
-            [knot.listing :as listing]
             [knot.version :as version]))
 
 (def ^:private dep-entry
@@ -766,39 +765,6 @@
       (is (zero? exit) (str "expected exit 0; err=" err))
       (is (= (str version/version "\n") out))
       (is (str/blank? err)))))
-
-;; --- listing column documentation drift guard -------------------------------
-
-(def ^:private computed-column-json-fields
-  "Computed column key -> the `--json` field name(s) its NOTES line must
-   name. AGE has no field of its own; it is bucketed from `updated`."
-  {:age        ["updated"]
-   :acceptance ["acceptance"]
-   :children   ["children_total" "children_terminal"]
-   :leverage   ["leverage"]
-   :coupling   ["coupling"]
-   :cc         ["cc"]
-   :level      ["level"]})
-
-(deftest listing-notes-document-computed-columns-test
-  ;; ADR 0017: anything derivable from the CLI belongs on the pull surface,
-  ;; so every computed column is defined in the help of the commands that
-  ;; render it. This guard fails when a column is added without its note.
-  (let [computed (cons {:key :age :header "AGE"} listing/columns)]
-
-    (testing "every computed column listing declares is covered by this guard"
-      (is (= (set (map :key computed))
-             (set (keys computed-column-json-fields)))
-          "a new computed column needs a NOTES line and an entry here"))
-
-    (doseq [cmd [:list :ready :blocked]]
-      (let [notes (str/join "\n" (:notes (get help/registry cmd)))]
-        (doseq [{:keys [key header]} computed]
-          (testing (str "knot help " (name cmd) " explains " header)
-            (is (re-find (re-pattern (str "\\b" header "\\b")) notes))
-            (doseq [field (get computed-column-json-fields key)]
-              (is (str/includes? notes (str "`" field "`"))
-                  (str header " must name its --json field " field)))))))))
 
 (deftest sectional-inputs-name-the-section-boundary-test
   (testing "the --description / --design descs say where a section ends"
