@@ -4227,7 +4227,7 @@ Restart the daemon.
              (cli/update-cmd (ctx tmp) {:id id :body "## Blocking\n\n- kno-1\n"})))
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo
-             #"## Children.*parent field.*--parent"
+             #"## Children.*other tickets' parent.*--parent"
              (cli/update-cmd (ctx tmp) {:id id :body "## Children\n\n- kno-1\n"})))
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo

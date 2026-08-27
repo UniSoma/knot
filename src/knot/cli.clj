@@ -54,12 +54,6 @@
       ""
       (str/join "\n" sections))))
 
-(def ^:private section-heading-pat
-  "Matches an H1 or H2 line. `## ` is exactly what the body parser splits
-   sections on; H1 joins it so the rule stays one sentence — the title is
-   the ticket's H1, knot's sections are its H2s."
-  #"(?m)^#{1,2} .*$")
-
 (defn- validate-no-section-headings!
   "Refuse `content` when it carries a heading that would end the section it
    is written into. `label` names the offending input in the message
@@ -67,22 +61,12 @@
    `:offending-heading`, so every sectional write path can refuse before
    touching a file."
   [label content]
-  (when-let [heading (some->> content (re-find section-heading-pat) str/trimr)]
+  (when-let [heading (ticket/section-breaking-heading content)]
     (throw (ex-info (str label " contains the heading \"" heading
                          "\": a section ends at the next ## line, so headings "
                          "inside a section must be ### or deeper. Use "
                          "update --body to write whole sections.")
                     {:offending-heading heading}))))
-
-(def ^:private reserved-section-owners
-  "Reserved heading -> the field that holds it and the flag that writes
-   it. `Blocking` is the one with no writer of its own: it is other
-   tickets' deps, read backwards."
-  {"Acceptance Criteria" "the acceptance field, written with --acceptance / --add-ac"
-   "Blockers"            "the deps field, written with knot dep"
-   "Blocking"            "other tickets' deps, written with knot dep on the blocked ticket"
-   "Children"            "each child's parent field, written with --parent"
-   "Linked"              "the links field, written with knot link"})
 
 (defn- validate-no-reserved-sections!
   "Refuse a `--body` carrying a section `show` synthesizes rather than
@@ -92,7 +76,9 @@
   (when-let [heading (first (ticket/reserved-sections body))]
     (throw (ex-info (str "--body contains the reserved heading \"## " heading
                          "\": knot show renders that section from "
-                         (reserved-section-owners heading)
+                         (ticket/reserved-section-source heading)
+                         ", written with "
+                         (:writer (ticket/reserved-section-owner heading))
                          ". If a frontmatter field holds it, the body doesn't.")
                     {:offending-section heading}))))
 

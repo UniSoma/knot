@@ -6,7 +6,8 @@
    to markdown, resolve an ordinal or title to an entry, validate the
    on-disk shape, parse
    a body section (one-shot migration only)."
-  (:require [clojure.string :as str]))
+  (:require [clojure.string :as str]
+            [knot.ticket :as ticket]))
 
 (defn progress
   "Return `[done-count total-count]` for `acceptance`. `[0 0]` on
@@ -32,16 +33,10 @@
   [acceptance]
   (every? :done acceptance))
 
-(def provenance-comment
-  "The line `render-section` prints under the heading. The section is
-   derived, not stored: an HTML comment says so where an agent reads the
-   render, and stays invisible where a human views the markdown."
-  "<!-- from frontmatter acceptance; edit with --add-ac / --ac -->")
-
 (defn render-section
   "Format an `:acceptance` vector as a `## Acceptance Criteria` markdown
    block, preceded by a leading blank-line separator and carrying
-   `provenance-comment` under the heading. Each entry is
+   `ticket/reserved-section-provenance` under the heading. Each entry is
    numbered with its 1-based ordinal — the number `--ac` and
    `--remove-ac` accept in place of the title. Returns `\"\"`
    when the vector is nil/empty so callers can concatenate
@@ -49,7 +44,8 @@
   [acceptance]
   (if (empty? acceptance)
     ""
-    (str "\n## Acceptance Criteria\n" provenance-comment "\n\n"
+    (str "\n## Acceptance Criteria\n"
+         (ticket/reserved-section-provenance "Acceptance Criteria") "\n\n"
          (str/join "\n"
                    (map-indexed (fn [i {:keys [title done]}]
                                   (str (inc i) ". [" (if done "x" " ") "] " title))

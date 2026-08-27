@@ -169,12 +169,50 @@
     (cond-> sections
       (str/blank? (get sections "")) (dissoc ""))))
 
+(def reserved-section-owners
+  "The `## ` headings `show` synthesizes rather than reads, in render
+   order, each with the frontmatter field it comes from and the flag that
+   writes it. `:inverse?` marks the two read backwards from other
+   tickets' fields — `Blocking` is other tickets' deps, `Children` other
+   tickets' parent. A body that carries one duplicates a field and
+   drifts from it, so the write surface refuses them and `check` flags
+   the ones already stored. Every message about a reserved section
+   formats from this table."
+  [{:heading "Acceptance Criteria" :field "acceptance" :writer "--add-ac / --ac"}
+   {:heading "Blockers"  :field "deps"   :writer "knot dep"}
+   {:heading "Blocking"  :field "deps"   :writer "knot dep on the blocked ticket" :inverse? true}
+   {:heading "Children"  :field "parent" :writer "--parent on the child"         :inverse? true}
+   {:heading "Linked"    :field "links"  :writer "knot link"}])
+
 (def reserved-section-names
-  "The `## ` headings `show` synthesizes rather than reads: the first from
-   the `acceptance` field, the rest from the graph. A body that carries
-   one duplicates a field and drifts from it, so the write surface
-   refuses them and `check` flags the ones already stored."
-  ["Acceptance Criteria" "Blockers" "Blocking" "Children" "Linked"])
+  "The `:heading` column of `reserved-section-owners`, in its order."
+  (mapv :heading reserved-section-owners))
+
+(defn reserved-section-owner
+  "The `reserved-section-owners` row for `heading`, nil when it is not
+   reserved."
+  [heading]
+  (some #(when (= heading (:heading %)) %) reserved-section-owners))
+
+(defn reserved-section-source
+  "Where `show` reads the reserved `heading` from, as a noun phrase:
+   `the deps field` for a stored field, `other tickets' deps` for an
+   inverse."
+  [heading]
+  (let [{:keys [field inverse?]} (reserved-section-owner heading)]
+    (if inverse?
+      (str "other tickets' " field)
+      (str "the " field " field"))))
+
+(defn reserved-section-provenance
+  "The HTML comment `show` prints under the reserved `heading`: the
+   section is derived, not stored, and the comment says so where an
+   agent reads the render while staying invisible where a human views
+   the markdown."
+  [heading]
+  (let [{:keys [field inverse? writer]} (reserved-section-owner heading)]
+    (str "<!-- " (if inverse? "inverse of other tickets' " "from frontmatter ")
+         field "; edit with " writer " -->")))
 
 (defn reserved-sections
   "The `reserved-section-names` `body` carries as `## ` headings, in
@@ -183,6 +221,20 @@
   [body]
   (let [present (set (map second (re-seq body-heading-pat (or body ""))))]
     (filterv present reserved-section-names)))
+
+(def ^:private section-breaking-heading-pat
+  ;; An H1 or H2 line. `## ` is exactly what `body-sections` splits on;
+  ;; H1 joins it so the rule stays one sentence — the title is the
+  ;; ticket's H1, knot's sections are its H2s.
+  #"(?m)^#{1,2} .*$")
+
+(defn section-breaking-heading
+  "The first line of `fragment` that would end the section it is written
+   into — an H1 or H2 heading, trailing whitespace trimmed — or nil when
+   every heading is `### ` or deeper. The sectional write paths refuse
+   through this before touching a file."
+  [fragment]
+  (some->> fragment (re-find section-breaking-heading-pat) str/trimr))
 
 (defn duplicate-sections
   "The `## ` headings `body` carries more than once, in first-appearance

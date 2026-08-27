@@ -220,33 +220,25 @@
                        "run `knot migrate-ac` to lift entries into "
                        "structured frontmatter")}])))
 
-(def ^:private reserved-section-fields
-  "Graph heading -> the field `show` renders that section from. Keyed on
-   `ticket/reserved-section-names` minus `Acceptance Criteria`, which
-   keeps `:legacy_acceptance_section`: that one has an automatic fix
-   (`migrate-ac`) and these do not — the prose under a graph heading is
-   usually narrative, so only a human can decide what survives."
-  {"Blockers" "the ticket's deps field"
-   "Blocking" "the deps fields of the tickets it blocks"
-   "Children" "the parent field of each child"
-   "Linked"   "the ticket's links field"})
-
 (defn- check-reserved-sections
   "Per-ticket warning: ticket body carries a `## ` heading `show`
    synthesizes from the graph. Stored, it duplicates the field it names
-   and drifts from it. One issue per heading found."
+   and drifts from it. One issue per heading found. `Acceptance
+   Criteria` is left to `:legacy_acceptance_section`: that one has an
+   automatic fix (`migrate-ac`) and these do not — the prose under a
+   graph heading is usually narrative, so only a human can decide what
+   survives."
   [_ctx ticket]
   (let [{:keys [id]} (:frontmatter ticket)]
     (when id
       (for [heading (ticket/reserved-sections (:body ticket))
-            :let    [field (reserved-section-fields heading)]
-            :when   field]
+            :when   (not= heading "Acceptance Criteria")]
         {:severity :warning
          :code     :reserved_section
          :ids      [id]
          :message  (str "reserved '## " heading "' body section found; "
                         "delete it — knot show renders that section from "
-                        field)}))))
+                        (ticket/reserved-section-source heading))}))))
 
 (defn- check-duplicate-sections
   "Per-ticket warning: the same `## ` heading appears more than once in

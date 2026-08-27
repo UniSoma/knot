@@ -27,18 +27,13 @@
 
 (def ^:private inverse-section-order
   "Canonical render order — Blockers, Blocking, Children, Linked — each
-   with the provenance comment that goes under its heading. The sections
-   are derived, not stored: the comment names the field they come from
-   and the flag that writes it, and stays invisible where a human views
-   the markdown."
-  [[:blockers "## Blockers"
-    "<!-- from frontmatter deps; edit with knot dep -->"]
-   [:blocking "## Blocking"
-    "<!-- inverse of other tickets' deps; edit with knot dep on the blocked ticket -->"]
-   [:children "## Children"
-    "<!-- inverse of other tickets' parent; edit with --parent on the child -->"]
-   [:linked   "## Linked"
-    "<!-- from frontmatter links; edit with knot link -->"]])
+   keyed to its entry in `inverses`. The sections are derived, not
+   stored; `ticket/reserved-section-provenance` says so under each
+   heading."
+  [[:blockers "Blockers"]
+   [:blocking "Blocking"]
+   [:children "Children"]
+   [:linked   "Linked"]])
 
 (defn- render-inverse-sections
   "Build the trailing inverse-section markdown for `show-text`. Empty
@@ -47,14 +42,14 @@
    `[terminal total]` tuple) is supplied, the `## Children` heading carries
    the `(d/t)` rollup; otherwise it renders plain `## Children`."
   [inverses children-progress]
-  (let [parts (for [[k header provenance] inverse-section-order
+  (let [parts (for [[k heading] inverse-section-order
                     :let [entries (get inverses k)
                           header  (if (and (= k :children) children-progress)
                                     (let [[term total] children-progress]
-                                      (str header " (" term "/" total ")"))
-                                    header)]
+                                      (str "## " heading " (" term "/" total ")"))
+                                    (str "## " heading))]
                     :when (seq entries)]
-                (str header "\n" provenance "\n\n"
+                (str header "\n" (ticket/reserved-section-provenance heading) "\n\n"
                      (str/join "\n" (map inverse-line entries))
                      "\n"))]
     (if (empty? parts)

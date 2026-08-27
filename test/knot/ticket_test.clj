@@ -347,3 +347,41 @@
   (testing "a heading with no slug-able characters folds into the preamble key"
     (let [body "## !!!\n\nstray\n"]
       (is (= {"" "\n\nstray\n"} (ticket/body-sections body))))))
+
+(deftest reserved-section-owners-test
+  (testing "the table lists every reserved heading in render order"
+    (is (= ["Acceptance Criteria" "Blockers" "Blocking" "Children" "Linked"]
+           (mapv :heading ticket/reserved-section-owners)))
+    (is (= ticket/reserved-section-names
+           (mapv :heading ticket/reserved-section-owners))))
+  (testing "reserved-section-owner looks a heading up; unknown headings are nil"
+    (is (= "deps" (:field (ticket/reserved-section-owner "Blockers"))))
+    (is (nil? (ticket/reserved-section-owner "Description"))))
+  (testing "source names the field a stored section comes from, or the inverse it is read from"
+    (is (= "the deps field" (ticket/reserved-section-source "Blockers")))
+    (is (= "other tickets' deps" (ticket/reserved-section-source "Blocking")))
+    (is (= "other tickets' parent" (ticket/reserved-section-source "Children")))
+    (is (= "the links field" (ticket/reserved-section-source "Linked")))
+    (is (= "the acceptance field" (ticket/reserved-section-source "Acceptance Criteria"))))
+  (testing "provenance is the comment show prints under each derived heading"
+    (is (= "<!-- from frontmatter acceptance; edit with --add-ac / --ac -->"
+           (ticket/reserved-section-provenance "Acceptance Criteria")))
+    (is (= "<!-- from frontmatter deps; edit with knot dep -->"
+           (ticket/reserved-section-provenance "Blockers")))
+    (is (= "<!-- inverse of other tickets' deps; edit with knot dep on the blocked ticket -->"
+           (ticket/reserved-section-provenance "Blocking")))
+    (is (= "<!-- inverse of other tickets' parent; edit with --parent on the child -->"
+           (ticket/reserved-section-provenance "Children")))
+    (is (= "<!-- from frontmatter links; edit with knot link -->"
+           (ticket/reserved-section-provenance "Linked")))))
+
+(deftest section-breaking-heading-test
+  (testing "the first H1 or H2 line, trailing whitespace trimmed"
+    (is (= "## Problem" (ticket/section-breaking-heading "Intro\n\n## Problem  \n\nIt broke.\n")))
+    (is (= "# Title" (ticket/section-breaking-heading "# Title\n## Later\n"))))
+  (testing "### and deeper never end a section; neither does a heading mid-line"
+    (is (nil? (ticket/section-breaking-heading "### Step one\n\nDo it.\n")))
+    (is (nil? (ticket/section-breaking-heading "see ## Problem above"))))
+  (testing "nil and empty fragments carry no heading"
+    (is (nil? (ticket/section-breaking-heading nil)))
+    (is (nil? (ticket/section-breaking-heading "")))))
