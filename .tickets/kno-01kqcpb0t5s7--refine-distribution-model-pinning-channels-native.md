@@ -6,7 +6,7 @@ type: task
 priority: 3
 mode: hitl
 created: '2026-04-29T13:20:01.861232445Z'
-updated: '2026-08-27T20:05:36.623946431Z'
+updated: '2026-08-27T20:22:04.238150530Z'
 deps:
 - kno-01kqcpw6bzn6
 links:
@@ -46,3 +46,7 @@ https://github.com/unisoma/aishell has good ideas
 **2026-08-27T20:05:36.623946431Z**
 
 Native binary via jolt is proven: jolt/ (deps.edn + cheshire/clj-yaml shims, bb build:jolt) compiles knot to an 18.6 MB self-contained ELF that passes the full bb test suite when the integration tests target the binary. Gaps: knot serve (http-kit is Java), startup ~160 ms vs bb ~110 ms, list/check slower from the Clojure YAML shim. Upstream jolt bugs found: str/last-index-of rejects a char, Matcher.find(int) ignores its offset, vendored babashka.fs/list-dir unbound. See jolt/README.md.
+
+**2026-08-27T20:22:04.238150530Z**
+
+bb uberjar + bb binary concatenation (bb build:bb -> target/knot, 68 MB) works unchanged and matches bb -m knot.main byte for byte. Timings vs jolt/knot on 149 tickets: --help 80 vs 155 ms; ready/list/prime/create ~100 vs ~300 ms; check 120 vs 350 ms; close 103 vs 300 ms; show 115 vs 440 ms; peak RSS on check 100 vs 160 MB. Jolt's only win is size (18 MB). The gap is the pure-Clojure YAML shim; SnakeYAML parses the same tickets ~7x faster.
