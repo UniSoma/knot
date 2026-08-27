@@ -9,7 +9,8 @@
     (is (= "" (acceptance/render-section []))))
 
   (testing "renders a numbered `N. [ ] / N. [x]` checklist with leading blank-line separator"
-    (is (= "\n## Acceptance Criteria\n\n1. [ ] foo\n2. [x] bar\n"
+    (is (= (str "\n## Acceptance Criteria\n" acceptance/provenance-comment
+                "\n\n1. [ ] foo\n2. [x] bar\n")
            (acceptance/render-section [{:title "foo" :done false}
                                        {:title "bar" :done true}]))))
 

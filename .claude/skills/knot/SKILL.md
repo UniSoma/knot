@@ -214,6 +214,13 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 A note lands inside `## Notes` under the same boundary rule as the sectional flags: `add-note` refuses text carrying
 a `#`/`##` heading, from the text arg, stdin, or the editor. Nest with `###` or deeper.
 
+Five sections in a `knot show` render are not in the body at all — `## Acceptance Criteria`, `## Blockers`,
+`## Blocking`, `## Children`, `## Linked` — synthesized from the `acceptance`, `deps`, `parent`, and `links` fields
+and marked in the render by an HTML comment naming the source. So a render is not a body: `--body` refuses those five
+names, and what you would have written under one goes through the owning field instead (`--add-ac`, `knot dep`,
+`--parent`, `knot link`). Near-synonyms are not refused and are the same mistake — a hand-written `## Blocked by`,
+`## Depends on`, or `## Parent document` is prose that stops matching the graph the moment the graph moves.
+
 The trap in the middle is set-semantics: `--tags` replaces the whole tag list, so adding one tag by re-sending the list
 drops anything you hadn't read first. `--external-ref` has the same shape. For a one-value change reach for the delta
 flags — `--add-tag` / `--remove-tag`, `--add-external-ref` / `--remove-external-ref`, and `--add-ac` / `--remove-ac` —

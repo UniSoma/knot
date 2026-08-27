@@ -26,11 +26,19 @@
          :else     (ticket-title ticket))))
 
 (def ^:private inverse-section-order
-  "Canonical render order: Blockers, Blocking, Children, Linked."
-  [[:blockers "## Blockers"]
-   [:blocking "## Blocking"]
-   [:children "## Children"]
-   [:linked   "## Linked"]])
+  "Canonical render order — Blockers, Blocking, Children, Linked — each
+   with the provenance comment that goes under its heading. The sections
+   are derived, not stored: the comment names the field they come from
+   and the flag that writes it, and stays invisible where a human views
+   the markdown."
+  [[:blockers "## Blockers"
+    "<!-- from frontmatter deps; edit with knot dep -->"]
+   [:blocking "## Blocking"
+    "<!-- inverse of other tickets' deps; edit with knot dep on the blocked ticket -->"]
+   [:children "## Children"
+    "<!-- inverse of other tickets' parent; edit with --parent on the child -->"]
+   [:linked   "## Linked"
+    "<!-- from frontmatter links; edit with knot link -->"]])
 
 (defn- render-inverse-sections
   "Build the trailing inverse-section markdown for `show-text`. Empty
@@ -39,14 +47,14 @@
    `[terminal total]` tuple) is supplied, the `## Children` heading carries
    the `(d/t)` rollup; otherwise it renders plain `## Children`."
   [inverses children-progress]
-  (let [parts (for [[k header] inverse-section-order
+  (let [parts (for [[k header provenance] inverse-section-order
                     :let [entries (get inverses k)
                           header  (if (and (= k :children) children-progress)
                                     (let [[term total] children-progress]
                                       (str header " (" term "/" total ")"))
                                     header)]
                     :when (seq entries)]
-                (str header "\n\n"
+                (str header "\n" provenance "\n\n"
                      (str/join "\n" (map inverse-line entries))
                      "\n"))]
     (if (empty? parts)
@@ -61,14 +69,22 @@
    sections — `## Blockers`, `## Blocking`, `## Children`, `## Linked`
    — appended after the body. Each inverse entry is
    `{:id ... :ticket <full-ticket>}` for a resolved ref or
-   `{:id ... :missing? true}` for a broken one. Empty sections are omitted."
+   `{:id ... :missing? true}` for a broken one. Empty sections are
+   omitted. A blank line separates the stored body from the derived
+   block even when the body has no trailing newline, and each derived
+   section carries a provenance comment under its heading."
   ([ticket]
-   (str (ticket/render ticket)
-        (acceptance/render-section (get-in ticket [:frontmatter :acceptance]))))
+   (show-text ticket nil))
   ([ticket inverses]
-   (str (ticket/render ticket)
-        (acceptance/render-section (get-in ticket [:frontmatter :acceptance]))
-        (render-inverse-sections inverses (:children-progress ticket)))))
+   (let [stored  (ticket/render ticket)
+         derived (str (acceptance/render-section
+                       (get-in ticket [:frontmatter :acceptance]))
+                      (render-inverse-sections inverses
+                                               (:children-progress ticket)))]
+     (str stored
+          (when (and (seq derived) (not (str/ends-with? stored "\n")))
+            "\n")
+          derived))))
 
 (def ^:private ansi-codes
   "Map of friendly names to ANSI SGR parameters (numbers as strings)."

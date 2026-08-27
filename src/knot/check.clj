@@ -220,12 +220,59 @@
                        "run `knot migrate-ac` to lift entries into "
                        "structured frontmatter")}])))
 
+(def ^:private reserved-section-fields
+  "Graph heading -> the field `show` renders that section from. Keyed on
+   `ticket/reserved-section-names` minus `Acceptance Criteria`, which
+   keeps `:legacy_acceptance_section`: that one has an automatic fix
+   (`migrate-ac`) and these do not — the prose under a graph heading is
+   usually narrative, so only a human can decide what survives."
+  {"Blockers" "the ticket's deps field"
+   "Blocking" "the deps fields of the tickets it blocks"
+   "Children" "the parent field of each child"
+   "Linked"   "the ticket's links field"})
+
+(defn- check-reserved-sections
+  "Per-ticket warning: ticket body carries a `## ` heading `show`
+   synthesizes from the graph. Stored, it duplicates the field it names
+   and drifts from it. One issue per heading found."
+  [_ctx ticket]
+  (let [{:keys [id]} (:frontmatter ticket)]
+    (when id
+      (for [heading (ticket/reserved-sections (:body ticket))
+            :let    [field (reserved-section-fields heading)]
+            :when   field]
+        {:severity :warning
+         :code     :reserved_section
+         :ids      [id]
+         :message  (str "reserved '## " heading "' body section found; "
+                        "delete it — knot show renders that section from "
+                        field)}))))
+
+(defn- check-duplicate-sections
+  "Per-ticket warning: the same `## ` heading appears more than once in
+   one body. `body-sections` concatenates the copies rather than
+   clobbering, so the duplication is invisible to every reader
+   downstream. One issue per repeated heading, however many copies it
+   has. No automatic dedup: which copy survives is a judgment only a
+   human can make."
+  [_ctx ticket]
+  (let [{:keys [id]} (:frontmatter ticket)]
+    (when id
+      (for [heading (ticket/duplicate-sections (:body ticket))]
+        {:severity :warning
+         :code     :duplicate_section
+         :ids      [id]
+         :message  (str "duplicate '## " heading "' body section found; "
+                        "keep one copy with `knot update --body` or "
+                        "`knot edit` — git is the undo path")}))))
+
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries
    `:config` (merged) and `:all-ids` (set of every known id)."
   [check-status check-type check-mode check-priority
    check-required-fields check-terminal-outside-archive
-   check-unknown-id check-acceptance check-legacy-acceptance])
+   check-unknown-id check-acceptance check-legacy-acceptance
+   check-reserved-sections check-duplicate-sections])
 
 (defn- per-ticket-issues
   "Run every per-ticket validator against every ticket. When `ids-filter`

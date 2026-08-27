@@ -413,6 +413,8 @@ bumping `schema_version`):
 | `frontmatter_parse_error`  | error    | Ticket file has unparseable YAML frontmatter.                                                          |
 | `invalid_active_status`    | error    | `.knot.edn` `:active-status` is not in `:statuses`.                                                    |
 | `acceptance_invalid`       | error    | Frontmatter `:acceptance` entry is malformed (non-map, missing `:title`, missing `:done`, etc.).       |
+| `reserved_section`         | warning  | A body carries a `## Blockers`, `## Blocking`, `## Children` or `## Linked` heading that `show` renders from the ticket's fields. |
+| `duplicate_section`        | warning  | A body carries the same `## ` heading more than once; the copies concatenate, so nothing downstream shows the duplication. |
 
 Filter with `--code <code>` (repeatable; OR within, AND across with
 `--severity`). Filters apply *before* the exit-code decision —

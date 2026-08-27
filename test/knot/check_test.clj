@@ -575,6 +575,108 @@
       (is (every? #(= :warning (:severity %)) warnings))
       (is (some #(= :legacy_acceptance_section (:code %)) warnings)))))
 
+(deftest reserved-section-warning-test
+  (testing "each graph heading in a body emits a :reserved_section warning naming its field"
+    (let [body    (str "## Description\n\nFoo.\n\n"
+                       "## Blockers\n\n- b\n\n"
+                       "## Blocking\n\n- c\n\n"
+                       "## Children\n\n- d\n\n"
+                       "## Linked\n\n- e\n")
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 4 (count issues)))
+      (is (every? #(= :warning (:severity %)) issues)
+          "a hand-written graph section is drift, not corruption")
+      (is (every? #(= ["a"] (:ids %)) issues))
+      (is (= #{"Blockers" "Blocking" "Children" "Linked"}
+             (set (map #(second (re-find #"'## (.+?)'" (:message %))) issues))))
+      (is (every? #(re-find #"(?i)delete" (:message %)) issues)
+          "message says to delete the section — there is no automatic fix")))
+
+  (testing "an archived ticket is warned about too"
+    (let [tickets [(assoc (archived-ticket "a" "closed" [] :title "T")
+                          :body "## Linked\n\n- e\n")]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 1 (count issues)))
+      (is (= ["a"] (:ids (first issues))))))
+
+  (testing "a body with no reserved heading emits nothing"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Description\n\n### Blockers\n\nnot an H2.\n")]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 0 (count issues)))))
+
+  (testing "the near-synonyms are deliberately not detected"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Blocked by\n\n- b\n\n## Parent document\n\n- c\n")]
+          issues  (issues-of (run-with tickets) :reserved_section)]
+      (is (= 0 (count issues)))))
+
+  (testing "a legacy Acceptance Criteria section keeps its own code, unchanged"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Acceptance Criteria\n\n- [ ] one\n")]
+          all     (:issues (run-with tickets))]
+      (is (= 0 (count (filterv #(= :reserved_section (:code %)) all)))
+          "Acceptance Criteria stays :legacy_acceptance_section — it has a fix")
+      (is (= 1 (count (filterv #(= :legacy_acceptance_section (:code %)) all))))))
+
+  (testing "warning is filterable by --code reserved_section"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Children\n\n- d\n")
+                   (ticket "b" "wat" [] :title "T")]
+          all      (:issues (run-with tickets))
+          filtered (check/filter-issues all {:code #{:reserved_section}})]
+      (is (= 1 (count filtered)))
+      (is (every? #(= :reserved_section (:code %)) filtered)))))
+
+(deftest duplicate-section-warning-test
+  (testing "a heading repeated in one body emits a :duplicate_section warning naming it"
+    (let [body    (str "## Description\n\nFirst copy.\n\n"
+                       "## Description\n\nSecond copy.\n")
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :duplicate_section)]
+      (is (= 1 (count issues))
+          "one issue per repeated heading, not one per copy")
+      (is (= :warning (:severity (first issues))))
+      (is (= ["a"] (:ids (first issues))))
+      (is (re-find #"'## Description'" (:message (first issues)))
+          "the message names the heading")
+      (is (re-find #"--body|knot edit" (:message (first issues)))
+          "the message names the manual repair — there is no automatic dedup")))
+
+  (testing "each repeated heading gets its own issue; a heading appearing once does not"
+    (let [body    (str "## Description\n\none\n\n## Design\n\nd\n\n"
+                       "## Description\n\ntwo\n\n## Notes\n\nn\n\n"
+                       "## Design\n\ne\n\n## Design\n\nf\n")
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :duplicate_section)]
+      (is (= 2 (count issues)))
+      (is (= #{"Description" "Design"}
+             (set (map #(second (re-find #"'## (.+?)'" (:message %))) issues))))))
+
+  (testing "a heading repeated at ### or deeper is not a duplicate section"
+    (let [body    "## Description\n\n### Notes\n\none\n\n### Notes\n\ntwo\n"
+          tickets [(assoc (ticket "a" "open" [] :title "T") :body body)]
+          issues  (issues-of (run-with tickets) :duplicate_section)]
+      (is (= 0 (count issues))
+          "only ## headings split a body, so only they can duplicate a section")))
+
+  (testing "an archived ticket is warned about too"
+    (let [tickets [(assoc (archived-ticket "a" "closed" [] :title "T")
+                          :body "## Design\n\none\n\n## Design\n\ntwo\n")]
+          issues  (issues-of (run-with tickets) :duplicate_section)]
+      (is (= 1 (count issues)))
+      (is (= ["a"] (:ids (first issues))))))
+
+  (testing "warning is filterable by --code duplicate_section"
+    (let [tickets [(assoc (ticket "a" "open" [] :title "T")
+                          :body "## Design\n\none\n\n## Design\n\ntwo\n")
+                   (ticket "b" "wat" [] :title "T")]
+          all      (:issues (run-with tickets))
+          filtered (check/filter-issues all {:code #{:duplicate_section}})]
+      (is (= 1 (count filtered)))
+      (is (every? #(= :duplicate_section (:code %)) filtered)))))
+
 (defn- spit-frontmatter-ticket! [path id title status body]
   (fs/create-dirs (fs/parent path))
   (spit (str path)

@@ -583,7 +583,12 @@
                    :desc (str "Replace the ## Design section."
                               " The section ends at the next ## line: nest headings as ### or deeper, and replace whole sections with --body.")}
                   {:name :body         :body? true
-                   :desc "Replace the whole body. Destructive (no --force); git is the documented undo path. Mutually exclusive with --description / --design. The ## Acceptance Criteria section is display-only on write — use --add-ac / --remove-ac / --ac to mutate criteria."}]
+                   :desc (str "Replace the whole body. Destructive (no --force); git is the documented undo path."
+                              " Mutually exclusive with --description / --design."
+                              " The five sections show renders from fields — ## Acceptance Criteria, ## Blockers,"
+                              " ## Blocking, ## Children, ## Linked — are display-only and refused here:"
+                              " if a frontmatter field holds it, the body doesn't."
+                              " Use --add-ac / --remove-ac / --ac to mutate criteria.")}]
     :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."
                   "--ac and --remove-ac read an all-digits value as a 1-based ordinal into the acceptance list, the number `knot show` prints beside each criterion; anything else is an exact title. No prefix matching."
                   "Ordinals resolve against the list as it stands at that step of the apply order (add -> flip -> remove), so --add-ac \"new\" --ac <last> --done flips the criterion just added."
@@ -647,6 +652,8 @@
                    :desc "Filter by severity (error|warning, repeatable)."}
                   {:name :code     :coerce []
                    :desc "Filter by issue code (repeatable; unknown codes ok)."}]
+    :notes       ["reserved_section is a warning: a body carries a ## Blockers, ## Blocking, ## Children or ## Linked heading, which knot show renders from the ticket's fields. Delete the section by hand — unlike legacy_acceptance_section there is no automatic fix, because the prose under a graph heading is usually narrative."
+                  "duplicate_section is a warning: one body carries the same ## heading twice or more, usually from an old --description write that replaced only the first copy. Body sections concatenate rather than clobber, so nothing downstream shows the duplication. Keep one copy by hand with update --body or knot edit."]
     :examples    [{:cmd "knot check"
                    :note "Validate every ticket and config; exit 0/1/2."}
                   {:cmd "knot check kno-01abc kno-01def --json"

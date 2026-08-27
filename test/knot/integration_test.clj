@@ -3618,3 +3618,47 @@
           (is (re-find #"## Findings" (get-in parsed [:error :message]))))
         (let [{shown :out} (run-knot tmp "show" id)]
           (is (not (str/includes? shown "## Findings"))))))))
+
+(deftest reserved-section-guard-end-to-end-test
+  (testing "update --body with a reserved heading exits 1, naming the field and its writer"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T" "--description" "Old.")
+            id (id-of out "t")
+            {:keys [exit err]} (run-knot tmp "update" id
+                                         "--body" "## Blockers\n\n- kno-1\n")]
+        (is (= 1 exit) (str "expected exit 1; err=" err))
+        (is (str/includes? err "## Blockers"))
+        (is (str/includes? err "deps field"))
+        (is (str/includes? err "knot dep"))
+        (let [{shown :out} (run-knot tmp "show" id)]
+          (is (str/includes? shown "Old.")
+              "refused before any write — the old body stands")))))
+
+  (testing "--json refuses with the invalid_argument envelope and no data slot"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id (id-of out "t")
+            {:keys [exit out err]} (run-knot tmp "update" id
+                                             "--body" "## Children\n\n- kno-1\n"
+                                             "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (= 1 exit) (str "expected exit 1, got " exit "; err=" err))
+        (is (= false (:ok parsed)))
+        (is (= "invalid_argument" (get-in parsed [:error :code])))
+        (is (re-find #"## Children" (get-in parsed [:error :message])))
+        (is (re-find #"--parent" (get-in parsed [:error :message])))
+        (is (nil? (:data parsed))))))
+
+  (testing "check reports reserved_section for a body written past the guard"
+    (with-tmp tmp
+      (let [{:keys [out]} (run-knot tmp "create" "T")
+            id   (id-of out "t")
+            path (first (fs/glob tmp ".tickets/*.md"))]
+        (spit (fs/file path)
+              (str/replace (slurp (fs/file path))
+                           #"(?s)\n\n$"
+                           "\n\n## Linked\n\n- kno-1\n"))
+        (let [{:keys [exit out]} (run-knot tmp "check" "--code" "reserved_section")]
+          (is (zero? exit) "a warning never changes the exit code")
+          (is (str/includes? out "reserved_section"))
+          (is (str/includes? out id)))))))

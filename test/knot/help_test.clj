@@ -819,3 +819,26 @@
       (is (seq notes) ":add-note should carry a :notes entry for the boundary rule")
       (is (some #(re-find #"###" %) notes))
       (is (some #(re-find #"--body" %) notes)))))
+
+(deftest reserved-sections-are-documented-test
+  (testing "the --body desc carries the if-a-field-holds-it rule"
+    (let [d (->> (get-in help/registry [:update :flags])
+                 (some #(when (= :body (:name %)) (:desc %))))]
+      (is (string? d))
+      (is (re-find #"(?i)if a frontmatter field holds it, the body doesn't" d)
+          "--body help should state the rule in one line")))
+
+  (testing "check --help names the reserved_section code"
+    (let [notes (str/join "\n" (get-in help/registry [:check :notes]))]
+      (is (str/includes? notes "reserved_section")
+          ":check should enumerate its new warning code")
+      (is (re-find #"(?i)warning" notes)
+          "the note should say reserved_section is a warning"))))
+
+(deftest duplicate-section-code-is-documented-test
+  (testing "check --help names the duplicate_section code"
+    (let [notes (str/join "\n" (get-in help/registry [:check :notes]))]
+      (is (str/includes? notes "duplicate_section")
+          ":check should enumerate its new warning code")
+      (is (re-find #"(?i)warning" notes)
+          "the note should say duplicate_section is a warning"))))

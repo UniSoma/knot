@@ -74,6 +74,28 @@
                          "update --body to write whole sections.")
                     {:offending-heading heading}))))
 
+(def ^:private reserved-section-owners
+  "Reserved heading -> the field that holds it and the flag that writes
+   it. `Blocking` is the one with no writer of its own: it is other
+   tickets' deps, read backwards."
+  {"Acceptance Criteria" "the acceptance field, written with --acceptance / --add-ac"
+   "Blockers"            "the deps field, written with knot dep"
+   "Blocking"            "other tickets' deps, written with knot dep on the blocked ticket"
+   "Children"            "each child's parent field, written with --parent"
+   "Linked"              "the links field, written with knot link"})
+
+(defn- validate-no-reserved-sections!
+  "Refuse a `--body` carrying a section `show` synthesizes rather than
+   stores. Stored, it duplicates the field it names and drifts from it.
+   Throws `ex-info` carrying `:offending-section` before any write."
+  [body]
+  (when-let [heading (first (ticket/reserved-sections body))]
+    (throw (ex-info (str "--body contains the reserved heading \"## " heading
+                         "\": knot show renders that section from "
+                         (reserved-section-owners heading)
+                         ". If a frontmatter field holds it, the body doesn't.")
+                    {:offending-section heading}))))
+
 (defn- build-frontmatter
   "Build a frontmatter map with a stable, human-readable key order. Keys
    present in this canonical order: id, title, status, type, priority,
@@ -1181,6 +1203,7 @@
                                         [:description :design])})))
   (validate-no-section-headings! "--description" (:description opts))
   (validate-no-section-headings! "--design" (:design opts))
+  (validate-no-reserved-sections! (:body opts))
   (validate-list-delta-opts! opts :tags :add-tag :remove-tag)
   (validate-list-delta-opts! opts :external-ref
                              :add-external-ref :remove-external-ref)

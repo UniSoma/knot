@@ -4206,6 +4206,57 @@ Restart the daemon.
         (is (= before (slurp created))
             "refused before any write")))))
 
+(deftest reserved-section-guard-test
+  (testing "update --body refuses each reserved heading, naming the field that owns it"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T" :description "Old."})
+            id      (id-of-created created "t")
+            before  (slurp created)]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Acceptance Criteria.*acceptance field.*--add-ac"
+             (cli/update-cmd (ctx tmp)
+                             {:id id :body "## Acceptance Criteria\n\n1. [ ] x\n"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Blockers.*deps field.*knot dep"
+             (cli/update-cmd (ctx tmp) {:id id :body "## Blockers\n\n- kno-1\n"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Blocking.*deps.*knot dep"
+             (cli/update-cmd (ctx tmp) {:id id :body "## Blocking\n\n- kno-1\n"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Children.*parent field.*--parent"
+             (cli/update-cmd (ctx tmp) {:id id :body "## Children\n\n- kno-1\n"})))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Linked.*links field.*knot link"
+             (cli/update-cmd (ctx tmp) {:id id :body "## Linked\n\n- kno-1\n"})))
+        (is (= before (slurp created))
+            "refused before any write"))))
+
+  (testing "a reserved heading below other sections is refused too"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")]
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo
+             #"## Linked"
+             (cli/update-cmd (ctx tmp)
+                             {:id id
+                              :body "## Description\n\nD.\n\n## Linked\n\n- kno-1\n"}))))))
+
+  (testing "an unreserved H2 section is still what --body is for"
+    (with-tmp tmp
+      (let [created (cli/create-cmd (ctx tmp) {:title "T"})
+            id      (id-of-created created "t")
+            _       (cli/update-cmd (ctx tmp)
+                                    {:id id
+                                     :body "## Description\n\nD.\n\n## Design\n\nX.\n"})
+            loaded  (store/load-one tmp ".tickets" id)]
+        (is (str/includes? (:body loaded) "## Design"))))))
+
 (deftest update-cmd-ac-flip-test
   (testing "update --ac \"<title>\" --done flips the matching entry to done"
     (with-tmp tmp

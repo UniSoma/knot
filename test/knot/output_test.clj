@@ -170,6 +170,61 @@
       (is (str/includes? s "## Acceptance Criteria"))
       (is (str/includes? s "1. [ ] only")))))
 
+(deftest show-text-derived-provenance-test
+  (testing "each synthesized section carries a provenance comment under its heading"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "ship it" :done false}]}
+                  :body "Body text.\n"
+                  :children-progress [1 2]}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [(mk-resolved "kno-C" "Gamma")]
+                    :children [(mk-resolved "kno-D" "Delta")]
+                    :linked   [(mk-resolved "kno-E" "Epsilon")]}
+          s (output/show-text ticket inverses)]
+      (is (str/includes?
+           s "## Acceptance Criteria\n<!-- from frontmatter acceptance; edit with --add-ac / --ac -->\n\n"))
+      (is (str/includes?
+           s "## Blockers\n<!-- from frontmatter deps; edit with knot dep -->\n\n"))
+      (is (str/includes?
+           s "## Blocking\n<!-- inverse of other tickets' deps; edit with knot dep on the blocked ticket -->\n\n"))
+      (is (str/includes?
+           s "## Children (1/2)\n<!-- inverse of other tickets' parent; edit with --parent on the child -->\n\n"))
+      (is (str/includes?
+           s "## Linked\n<!-- from frontmatter links; edit with knot link -->\n\n"))))
+
+  (testing "a blank line separates the body from the derived block when the body has no trailing newline"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "ship it" :done false}]}
+                  :body "Body text."}
+          s (output/show-text ticket)]
+      (is (str/includes? s "Body text.\n\n## Acceptance Criteria"))))
+
+  (testing "the separator is one blank line when the body already ends in a newline"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body text.\n"}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [] :children [] :linked []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "Body text.\n\n## Blockers"))
+      (is (not (str/includes? s "Body text.\n\n\n## Blockers")))))
+
+  (testing "an unterminated body with no derived section is left unpadded"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
+                  :body "Body text."}
+          s (output/show-text ticket {:blockers [] :blocking [] :children [] :linked []})]
+      (is (str/ends-with? s "Body text."))))
+
+  (testing "the comments are text-only: --json carries no provenance"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"
+                                :acceptance [{:title "ship it" :done false}]}
+                  :body "Body text.\n"}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [(mk-resolved "kno-C" "Gamma")]
+                    :children [(mk-resolved "kno-D" "Delta")]
+                    :linked   [(mk-resolved "kno-E" "Epsilon")]}
+          out (output/show-json ticket inverses)]
+      (is (not (str/includes? out "<!--"))))))
+
 (deftest color-enabled-test
   (testing "TTY with no overrides — color enabled"
     (is (true? (output/color-enabled? {:tty? true

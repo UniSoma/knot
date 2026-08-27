@@ -169,6 +169,33 @@
     (cond-> sections
       (str/blank? (get sections "")) (dissoc ""))))
 
+(def reserved-section-names
+  "The `## ` headings `show` synthesizes rather than reads: the first from
+   the `acceptance` field, the rest from the graph. A body that carries
+   one duplicates a field and drifts from it, so the write surface
+   refuses them and `check` flags the ones already stored."
+  ["Acceptance Criteria" "Blockers" "Blocking" "Children" "Linked"])
+
+(defn reserved-sections
+  "The `reserved-section-names` `body` carries as `## ` headings, in
+   `reserved-section-names` order. Matches the heading text exactly, the
+   same text `body-sections` slugs on."
+  [body]
+  (let [present (set (map second (re-seq body-heading-pat (or body ""))))]
+    (filterv present reserved-section-names)))
+
+(defn duplicate-sections
+  "The `## ` headings `body` carries more than once, in first-appearance
+   order. Matches the heading text exactly, the same text `body-sections`
+   splits on, so a heading repeated at `### ` or deeper is not one: it
+   never started a section. `body-sections` concatenates the copies
+   rather than clobbering, which is what makes the duplication invisible
+   downstream."
+  [body]
+  (let [headings (mapv second (re-seq body-heading-pat (or body "")))
+        freqs    (frequencies headings)]
+    (filterv #(< 1 (freqs %)) (distinct headings))))
+
 (def ^:private notes-heading "## Notes")
 
 (defn- note-block
