@@ -314,6 +314,61 @@
   (println-out (output/error-envelope-str error))
   (System/exit 1))
 
+(defn- emit-json-failure!
+  "Route a command failure to its `--json` error envelope (every branch
+   exits 1): the ambiguous_id and not_found envelopes for those two
+   ex-data kinds, `invalid_argument` for anything else. Callers guard on
+   `--json` and keep their own plain-text policy for the other path."
+  [^Exception e data]
+  (cond
+    (= :ambiguous (:kind data)) (emit-ambiguous-envelope! e data)
+    (= :not-found (:kind data)) (emit-error-envelope! {:code    "not_found"
+                                                      :message (.getMessage e)})
+    :else                       (emit-error-envelope! {:code    "invalid_argument"
+                                                       :message (.getMessage e)})))
+
+(defn- emit-gate-failure!
+  "Emit a gate refusal in both output modes and exit 1. Under `--json`,
+   the v0.3 error envelope for `code` carrying `extra`'s fields; otherwise
+   the gate's plain-text stderr form — a `knot <cmd-name>: <msg>` header,
+   one indented line per offending item, and the footer telling the caller
+   how to get past the gate. One `case` on `code` yields all three; `extra`
+   holds the code-specific fields already shaped for JSON and the stderr
+   branch reads them back, so the two modes can never drift apart. `:gate`
+   (`:start` or `:close`, `open_children` only) picks the footer and never
+   reaches the envelope."
+  [cmd-name json? code msg extra]
+  (if json?
+    (emit-error-envelope! (merge {:code code :message msg} (dissoc extra :gate)))
+    (binding [*out* *err*]
+      (let [[suffix items footer]
+            (case code
+              "acceptance_incomplete"
+              [nil (map :title (:open_acceptance extra))
+               (str "use 'knot update <id> --ac \"<title>\" --done' for each one, "
+                    "or --force --summary \"<reason>\" to override.")]
+              "already_assigned" ["; nothing was written." nil nil]
+              "open_children"
+              [nil (:open_children extra)
+               (case (:gate extra)
+                 :close (str "close each child first, or pass --force --summary "
+                             "\"<reason>\" to ship the umbrella as-is.")
+                 :start (str "close each child first, or pass --force "
+                             "to start the umbrella anyway."))]
+              ;; rows arrive JSON-stringified; `name` passes a string through
+              "has_incoming_refs"
+              [nil (map (fn [{:keys [id field]}] (str id " " (name field)))
+                        (:referrers extra))
+               (str "drop each reference first "
+                    "(`knot undep`, `knot unlink`, "
+                    "or `knot update <id> --parent \"\"`) "
+                    "and re-run.")])]
+        (println (str "knot " cmd-name ": " msg suffix))
+        (doseq [item items]
+          (println (str "  - " item)))
+        (when footer (println footer)))
+      (System/exit 1))))
+
 (defn- extract-rel-order
   "Walk argv and return [[:dep input] [:link input] ...] in CLI occurrence
    order. Used by `create-handler` to honour AC9 (first failing strict
@@ -412,28 +467,34 @@
           [:status :assignee :tag :type :mode :priority :acceptance-complete
            :parent]))
 
-(defn- resolve-id-list!
+(defn- resolve-ids
   "Resolve every raw id string in `raws` to its canonical full id via the
    standard partial-id resolution (live+archive), returning the vector of
-   resolved ids. A value that does not resolve fails loudly: under
-   `--json` it emits the same not_found / ambiguous_id error envelopes as
-   `show` (exit 1); otherwise it dies on stderr (exit 1). Shared by the
-   `--parent` and `--closure` list filters."
-  [ctx raws json?]
+   resolved ids. The first value that does not resolve throws
+   `store/resolve-id`'s ex-info — the caller owns the failure policy."
+  [ctx raws]
   (mapv (fn [v]
-          (try
-            (get-in (store/resolve-id (:project-root ctx)
-                                      (:tickets-dir ctx) v)
-                    [:frontmatter :id])
-            (catch clojure.lang.ExceptionInfo e
-              (let [data (ex-data e)]
-                (cond
-                  (and json? (= :ambiguous (:kind data)))
-                  (emit-ambiguous-envelope! e data)
-                  (and json? (= :not-found (:kind data)))
-                  (emit-not-found-envelope! v)
-                  :else (die (str "knot: " (.getMessage e))))))))
+          (get-in (store/resolve-id (:project-root ctx) (:tickets-dir ctx) v)
+                  [:frontmatter :id]))
         raws))
+
+(defn- resolve-id-list!
+  "`resolve-ids` under the listing commands' exit policy: a value that
+   does not resolve fails loudly — under `--json` it emits the same
+   not_found / ambiguous_id error envelopes as `show` (exit 1); otherwise
+   it dies on stderr (exit 1). Shared by the `--parent` and `--closure`
+   list filters."
+  [ctx raws json?]
+  (try
+    (resolve-ids ctx raws)
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (cond
+          (and json? (= :ambiguous (:kind data)))
+          (emit-ambiguous-envelope! e data)
+          (and json? (= :not-found (:kind data)))
+          (emit-not-found-envelope! (:input data))
+          :else (die (str "knot: " (.getMessage e))))))))
 
 (defn- resolve-parent-filter!
   "Resolve every `--parent` value in `opts` to its canonical full id,
@@ -522,69 +583,6 @@
         path (cli/init-cmd ctx opts)]
     (println-out path)))
 
-(defn- emit-acceptance-incomplete!
-  "Emit the v0.3 acceptance gate failure: JSON envelope with code
-   `acceptance_incomplete` and `open_acceptance: [{title}, ...]`, or a
-   plain-text stderr message with the count and indented open titles.
-   Exits 1 in both modes."
-  [cmd-name json? msg open-titles]
-  (if json?
-    (do (println-out (output/error-envelope-str
-                      {:code             "acceptance_incomplete"
-                       :message          msg
-                       :open_acceptance  (mapv (fn [t] {:title t}) open-titles)}))
-        (System/exit 1))
-    (binding [*out* *err*]
-      (println (str "knot " cmd-name ": " msg))
-      (doseq [t open-titles]
-        (println (str "  - " t)))
-      (println (str "use 'knot update <id> --ac \"<title>\" --done' for each one, "
-                    "or --force --summary \"<reason>\" to override."))
-      (System/exit 1))))
-
-(defn- emit-already-assigned!
-  "Emit the `--if-unassigned` claim failure: JSON envelope with code
-   `already_assigned` and `current_assignee: \"<holder>\"`, or a
-   plain-text stderr message naming the holder. Exits 1 in both modes.
-   Nothing was written before this fires — the predicate runs on the
-   freshly-read ticket, ahead of every gate and the save."
-  [cmd-name json? msg current-assignee]
-  (if json?
-    (do (println-out (output/error-envelope-str
-                      {:code             "already_assigned"
-                       :message          msg
-                       :current_assignee current-assignee}))
-        (System/exit 1))
-    (binding [*out* *err*]
-      (println (str "knot " cmd-name ": " msg "; nothing was written."))
-      (System/exit 1))))
-
-(defn- emit-open-children!
-  "Emit the open-children gate failure: JSON envelope with code
-   `open_children` and `open_children: [<id>, ...]`, or a plain-text
-   stderr message with the count and indented open child ids. Exits 1
-   in both modes. `gate` (`:start` or `:close`) selects the stderr
-   instruction footer — close advises `--force --summary`, start
-   advises just `--force`."
-  [cmd-name json? gate msg open-ids]
-  (if json?
-    (do (println-out (output/error-envelope-str
-                      {:code           "open_children"
-                       :message        msg
-                       :open_children  (vec open-ids)}))
-        (System/exit 1))
-    (binding [*out* *err*]
-      (println (str "knot " cmd-name ": " msg))
-      (doseq [cid open-ids]
-        (println (str "  - " cid)))
-      (println
-       (case gate
-         :close (str "close each child first, or pass --force --summary "
-                     "\"<reason>\" to ship the umbrella as-is.")
-         :start (str "close each child first, or pass --force "
-                     "to start the umbrella anyway.")))
-      (System/exit 1))))
-
 (defn- transition-handler
   "Run a single-id status-mutation command (`status`/`start`/`close`/`reopen`)
    via `transition-fn`. `arg-count` is the number of positional args
@@ -637,16 +635,19 @@
               (emit-ambiguous-envelope! e data)
 
               (:acceptance-incomplete data)
-              (emit-acceptance-incomplete!
-               cmd-name json? (.getMessage e) (:open-titles data))
+              (emit-gate-failure!
+               cmd-name json? "acceptance_incomplete" (.getMessage e)
+               {:open_acceptance (mapv (fn [t] {:title t}) (:open-titles data))})
 
               (:open-children data)
-              (emit-open-children!
-               cmd-name json? (:gate data) (.getMessage e) (:open-child-ids data))
+              (emit-gate-failure!
+               cmd-name json? "open_children" (.getMessage e)
+               {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
 
               (:already-assigned data)
-              (emit-already-assigned!
-               cmd-name json? (.getMessage e) (:current-assignee data))
+              (emit-gate-failure!
+               cmd-name json? "already_assigned" (.getMessage e)
+               {:current_assignee (:current-assignee data)})
 
               json?
               (emit-error-envelope! {:code    "invalid_argument"
@@ -767,18 +768,8 @@
           (doseq [path out]
             (println-out (str path)))))
       (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          (cond
-            (and json? (= :ambiguous (:kind data)))
-            (emit-ambiguous-envelope! e data)
-
-            (and json? (= :not-found (:kind data)))
-            (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
-
-            json?
-            (emit-error-envelope! {:code "invalid_argument" :message (.getMessage e)})
-
-            :else (die (str "knot link: " (or (.getMessage e) (.toString e)))))))
+        (when json? (emit-json-failure! e (ex-data e))) ; each branch exits 1
+        (die (str "knot link: " (or (.getMessage e) (.toString e)))))
       (catch Exception e
         (die (str "knot link: " (or (.getMessage e) (.toString e))))))))
 
@@ -802,48 +793,10 @@
           (doseq [path out]
             (println-out (str path)))))
       (catch clojure.lang.ExceptionInfo e
-        (let [data (ex-data e)]
-          (cond
-            (and json? (= :ambiguous (:kind data)))
-            (emit-ambiguous-envelope! e data)
-
-            (and json? (= :not-found (:kind data)))
-            (emit-error-envelope! {:code "not_found" :message (.getMessage e)})
-
-            json?
-            (emit-error-envelope! {:code "invalid_argument" :message (.getMessage e)})
-
-            :else (die (str "knot unlink: " (or (.getMessage e) (.toString e)))))))
+        (when json? (emit-json-failure! e (ex-data e))) ; each branch exits 1
+        (die (str "knot unlink: " (or (.getMessage e) (.toString e)))))
       (catch Exception e
         (die (str "knot unlink: " (or (.getMessage e) (.toString e))))))))
-
-(defn- format-referrer-lines
-  "Render a referrer payload as one `  - <id> <field>` line per row for
-   the plain-text refusal output. Sort is preserved from the cli layer
-   (alphabetical by `:id`)."
-  [referrers]
-  (->> referrers
-       (map (fn [{:keys [id field]}] (str "  - " id " " (name field))))
-       (str/join "\n")))
-
-(defn- emit-has-incoming-refs!
-  "Plain-text refusal: enumerate referrer + field on stderr; exit 1.
-   `--json`: emit the v0.3 `has_incoming_refs` error envelope on stdout
-   (referrers field-keyword stringified for JSON consumers)."
-  [json? msg referrers]
-  (if json?
-    (emit-error-envelope! {:code      "has_incoming_refs"
-                           :message   msg
-                           :referrers (mapv (fn [r] (update r :field name))
-                                            referrers)})
-    (binding [*out* *err*]
-      (println (str "knot delete: " msg))
-      (println (format-referrer-lines referrers))
-      (println (str "drop each reference first "
-                    "(`knot undep`, `knot unlink`, "
-                    "or `knot update <id> --parent \"\"`) "
-                    "and re-run."))
-      (System/exit 1))))
 
 (defn- emit-cleaned-audit!
   "Write one stderr line per cleaned referrer in the same alphabetical
@@ -888,7 +841,9 @@
         (let [data (ex-data e)]
           (cond
             (= :has-incoming-refs (:kind data))
-            (emit-has-incoming-refs! json? (.getMessage e) (:referrers data))
+            (emit-gate-failure!
+             "delete" json? "has_incoming_refs" (.getMessage e)
+             {:referrers (mapv (fn [r] (update r :field name)) (:referrers data))})
 
             (and json? (= :ambiguous (:kind data)))
             (emit-ambiguous-envelope! e data)
@@ -1106,16 +1061,19 @@
             (emit-ambiguous-envelope! e data)
 
             (:acceptance-incomplete data)
-            (emit-acceptance-incomplete!
-             "update" json? (.getMessage e) (:open-titles data))
+            (emit-gate-failure!
+             "update" json? "acceptance_incomplete" (.getMessage e)
+             {:open_acceptance (mapv (fn [t] {:title t}) (:open-titles data))})
 
             (:open-children data)
-            (emit-open-children!
-             "update" json? (:gate data) (.getMessage e) (:open-child-ids data))
+            (emit-gate-failure!
+             "update" json? "open_children" (.getMessage e)
+             {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
 
             (:already-assigned data)
-            (emit-already-assigned!
-             "update" json? (.getMessage e) (:current-assignee data))
+            (emit-gate-failure!
+             "update" json? "already_assigned" (.getMessage e)
+             {:current_assignee (:current-assignee data)})
 
             json?
             (emit-error-envelope! {:code    "invalid_argument"
@@ -1328,22 +1286,6 @@
             (print (cli/schema-cmd ctx))
             (flush)))))))
 
-(defn- resolve-prime-parent-filter
-  "Resolve every `--parent` value in `opts` to its canonical full id.
-   Unlike `resolve-parent-filter!`, an unresolvable value throws instead
-   of exiting 1: the `prime-handler` catch turns it into the fallback
-   primer, which keeps the always-exit-0 SessionStart contract. No-op
-   when no `--parent` was given."
-  [ctx opts]
-  (if-let [vs (seq (:parent opts))]
-    (assoc opts :parent
-           (mapv (fn [v]
-                   (get-in (store/resolve-id (:project-root ctx)
-                                             (:tickets-dir ctx) v)
-                           [:frontmatter :id]))
-                 vs))
-    opts))
-
 (defn- prime-handler
   "Run `knot prime`. Always exits 0, including in directories with no
    Knot project — the renderer emits a fallback preamble pointing at
@@ -1359,7 +1301,9 @@
                     opts                      (merge opts value-opts)
                     _            (validate-priority-filter! opts)
                     ctx          (discover-ctx)
-                    opts         (resolve-prime-parent-filter ctx opts)
+                    opts         (cond-> opts
+                                   (seq (:parent opts))
+                                   (assoc :parent (resolve-ids ctx (:parent opts))))
                     filter-opts  (dissoc (filter-opts-from-cli opts) :mode)]
                 (cli/prime-cmd ctx
                                (merge filter-opts
