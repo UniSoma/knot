@@ -1,25 +1,26 @@
 ---
 id: kno-01kzxmbta84f
 title: bb test guard against doc/CLI flag drift
-status: open
+status: closed
 type: chore
 priority: 3
 mode: afk
 created: '2026-08-13T13:18:10.746284458Z'
-updated: '2026-08-13T20:54:46.127981880Z'
+updated: '2026-08-27T17:00:22.418449370Z'
+closed: '2026-08-27T17:00:22.418449370Z'
 tags:
 - tooling
 - testing
 - docs
 acceptance:
 - title: A test extracts flags from knot invocations across the skill, docs/agents, AGENTS.md, and README.md
-  done: false
+  done: true
 - title: Each extracted flag is checked against the accepting command's knot help output, not merely against the global flag set
-  done: false
+  done: true
 - title: Non-knot flags in the same files (--lint, --timeout, --discover-ports) do not trip the check
-  done: false
+  done: true
 - title: bb test passes on the current tree and fails when a knot flag in any doc is renamed or removed
-  done: false
+  done: true
 deps:
 - kno-01kzxmbd81de
 - kno-01kzyefq5cxv
@@ -64,3 +65,9 @@ regex; the extractor needs to reject them.
 
 This ticket depends on the doc-correction ticket: landing the guard first
 would put `bb test` red.
+
+## Notes
+
+**2026-08-27T17:00:22.418449370Z**
+
+Added test/knot/doc_flags_test.clj: extracts flags from knot invocations across the skill, docs/agents, AGENTS.md and README.md (125 invocations, 81 flags on the current tree) and resolves each against the accepting command's help registry entry, subcommands and aliases included. Verified it passes on the tree and fails on an injected --tag→--tagz rename.
