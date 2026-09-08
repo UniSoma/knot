@@ -78,14 +78,14 @@
       (is (not (str/includes? s "## Children")))
       (is (not (str/includes? s "## Linked")))))
 
-  (testing "each entry renders as `- <id>  <title>` (resolved)"
+  (testing "each entry renders as `- <id>  [<status>]  <title>` (resolved)"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
           inverses {:blockers [(mk-resolved "kno-B" "Beta")
                                (mk-resolved "kno-C" "Gamma")]
                     :blocking [] :children [] :linked []}
           s (output/show-text ticket inverses)]
-      (is (str/includes? s "- kno-B  Beta"))
-      (is (str/includes? s "- kno-C  Gamma"))))
+      (is (str/includes? s "- kno-B  [open]  Beta"))
+      (is (str/includes? s "- kno-C  [open]  Gamma"))))
 
   (testing "missing refs render with `[missing]` marker"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
@@ -100,6 +100,37 @@
       (is (str/includes? s "title: Alpha"))
       (is (not (str/includes? s "## Blockers"))))))
 
+(deftest show-text-status-marker-test
+  (testing "resolved entries render `- <id>  [<status>]  <title>`"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          inverses {:blockers [(mk-resolved "kno-B" "Beta")]
+                    :blocking [(assoc-in (mk-resolved "kno-C" "Gamma")
+                                         [:ticket :frontmatter :status] "closed")]
+                    :children [(assoc-in (mk-resolved "kno-D" "Delta")
+                                         [:ticket :frontmatter :status] "in_progress")]
+                    :linked   []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "- kno-B  [open]  Beta"))
+      (is (str/includes? s "- kno-C  [closed]  Gamma"))
+      (is (str/includes? s "- kno-D  [in_progress]  Delta"))))
+
+  (testing "a missing referent still renders `[missing]` and nothing else"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          inverses {:blockers [(mk-missing "kno-ghost")]
+                    :blocking [] :children [] :linked []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "- kno-ghost  [missing]\n"))))
+
+  (testing "a resolved ticket with no frontmatter status renders no marker"
+    (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
+          inverses {:blockers [{:id "kno-B"
+                                :ticket {:frontmatter {:id "kno-B" :title "Beta"}
+                                         :body ""}}]
+                    :blocking [] :children [] :linked []}
+          s (output/show-text ticket inverses)]
+      (is (str/includes? s "- kno-B  Beta"))
+      (is (not (str/includes? s "- kno-B  ["))))))
+
 (deftest show-text-children-progress-heading-test
   (testing "## Children heading carries the (d/t) rollup when :children-progress is present"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}
@@ -112,9 +143,9 @@
           s (output/show-text ticket inverses)]
       (is (str/includes? s "## Children (1/2)")
           "heading shows terminal/total of direct children")
-      (is (str/includes? s "- kno-C  Gamma")
+      (is (str/includes? s "- kno-C  [open]  Gamma")
           "per-child list is unchanged")
-      (is (str/includes? s "- kno-D  Delta"))))
+      (is (str/includes? s "- kno-D  [open]  Delta"))))
 
   (testing "heading falls back to plain `## Children` when no :children-progress attached"
     (let [ticket {:frontmatter {:id "kno-A" :title "Alpha" :status "open"} :body ""}
@@ -1299,7 +1330,7 @@
   (testing "root node with no children renders as a single id+title line"
     (let [tree (node "kno-A" "Alpha")
           out  (output/dep-tree-text tree)]
-      (is (= "kno-A  Alpha" (str/trim out))))))
+      (is (= "kno-A  [open]  Alpha" (str/trim out))))))
 
 (deftest dep-tree-text-children-test
   (testing "single child uses a └── connector"
@@ -1307,7 +1338,7 @@
                      :children [(node "kno-B" "Beta")])
           lines (str/split-lines (output/dep-tree-text tree))]
       (is (= 2 (count lines)))
-      (is (= "kno-A  Alpha" (first lines)))
+      (is (= "kno-A  [open]  Alpha" (first lines)))
       (is (str/starts-with? (second lines) "└── "))
       (is (str/includes? (second lines) "kno-B"))
       (is (str/includes? (second lines) "Beta"))))
@@ -1365,6 +1396,32 @@
           out  (output/dep-tree-text tree)]
       (is (str/includes? out "kno-ghost"))
       (is (str/includes? out "[missing]")))))
+
+(deftest dep-tree-text-status-marker-test
+  (testing "every non-missing node, root included, carries its literal status"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(assoc-in (node "kno-B" "Beta")
+                                          [:ticket :frontmatter :status] "closed")])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (= "kno-A  [open]  Alpha" (first lines)))
+      (is (= "└── kno-B  [closed]  Beta" (second lines)))))
+
+  (testing "the seen-before ↑ still trails the title"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-D" "Delta" :seen-before? true)])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (= "└── kno-D  [open]  Delta ↑" (last lines)))))
+
+  (testing "a missing node still renders `[missing]` and nothing else"
+    (let [tree (node "kno-A" "Alpha"
+                     :children [(node "kno-ghost" nil :missing? true)])
+          lines (str/split-lines (output/dep-tree-text tree))]
+      (is (= "└── kno-ghost  [missing]" (last lines)))))
+
+  (testing "a node whose ticket has no frontmatter status renders no marker"
+    (let [tree {:id "kno-A"
+                :ticket {:frontmatter {:id "kno-A" :title "Alpha"} :body ""}}]
+      (is (= "kno-A  Alpha" (str/trim (output/dep-tree-text tree)))))))
 
 (deftest dep-tree-json-test
   (testing "root with no children: envelope-wrapped object with id, title, status, deps:[]"
@@ -2338,7 +2395,7 @@
                                  :ticket (title-only-ticket "kno-B" "Beta from FM")}]
                      :blocking [] :children [] :linked []}
           out (output/show-text root inverses)]
-      (is (str/includes? out "- kno-B  Beta from FM"))))
+      (is (str/includes? out "- kno-B  [open]  Beta from FM"))))
 
   (testing "missing :title in inverse entry frontmatter renders as empty (no crash)"
     (let [root     {:frontmatter {:id "kno-A" :title "Alpha" :status "open"}

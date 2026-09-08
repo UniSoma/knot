@@ -1700,9 +1700,9 @@
         (let [{a-out :out} (run-knot tmp "show" a-id)
               {b-out :out} (run-knot tmp "show" b-id)]
           (is (str/includes? a-out "## Linked"))
-          (is (str/includes? a-out (str "- " b-id "  Beta")))
+          (is (str/includes? a-out (str "- " b-id "  [open]  Beta")))
           (is (str/includes? b-out "## Linked"))
-          (is (str/includes? b-out (str "- " a-id "  Alpha")))))))
+          (is (str/includes? b-out (str "- " a-id "  [open]  Alpha")))))))
 
   (testing "link a b c creates all three pairs in one shot"
     (with-tmp tmp
@@ -1758,7 +1758,7 @@
               {b-json :out} (run-knot tmp "show" b-id "--json")]
           (is (str/includes? b-out "## Linked")
               "B's Linked section still computed even though A is archived")
-          (is (str/includes? b-out (str "- " a-id "  Alpha"))
+          (is (str/includes? b-out (str "- " a-id "  [closed]  Alpha"))
               "B's Linked entry resolves the archived A's title")
           (is (str/includes? b-json (str "\"id\":\"" a-id "\""))
               "B's --json linked array still names the archived A"))))))

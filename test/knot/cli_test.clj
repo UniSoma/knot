@@ -893,7 +893,7 @@
             out  (binding [*err* (java.io.StringWriter.)]
                    (cli/show-cmd (ctx tmp) {:id a-id}))]
         (is (str/includes? out "## Blockers"))
-        (is (str/includes? out (str "- " b-id "  Beta"))))))
+        (is (str/includes? out (str "- " b-id "  [open]  Beta"))))))
 
   (testing "show text includes ## Blocking on the dep target"
     (with-tmp tmp
@@ -905,7 +905,7 @@
             out  (binding [*err* (java.io.StringWriter.)]
                    (cli/show-cmd (ctx tmp) {:id b-id}))]
         (is (str/includes? out "## Blocking"))
-        (is (str/includes? out (str "- " a-id "  Alpha"))))))
+        (is (str/includes? out (str "- " a-id "  [open]  Alpha"))))))
 
   (testing "show text includes ## Children when other tickets parent into this"
     (with-tmp tmp
@@ -916,7 +916,7 @@
             out  (binding [*err* (java.io.StringWriter.)]
                    (cli/show-cmd (ctx tmp) {:id p-id}))]
         (is (str/includes? out "## Children"))
-        (is (str/includes? out (str "- " c-id "  Child"))))))
+        (is (str/includes? out (str "- " c-id "  [open]  Child"))))))
 
   (testing "computed sections are omitted when empty"
     (with-tmp tmp

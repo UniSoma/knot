@@ -16,14 +16,24 @@
   [ticket]
   (or (get-in ticket [:frontmatter :title]) ""))
 
+(defn- status-marker
+  "Render a ticket's literal frontmatter status as `[<status>]  `, ready to sit
+   between an id and a title. Yields `\"\"` when the frontmatter carries no
+   status, so an absent marker never stands in for a guessed one."
+  [ticket]
+  (if-let [status (get-in ticket [:frontmatter :status])]
+    (str "[" status "]  ")
+    ""))
+
 (defn- inverse-line
-  "Format a single inverse entry as `- <id>  <title>` or
-   `- <id>  [missing]`."
+  "Format a single inverse entry as `- <id>  [<status>]  <title>` or
+   `- <id>  [missing]`. The status marker is omitted when the resolved
+   ticket's frontmatter carries none."
   [{:keys [id ticket missing?]}]
   (str "- " id "  "
-       (cond
-         missing?  "[missing]"
-         :else     (ticket-title ticket))))
+       (if missing?
+         "[missing]"
+         (str (status-marker ticket) (ticket-title ticket)))))
 
 (def ^:private inverse-section-order
   "Canonical render order — Blockers, Blocking, Children, Linked — each
@@ -463,13 +473,14 @@
     []))
 
 (defn- node-label
-  "Format a single dep-tree node line: `<id>  <title>` (or `[missing]`),
-   with a trailing ` ↑` for seen-before? leaves."
+  "Format a single dep-tree node line: `<id>  [<status>]  <title>` (or
+   `[missing]`), with a trailing ` ↑` for seen-before? leaves. The status
+   marker is omitted when the node's frontmatter carries none."
   [{:keys [id ticket missing? seen-before?]}]
-  (cond
-    missing?     (str id "  [missing]")
-    seen-before? (str id "  " (ticket-title ticket) " ↑")
-    :else        (str id "  " (ticket-title ticket))))
+  (if missing?
+    (str id "  [missing]")
+    (str id "  " (status-marker ticket) (ticket-title ticket)
+         (when seen-before? " ↑"))))
 
 (defn- render-tree-lines
   "Recursively render a dep-tree node into a flat seq of strings using
