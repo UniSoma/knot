@@ -60,7 +60,7 @@ COPY --from=eclipse-temurin:25-jdk-jammy /opt/java/openjdk /opt/java/openjdk
 ENV JAVA_HOME=/opt/java/openjdk \
     PATH="/opt/java/openjdk/bin:${PATH}"
 
-ARG CLOJURE_VERSION=1.12.5.1664
+ARG CLOJURE_VERSION=1.12.6.1673
 RUN curl -fsSL "https://github.com/clojure/brew-install/releases/download/${CLOJURE_VERSION}/linux-install.sh" -o /tmp/linux-install.sh; \
     bash /tmp/linux-install.sh; \
     rm /tmp/linux-install.sh; \
@@ -88,6 +88,11 @@ RUN bbin install https://github.com/bhauman/clojure-mcp-light.git --tag "v${CLOJ
     bbin install https://github.com/bhauman/clojure-mcp-light.git --tag "v${CLOJURE_MCP_LIGHT_VERSION}" --as clj-nrepl-eval --main-opts '["-m" "clojure-mcp-light.nrepl-eval"]'; \
     bbin install https://github.com/bhauman/clojure-mcp-light.git --tag "v${CLOJURE_MCP_LIGHT_VERSION}" --as clj-paren-repair --main-opts '["-m" "clojure-mcp-light.paren-repair"]'
 
-ARG CLJ_SURGEON_SHA=28f4a11a33bb5be1f66e3ff094d4e1997756c5e7
-RUN bbin install https://github.com/realgenekim/clj-surgeon.git --git/sha "${CLJ_SURGEON_SHA}"
+ARG CLJ_SURGEON_SHA=8325ff425410569ddc7ecd2fd01afaf8f6a8b140
+RUN bbin install https://github.com/realgenekim/clj-surgeon.git --git/sha "${CLJ_SURGEON_SHA}"; \
+    curl -fsSL "https://raw.githubusercontent.com/realgenekim/clj-surgeon/${CLJ_SURGEON_SHA}/resources/clj-kondo-admission.py" -o /usr/local/bin/clj-kondo-admission; \
+    chmod +x /usr/local/bin/clj-kondo-admission; \
+    clj-surgeon --version
+# :ls, :declares, and :fix-declares run clj-kondo through this gate and refuse without it.
+ENV CLJ_SURGEON_CLJ_KONDO_ADMISSION=/usr/local/bin/clj-kondo-admission
 # <<< clojure (managed) <<<
