@@ -14,6 +14,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added/Changed/Fixed/Removed
 
+## [0.12.0] - 2026-09-08
+
+### Added
+
+- **`knot show` and `knot dep tree` print the status of every ticket they name.** The four derived sections of `show` and every node of the dependency tree used to print `<id>  <title>`, so a reader could not tell a closed blocker from an open one, or a child in progress from a child not started, without showing each referent in turn. Both renders now carry a bracketed status between the id and the title: `- <id>  [<status>]  <title>` in `show`, `<id>  [<status>]  <title>` in the tree. The marker is the literal frontmatter string, so the text render and `--json`, which already carried the status, agree. A resolved ticket that stores no status prints no marker rather than a guessed one, `[missing]` is unchanged, and the seen-before `↑` still trails the line. The marker takes no padding and no color, so the width of the output never depends on what the render contains.
+
+- **`bb build:bb` writes a self-contained `knot` executable.** The task runs `bb uberjar` and concatenates the jar onto the `bb` binary, producing `target/knot`. The file carries its own runtime, so it runs on a machine that has neither babashka nor a JVM installed. Against 149 tickets it answers `--help` in 80 ms, `list`, `check` and `create` in 100 to 120 ms, and `show` in 115 ms, at 100 MB peak resident memory.
+
+- **`bb build:jolt` compiles knot to a native binary.** [jolt](https://github.com/jolt-lang/jolt) builds Clojure into an executable on Chez Scheme. The new `jolt/` directory holds the `deps.edn` that reaches back into `../src`, so the binary comes from the same source as the babashka entry point, plus pure-Clojure stand-ins for the two Java-backed libraries knot depends on: `cheshire.core` over `clojure.data.json`, and a `clj-yaml.core` that parses and emits the frontmatter subset knot uses, matching SnakeYAML's block style byte for byte so ticket files round-trip between the two builds. `knot serve` is the one gap, because http-kit is Java; every other command passes the full `bb test` suite when the integration tests point at the binary. The binary is 18 MB against the 68 MB of `build:bb` and runs two to four times slower. `jolt/README.md` records the comparison.
+
 ## [0.11.0] - 2026-08-27
 
 ### Added
