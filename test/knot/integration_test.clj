@@ -546,8 +546,8 @@
       (run-knot tmp "init")
       (let [{:keys [exit err]} (run-knot tmp "create" "x" "--priority" "abc")]
         (is (= 1 exit))
-        (is (str/includes? err "Coerce failure")
-            "the hint must not fire on legit-but-unparseable values")
+        (is (str/includes? err "abc")
+            "the hint must not fire on legit-but-unparseable values; bb-cli's own message, which quotes the input, reaches the user")
         (is (not (str/includes? err "none was provided"))
             "the missing-value hint must not fire when a value was provided")))))
 
