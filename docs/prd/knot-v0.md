@@ -9,7 +9,7 @@ source: conversation
 > **History note (v0.3).** This PRD is a historical spec for the v0 product
 > shape, kept verbatim for design-rationale value. The shipped CLI has
 > deviated in a few places — `README.md`, `.claude/skills/knot/SKILL.md`,
-> `.claude/skills/knot/references/json-protocol.md`, and `CHANGELOG.md`
+> `.claude/skills/knot/references/json.md`, and `CHANGELOG.md`
 > are the current contract. Deviations from this spec are flagged
 > inline below as `*v0.3:*` notes; each points at a CHANGELOG entry
 > that owns the change.
@@ -136,7 +136,7 @@ Distribution is via `bbin install io.github.<user>/knot --as knot`. Implementati
 > *v0.3:* The "no envelope wrapping" decision was reversed. Every `--json`
 > command now wraps its payload in a tagged envelope
 > `{schema_version: 1, ok: true, data: <payload>}` — see
-> `.claude/skills/knot/references/json-protocol.md` for the full
+> `.claude/skills/knot/references/json.md` for the full
 > contract. The bare-object/bare-array shape on
 > `show` / `ls` / `ready` / `blocked` / `closed` was a v0.3 BREAKING
 > change.

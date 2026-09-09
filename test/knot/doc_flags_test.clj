@@ -10,7 +10,7 @@
             [knot.help :as help]))
 
 (def ^:private doc-files
-  (concat (fs/glob ".claude/skills/knot" "**/*.md")
+  (concat (fs/glob "resources/knot/skill" "**/*.md")
           (fs/glob "docs/agents" "*.md")
           [(fs/path "AGENTS.md") (fs/path "README.md")]))
 

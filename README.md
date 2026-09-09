@@ -109,7 +109,7 @@ Every read command (`show`, `ls`, `ready`, `blocked`, `closed`, `dep tree`, `che
 and emits snake_case keys.
 Stdout carries data only; warnings and errors go to stderr.
 See the bundled skill's reference at
-[`.claude/skills/knot/references/json-protocol.md`](.claude/skills/knot/references/json-protocol.md)
+[`.claude/skills/knot/references/json.md`](.claude/skills/knot/references/json.md)
 for the full envelope shape, per-command `data` payloads, and the error-code catalogue.
 The reference travels with the skill,
 so any project that copies `.claude/skills/knot/` gets the protocol contract alongside it.

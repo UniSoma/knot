@@ -18,7 +18,7 @@ shows in the `list` view and not in `prime`'s.
 
 Empty means **unassigned** on all five commands, mirroring `update <id> --assignee ""`, and composes with named handles
 in the same call: `--assignee "" --assignee alice` is "free or alice's". `knot ready --assignee ""` is the frontier an
-agent claims from; the claim predicate is in [`lifecycle-gates.md`](lifecycle-gates.md).
+agent claims from; the claim predicate is in [`lifecycle.md`](lifecycle.md).
 
 ## Graph filters
 

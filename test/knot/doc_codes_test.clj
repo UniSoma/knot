@@ -1,6 +1,6 @@
 (ns knot.doc-codes-test
   "Guard against catalogue drift: every error code `main.clj` emits has a
-   row in the error-code table of the bundled skill's json-protocol.md, and
+   row in the error-code table of the skill source's json.md, and
    every check code `check.clj` emits has a row in its check-code table —
    in both directions, so a renamed code cannot leave a stale row behind.
    The guard pins the code *set* only; the per-command attribution column
@@ -8,7 +8,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]))
 
-(def ^:private doc-path ".claude/skills/knot/references/json-protocol.md")
+(def ^:private doc-path "resources/knot/skill/references/json.md")
 
 (defn- codes
   "Sorted set of the first capture group over every match of `re` in `text`."
@@ -20,7 +20,7 @@
   [doc from to]
   (let [i (str/index-of doc from)
         j (str/index-of doc to i)]
-    (assert (and i j) (str "json-protocol.md lost the section between " from " and " to))
+    (assert (and i j) (str doc-path " lost the section between " from " and " to))
     (subs doc i j)))
 
 (def ^:private table-row-re
