@@ -6,7 +6,7 @@ type: feature
 priority: 4
 mode: hitl
 created: '2026-05-18T13:37:23.102315484Z'
-updated: '2026-05-18T15:39:01.321784074Z'
+updated: '2026-09-09T02:25:19.536513828Z'
 closed: '2026-05-18T15:39:01.321784074Z'
 tags:
 - prototype
@@ -34,6 +34,8 @@ acceptance:
   done: true
 - title: CHANGELOG entry under Unreleased.
   done: true
+links:
+- kno-01m21zqt72bh
 ---
 
 ## Description

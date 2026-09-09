@@ -6,7 +6,7 @@ type: chore
 priority: 2
 mode: afk
 created: '2026-09-08T20:12:24.794135626Z'
-updated: '2026-09-08T20:12:24.794135626Z'
+updated: '2026-09-09T02:25:19.536513828Z'
 parent: kno-01m21abe2vqs
 tags:
 - docs
@@ -20,6 +20,8 @@ acceptance:
   done: false
 - title: No topic file starts with YAML frontmatter; SKILL.md keeps its name/description frontmatter unchanged
   done: false
+links:
+- kno-01m21zqt72bh
 ---
 
 ## Description
