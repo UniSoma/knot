@@ -1,7 +1,8 @@
 (ns knot.help
   "Help system: command registry (source of truth for parse + display)
    and renderers for top-level and per-command help."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [knot.listing :as listing]
             [knot.output :as output]
             [knot.version :as version]))
@@ -154,6 +155,47 @@
          "AGE  time since the ticket's `updated` stamp, bucketed as Nd / Nw / Nm, or `-` when there is no usable stamp. No --json field of its own: read the raw `updated` timestamp."]
         (map (fn [{:keys [header note]}] (str header "  " note)))
         listing/columns))
+
+(def topics
+  "Bundled concept guides, printed verbatim by `knot help <topic>`. The
+   same markdown is the agent skill under `resources/knot/skill/`:
+   `intro` is its SKILL.md body, the rest its references. Insertion
+   order is listing order; no topic name may shadow a command name,
+   alias or subcommand, since the help dispatcher resolves those first."
+  (array-map
+   "intro"      {:resource "knot/skill/SKILL.md"
+                 :summary  "What knot is, and the contract between the CLI, the tickets and .knot.edn"}
+   "lifecycle"  {:resource "knot/skill/references/lifecycle.md"
+                 :summary  "The acceptance and open-children gates, and the conditional claim"}
+   "graph"      {:resource "knot/skill/references/graph.md"
+                 :summary  "How far each listing filter reaches, and how to read the computed columns"}
+   "json"       {:resource "knot/skill/references/json.md"
+                 :summary  "The --json envelope, its per-command payloads and the error catalogue"}
+   "autonomous" {:resource "knot/skill/references/autonomous.md"
+                 :summary  "Modes as a contract, and the loop an unattended agent runs"}
+   "writes"     {:resource "knot/skill/references/writes.md"
+                 :summary  "Appending versus overwriting, and the sections a body may not hold"}))
+
+(defn topic-text
+  "The markdown for `topic`, or nil when it names no topic. Leading YAML
+   frontmatter is dropped — SKILL.md carries a name/description block
+   that means nothing on a terminal."
+  [topic]
+  (when-let [resource (get-in topics [topic :resource])]
+    (-> (slurp (io/resource resource))
+        (str/replace #"(?s)\A---\n.*?\n---\n" "")
+        str/triml)))
+
+(defn topics-list-text
+  "Render `knot help topics`: one `name  summary` line per topic. Width
+   math uses the uncolored name so ANSI escapes do not throw alignment
+   off, as in the top-level command listing."
+  [{:keys [color?]}]
+  (let [max-w (apply max (map count (keys topics)))]
+    (str/join "\n"
+              (for [[topic {:keys [summary]}] topics
+                    :let [pad (apply str (repeat (- max-w (count topic)) \space))]]
+                (str "  " (cyan color? topic) pad "  " summary)))))
 
 (def registry
   "Source of truth for every CLI command. Keys are registry IDs:
@@ -758,6 +800,7 @@
          (bold color? "USAGE") "\n  " (cyan color? "knot <command> [args...]") "\n"
          "\n"
          "Run `knot help <command>` for per-command details.\n"
+         "Concept guides for the tracker itself: `knot help topics`.\n"
          "\n"
          (str/join "\n\n" groups)
          "\n")))

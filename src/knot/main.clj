@@ -1380,7 +1380,9 @@
       ;; (alone or chained with other help tokens like `knot help help`,
       ;; `knot --help -h`) all collapse to top-level help. With a trailing
       ;; non-help token, the remainder is resolved as a per-command help
-      ;; target. Unknown target → stderr, exit 1.
+      ;; target, then as a bundled concept guide (`knot help topics`
+      ;; lists them) — commands, aliases and subcommands win over topic
+      ;; names. Unknown target → stderr, exit 1.
       (when (#{"--help" "-h" "help"} cmd)
         (let [tail (drop-while #{"help" "--help" "-h"} rest-argv)]
           (cond
@@ -1388,9 +1390,15 @@
             (do (print-top-level-help) (System/exit 0))
 
             :else
-            (if-let [k (resolve-cmd-key tail)]
-              (do (print-command-help k) (System/exit 0))
-              (die (str "knot help: unknown command: " (str/join " " tail)))))))
+            (let [target (str/join " " tail)]
+              (if-let [k (resolve-cmd-key tail)]
+                (do (print-command-help k) (System/exit 0))
+                (if-let [text (if (= "topics" target)
+                                (help/topics-list-text {:color? (color-enabled-on-stdout?)})
+                                (help/topic-text target))]
+                  (do (println-out text) (System/exit 0))
+                  (die (str "knot help: unknown command: " target
+                            "\nRun `knot help topics` for the bundled concept guides."))))))))
 
       ;; Per-command `--help` / `-h` anywhere in argv: pre-scan after
       ;; extracting body flags so a literal `--help` inside a body value

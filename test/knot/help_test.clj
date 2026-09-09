@@ -1,6 +1,7 @@
 (ns knot.help-test
   (:require [babashka.fs]
             [babashka.process]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.help :as help]
@@ -539,7 +540,9 @@
    stdin is closed (empty) so commands probing it don't block."
   [& args]
   @(babashka.process/process
-    (concat ["bb" "-cp" (str (babashka.fs/path project-root "src"))
+    (concat ["bb" "-cp" (str/join java.io.File/pathSeparator
+                                  [(str (babashka.fs/path project-root "src"))
+                                   (str (babashka.fs/path project-root "resources"))])
              "-e"
              (str "(require '[knot.main]) "
                   "(apply (resolve 'knot.main/-main) *command-line-args*)")
@@ -817,3 +820,109 @@
           ":check should enumerate its new warning code")
       (is (re-find #"(?i)warning" notes)
           "the note should say duplicate_section is a warning"))))
+
+;; ---- Bundled concept guides (`knot help <topic>`) ----
+
+(def ^:private skill-src
+  (str (babashka.fs/path project-root "resources" "knot" "skill")))
+
+(defn- topic-name-for-file
+  "The topic a skill markdown file is served as: SKILL.md is `intro`,
+   every `references/<name>.md` is `<name>`."
+  [rel]
+  (if (= rel "SKILL.md")
+    "intro"
+    (str/replace (str (babashka.fs/file-name rel)) #"\.md$" "")))
+
+(defn- skill-markdown-files []
+  (->> (babashka.fs/glob skill-src "**")
+       (filter #(str/ends-with? (str %) ".md"))
+       (map #(str (babashka.fs/relativize skill-src %)))))
+
+(def ^:private topics-in-order (vec (keys help/topics)))
+
+(deftest topics-registry-test
+  (testing "no topic name shadows a command name, alias or subcommand"
+    (let [reserved (into #{"topics"}
+                         (mapcat (fn [[k entry]]
+                                   (concat [(name k)]
+                                           (some-> (namespace k) vector)
+                                           (:aliases entry))))
+                         help/registry)]
+      (doseq [t (keys help/topics)]
+        (is (not (contains? reserved t))
+            (str "topic " t " is unreachable: the help dispatcher resolves commands first")))))
+
+  (testing "every skill markdown file has a topics entry and vice versa"
+    (is (= (set (map topic-name-for-file (skill-markdown-files)))
+           (set (keys help/topics)))))
+
+  (testing "every topic resource is on the classpath"
+    (doseq [[t {:keys [resource summary]}] help/topics]
+      (is (some? (io/resource resource)) (str t " resource missing"))
+      (is (not (str/blank? summary)) (str t " has no summary")))))
+
+(deftest topic-text-test
+  (testing "a reference topic is its file, byte for byte"
+    (doseq [rel (skill-markdown-files)
+            :when (not= rel "SKILL.md")]
+      (is (= (slurp (str (babashka.fs/path skill-src rel)))
+             (help/topic-text (topic-name-for-file rel)))
+          (str rel " is not printed verbatim"))))
+
+  (testing "intro is SKILL.md minus the frontmatter written for a harness"
+    (let [raw (slurp (str (babashka.fs/path skill-src "SKILL.md")))
+          out (help/topic-text "intro")]
+      (is (str/includes? raw "\nname: knot\n"))
+      (is (not (str/includes? out "name: knot")))
+      (is (str/ends-with? raw out) "only the leading frontmatter is dropped")
+      (is (str/starts-with? out "# knot"))))
+
+  (testing "an unknown topic has no text"
+    (is (nil? (help/topic-text "bogus")))))
+
+(deftest topics-list-text-test
+  (testing "lists every topic with its summary, intro first"
+    (let [out   (help/topics-list-text {:color? false})
+          lines (str/split-lines out)]
+      (is (= (count topics-in-order) (count lines)))
+      (is (str/starts-with? (first lines) "  intro"))
+      (doseq [[t {:keys [summary]}] help/topics]
+        (is (some #(and (str/includes? % t) (str/includes? % summary)) lines)
+            (str t " has no line carrying its summary")))))
+
+  (testing "with :color? false, no ANSI escapes appear"
+    (is (not (re-find #"\x1b\[" (help/topics-list-text {:color? false})))))
+
+  (testing "with :color? true, topic names are cyan"
+    (is (re-find #"\x1b\[36mintro\x1b\[0m" (help/topics-list-text {:color? true})))))
+
+(deftest topic-routing-test
+  (testing "knot help <topic> prints the guide and exits 0"
+    (doseq [t (keys help/topics)]
+      (let [{:keys [exit out err]} (run-knot "help" t)]
+        (is (zero? exit) (str "knot help " t " exited " exit "; err=" err))
+        (is (= (str/trim-newline (help/topic-text t)) (str/trim-newline out))
+            (str "knot help " t " did not print the guide verbatim"))
+        (is (str/blank? err)))))
+
+  (testing "knot help topics lists every topic, unpaged and unpiped-uncolored"
+    (let [{:keys [exit out err]} (run-knot "help" "topics")]
+      (is (zero? exit) (str "err=" err))
+      (is (= (help/topics-list-text {:color? false}) (str/trim-newline out)))
+      (is (str/blank? err))))
+
+  (testing "commands still win over topics"
+    (let [{:keys [exit out]} (run-knot "help" "list")]
+      (is (zero? exit))
+      (is (str/includes? out "USAGE"))
+      (is (str/includes? out "knot list"))))
+
+  (testing "an unknown help target names knot help topics"
+    (let [{:keys [exit err]} (run-knot "help" "bogus")]
+      (is (= 1 exit))
+      (is (str/includes? err "knot help topics"))))
+
+  (testing "top-level help advertises the concept guides"
+    (let [{:keys [out]} (run-knot "--help")]
+      (is (str/includes? out "knot help topics")))))
