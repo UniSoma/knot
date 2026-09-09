@@ -3,7 +3,9 @@
    byte-for-byte mirror of `resources/knot/skill/`, the source of truth
    `knot skill install` writes out. Editing either side alone fails here."
   (:require [babashka.fs :as fs]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
+            [knot.cli :as cli]))
 
 (def ^:private src-dir "resources/knot/skill")
 (def ^:private copy-dir ".claude/skills/knot")
@@ -35,11 +37,23 @@
     (let [head (slurp (str (fs/path src-dir "SKILL.md")))]
       (is (re-find #"(?s)\A---\nname: knot\ndescription: .+?\n---\n" head)))))
 
+(def ^:private stamp-re
+  #"(?m)^<!-- installed by knot \d+\.\d+\.\d+ -->\n")
+
 (deftest committed-copy-matches-source-test
   (testing "same file set"
     (is (= (relative-files src-dir) (relative-files copy-dir))))
-  (testing "same bytes"
+  (testing "cli/skill-files lists exactly what the source holds"
+    (is (= (relative-files src-dir) (into (sorted-set) cli/skill-files))))
+  (testing "same bytes, once the installed SKILL.md loses its version stamp"
     (doseq [f (relative-files src-dir)]
       (is (= (slurp (str (fs/path src-dir f)))
-             (slurp (str (fs/path copy-dir f))))
-          (str f " differs; re-copy " src-dir " over " copy-dir)))))
+             (cond-> (slurp (str (fs/path copy-dir f)))
+               (= f "SKILL.md") (str/replace stamp-re "")))
+          (str f " differs; regenerate with `knot skill install`")))))
+
+(deftest committed-copy-carries-the-install-stamp-test
+  (testing "SKILL.md was written by the command, so it is stamped"
+    (let [md (slurp (str (fs/path copy-dir "SKILL.md")))]
+      (is (re-find #"(?s)\A---\n.*?\n---\n<!-- installed by knot \d+\.\d+\.\d+ -->\n" md)
+          "regenerate the committed copy with `knot skill install`"))))

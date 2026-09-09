@@ -72,14 +72,15 @@ Every path in the envelope is **absolute** and **POSIX-separated** (forward slas
 included). Absolute because the project root is discovered by walking up from cwd, so a root-relative path is not
 openable from a subdirectory — terminal hyperlinking and agent file-read tools both resolve against cwd — and because
 an agent then never has to join against `project_root` with a second `knot info --json` call. The one exception is
-`info`'s `paths.tickets_dir`, which echoes the configured directory name (`.tickets`) and stays relative: it names a
-config value rather than locating a file, and `tickets_path` is its absolute form.
+`info`'s `paths.tickets_dir` and `paths.skill_dir`, which echo configured values (`.tickets`, and `:skill-dir` when
+set — possibly relative or `~`-prefixed, `null` when unset): they name config values rather than locating files, and
+`tickets_path` and `skill_path` are their absolute forms.
 
 | Site                 | Emitted by                                             | Notes                                     |
 |----------------------|--------------------------------------------------------|-------------------------------------------|
 | `meta.archived_to`   | `close`, terminal `status`, terminal `update --status` |                                           |
 | `data.deleted.path`  | `delete`                                               | Where the file *was* — it is gone.        |
-| `data.paths.*`       | `info`                                                 | `tickets_dir` is the relative exception.  |
+| `data.paths.*`       | `info`                                                 | `tickets_dir` and `skill_dir` are the config-echo exceptions. |
 | `data.issues[].path` | `check`, on file-level codes only                      | See *`check` shape*.                      |
 
 **Known boundary:** an absolute path is wrong across a container boundary where the repo is mounted at a different
@@ -126,7 +127,7 @@ includes the missing id verbatim.
 | `acceptance_incomplete` | Active→terminal transition with at least one frontmatter `:acceptance` entry unchecked.         | `open_acceptance: {title}[]` | `close`, `status` (terminal target), `update --status <terminal>`.                                                                        |
 | `open_children`         | Start or close of a ticket with a child in a non-terminal status.                               | `open_children: string[]`    | `start`, `close`, `status`, `update --status`.                                                                                            |
 | `already_assigned`      | `--if-unassigned` passed and the ticket already carries a non-blank `assignee`. Nothing written. | `current_assignee: string`   | `start`, `update`.                                                                                                                        |
-| `no_project`            | No `.knot.edn` and no `.tickets/` discoverable from cwd.                                        | —                            | `check` (exit 2), `info` (exit 1).                                                                                                        |
+| `no_project`            | No `.knot.edn` and no `.tickets/` discoverable from cwd.                                        | —                            | `check` (exit 2), `info` (exit 1), `skill install` without a `<dir>` (exit 1).                                                                                                        |
 | `config_invalid`        | `.knot.edn` exists but cannot be parsed or contains invalid keys.                               | —                            | `check` (exit 2), `info` (exit 1).                                                                                                        |
 
 Argument-parsing failures (unknown flag, missing positional, out-of-range numeric) are CLI-usage errors, not data
@@ -213,13 +214,14 @@ Optional keys:
 | `update <id> [flags…]`        | `ticket`                                                | yes   | conditional | `meta.archived_to` iff the resulting `data.status` is terminal — including a field-only update to an archived ticket.                                                                                                                       |
 | `delete <id>` (+ `--cascade`) | `{deleted: {id, path}, cleaned: [{id, fields: […]}]}`   | n/a   | —           | Without `--cascade`, `cleaned` is `[]` and a non-leaf delete emits `has_incoming_refs` instead. With it, `cleaned` lists every rewritten referrer, alphabetical by id, `fields` as a string vector.                                          |
 | `migrate-ac`                  | `{migrated, unchanged, total}`                          | n/a   | —           | One-shot legacy migration; `total == migrated + unchanged`.                                                                                                                                                                                 |
+| `skill install [<dir>]`       | `{dir, files}`                                          | n/a   | —           | `dir` is the absolute install directory; `files` lists the written files as paths relative to it, in write order. Every install overwrites those files.                                                                                       |
 
 ### `info` shape
 
 ```json
 {
   "project":        { "knot_version": "…", "name": "…", "prefix": "kno", "config_present": true },
-  "paths":          { "cwd": "…", "project_root": "…", "config_path": "…", "tickets_dir": ".tickets", "tickets_path": "…", "archive_path": "…" },
+  "paths":          { "cwd": "…", "project_root": "…", "config_path": "…", "tickets_dir": ".tickets", "tickets_path": "…", "archive_path": "…", "skill_dir": null, "skill_path": "…" },
   "defaults":       { "default_assignee": "…", "effective_create_assignee": "…", "default_type": "task", "default_priority": 2, "default_mode": "hitl" },
   "allowed_values": { "statuses": [...], "active_status": "in_progress", "terminal_statuses": [...], "types": [...], "modes": [...], "afk_mode": "afk", "priority_range": { "min": 0, "max": 4 } },
   "counts":         { "live_count": N, "archive_count": M, "total_count": N + M }

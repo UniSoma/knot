@@ -1007,7 +1007,7 @@ before issuing other Knot commands.")
   [{:keys [project paths defaults allowed_values counts]}]
   (let [{:keys [knot_version name prefix config_present]} project
         {:keys [cwd project_root config_path tickets_dir
-                tickets_path archive_path]} paths
+                tickets_path archive_path skill_dir skill_path]} paths
         {:keys [default_assignee effective_create_assignee
                 default_type default_priority default_mode]} defaults
         {:keys [statuses active_status terminal_statuses types modes
@@ -1024,7 +1024,9 @@ before issuing other Knot commands.")
                                   (str "Config path: "   (info-scalar config_path))
                                   (str "Tickets dir: "   (info-scalar tickets_dir))
                                   (str "Tickets path: "  (info-scalar tickets_path))
-                                  (str "Archive path: "  (info-scalar archive_path))])
+                                  (str "Archive path: "  (info-scalar archive_path))
+                                  (str "Skill dir: "     (info-scalar skill_dir))
+                                  (str "Skill path: "    (info-scalar skill_path))])
         defaults-block (str/join "\n"
                                  [(str "Default assignee: "          (info-scalar default_assignee))
                                   (str "Effective create assignee: " (info-scalar effective_create_assignee))
@@ -1048,6 +1050,18 @@ before issuing other Knot commands.")
          (info-section "Defaults"       defaults-block) "\n"
          (info-section "Allowed Values" allowed-block) "\n"
          (info-section "Counts"         counts-block))))
+
+(defn skill-install-text
+  "Render a `skill install` result as the target directory followed by one
+   indented line per written file."
+  [{:keys [dir files]}]
+  (str/join "\n" (cons (str "Installed the knot skill to " dir)
+                       (map #(str "  " %) files))))
+
+(defn skill-install-json
+  "Wrap a `skill install` result — `{dir, files}` — in the success envelope."
+  [data]
+  (envelope-str data))
 
 (defn info-json
   "Wrap the `knot info` payload in the v0.3 success envelope with the

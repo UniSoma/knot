@@ -1341,6 +1341,39 @@
   (println-out (help/top-level-help-text help/registry
                                          {:color? (color-enabled-on-stdout?)})))
 
+(defn- skill-install-handler
+  "Run `knot skill install [dir]`. Without `dir` the target comes from the
+   project's `:skill-dir` (or the `.claude/skills/knot` default), so a
+   missing project is a hard error; with an explicit `dir` — the global
+   install — no project is required."
+  [argv]
+  (let [{:keys [opts args]} (bcli/parse-args argv (spec :skill/install))
+        json? (boolean (:json opts))
+        dir   (first args)
+        ;; Canonicalized like `discover-ctx` does, so an explicit dir that
+        ;; *is* the effective skill dir compares equal to it (macOS
+        ;; /var → /private/var, Windows 8.3 names) and draws no hint.
+        ctx   (assoc (discover-ctx) :cwd (str (fs/canonicalize (fs/cwd))))]
+    (when (and (nil? dir) (not (:project-found? ctx)))
+      (if json?
+        (emit-error-envelope!
+         {:code "no_project"
+          :message (str "no project found at or above " (:cwd ctx)
+                        " — pass a directory to install anyway")})
+        (die (str "knot skill install: no project found at or above " (:cwd ctx)
+                  "\n      Pass a directory to install anyway."))))
+    ;; The hint echoes `dir` as typed, not its absolute form: `.knot.edn`
+    ;; is committed, and a project-relative or `~`-prefixed :skill-dir is
+    ;; the portable spelling.
+    (when (and dir
+               (:project-found? ctx)
+               (not= (cli/resolve-skill-dir ctx dir) (cli/effective-skill-dir ctx)))
+      (binding [*out* *err*]
+        (println (str "knot: hint: add :skill-dir \"" dir "\" to .knot.edn"
+                      " so later installs default there"))))
+    (println-out (cli/skill-install-cmd ctx {:dir dir :json? json?}))))
+
+
 (defn- resolve-cmd-key
   "Look at the first one or two non-flag tokens of `argv` and return the
    matching registry key, preferring the two-token form when both match.
@@ -1358,6 +1391,15 @@
                                        (get help/registry k)
                                        {:color?   (color-enabled-on-stdout?)
                                         :registry help/registry})))
+
+(defn- skill-handler
+  "Route `knot skill ...`. `install` is the only subcommand; bare `knot
+   skill` prints the group help and exits 1, like an argument-less knot."
+  [argv]
+  (case (first argv)
+    "install" (skill-install-handler (rest argv))
+    nil       (do (print-command-help :skill) (System/exit 1))
+    (die (str "knot skill: unknown subcommand: " (first argv)))))
 
 (defn- help-requested?
   "True when `argv` (after body-flag extraction) contains `--help` or
@@ -1434,6 +1476,7 @@
         "edit"     (edit-handler rest-argv)
         "update"   (update-handler rest-argv)
         "migrate-ac" (migrate-ac-handler rest-argv)
+        "skill"   (skill-handler rest-argv)
         "serve"   (serve-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]

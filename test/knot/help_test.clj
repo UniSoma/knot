@@ -340,8 +340,9 @@
 
 (def ^:private expected-cmd-keys
   "Every command name dispatched from `knot.main/-main`'s top-level case
-   plus the `dep` subcommand. The registry must cover all of these."
-  #{:init :prime :info :check :migrate-ac
+   plus the `dep` and `skill` subcommands. The registry must cover all
+   of these."
+  #{:init :prime :info :check :migrate-ac :skill :skill/install
     :create :show :list
     :status :start :close :reopen :delete
     :dep :dep/tree :undep

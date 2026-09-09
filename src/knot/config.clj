@@ -58,7 +58,7 @@
 (def ^:private known-keys
   #{:tickets-dir :prefix :project-name :default-assignee :default-type
     :default-priority :statuses :terminal-statuses :active-status
-    :types :modes :default-mode :afk-mode})
+    :types :modes :default-mode :afk-mode :skill-dir})
 
 (defn- warn! [msg]
   (binding [*out* *err*] (println msg)))
@@ -94,7 +94,7 @@
   [merged]
   (let [{:keys [tickets-dir prefix project-name default-assignee default-type
                 default-priority statuses terminal-statuses active-status
-                types modes default-mode afk-mode]} merged]
+                types modes default-mode afk-mode skill-dir]} merged]
     (when-not (non-blank-string? tickets-dir)
       (throw (ex-info ".knot.edn :tickets-dir must be a non-blank string" {})))
     (when (and (some? prefix) (not (and (non-blank-string? prefix)
@@ -131,7 +131,9 @@
                            " (or nil to disable the agent preamble)")
                       {:afk-mode afk-mode :modes modes})))
     (when-not (and (integer? default-priority) (<= 0 default-priority 4))
-      (throw (ex-info ".knot.edn :default-priority must be an integer 0..4" {}))))
+      (throw (ex-info ".knot.edn :default-priority must be an integer 0..4" {})))
+    (when (and (some? skill-dir) (not (non-blank-string? skill-dir)))
+      (throw (ex-info ".knot.edn :skill-dir must be a non-blank string" {}))))
   merged)
 
 (defn load-config

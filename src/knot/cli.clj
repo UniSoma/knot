@@ -2,6 +2,7 @@
   "Per-command argument specs and handlers. Wired by knot.main via
    babashka.cli/dispatch."
   (:require [babashka.fs :as fs]
+            [clojure.java.io :as io]
             [clojure.set :as set]
             [clojure.string :as str]
             [flatland.ordered.map :as om]
@@ -1603,6 +1604,71 @@
                          (str/ends-with? (str (fs/file-name %)) ".md"))
                    (fs/glob dir "*.md")))))
 
+(def skill-files
+  "Every file of the bundled agent skill, as classpath paths under
+   `knot/skill/`. Listed rather than walked: an uberjar has no resource
+   directory to enumerate. Print order is install order."
+  ["SKILL.md"
+   "agents/openai.yaml"
+   "references/autonomous.md"
+   "references/graph.md"
+   "references/json.md"
+   "references/lifecycle.md"
+   "references/writes.md"])
+
+(defn- stamp-skill-md
+  "Insert `<!-- installed by knot <version> -->` right after SKILL.md's
+   YAML frontmatter. An HTML comment, not a frontmatter key, so no agent
+   harness rejects the file over an unknown key."
+  [md]
+  (str/replace-first md
+                     #"(?s)\A(---\n.*?\n---\n)"
+                     (str "$1<!-- installed by knot " version/version " -->\n")))
+
+(defn- absolutize-dir
+  "Normalized absolute path for a user-supplied directory: `~` expands,
+   and a relative path resolves against `base`."
+  [dir base]
+  (let [expanded (fs/expand-home dir)]
+    (str (fs/normalize (if (fs/absolute? expanded)
+                         (fs/path expanded)
+                         (fs/path base expanded))))))
+
+(defn effective-skill-dir
+  "Where `knot skill install` writes without an explicit directory:
+   `:skill-dir` from `.knot.edn` when set (relative to the project root),
+   else `<project-root>/.claude/skills/knot`."
+  [{:keys [project-root skill-dir]}]
+  (if skill-dir
+    (absolutize-dir skill-dir project-root)
+    (str (fs/path project-root ".claude" "skills" "knot"))))
+
+(defn resolve-skill-dir
+  "Absolute install directory for `dir` as typed on the command line: an
+   explicit `dir` (resolved against `:cwd`, falling back to the project
+   root) wins over the effective skill dir. Native separators — this is
+   the path knot prints for a human to paste back into a shell."
+  [ctx dir]
+  (if dir
+    (absolutize-dir dir (or (:cwd ctx) (:project-root ctx)))
+    (effective-skill-dir ctx)))
+
+(defn skill-install-cmd
+  "Write the bundled agent skill out as files under `resolve-skill-dir`.
+   Existing files are overwritten — knot owns them — but nothing else in
+   the target directory is touched, and no file is ever removed. `opts`
+   supports `:dir` and `:json?`. Returns a string."
+  [ctx {:keys [dir json?]}]
+  (let [target (resolve-skill-dir ctx dir)]
+    (doseq [f skill-files
+            :let [out     (fs/path target f)
+                  content (slurp (io/resource (str "knot/skill/" f)))]]
+      (fs/create-dirs (fs/parent out))
+      (spit (str out) (cond-> content (= f "SKILL.md") stamp-skill-md)))
+    (if json?
+      (output/skill-install-json {:dir (fs/unixify target) :files skill-files})
+      (output/skill-install-text {:dir (str target) :files skill-files}))))
+
 (defn- info-data
   "Build the snake_case data map used by both `output/info-text` and
    `output/info-json`. Five fixed sections: project, paths, defaults,
@@ -1620,7 +1686,9 @@
            :config_path  (fs/unixify (fs/path project-root ".knot.edn"))
            :tickets_dir  (fs/unixify tickets-dir)
            :tickets_path (fs/unixify (fs/path project-root tickets-dir))
-           :archive_path (fs/unixify (fs/path project-root tickets-dir store/archive-subdir))}
+           :archive_path (fs/unixify (fs/path project-root tickets-dir store/archive-subdir))
+           :skill_dir    (:skill-dir ctx)
+           :skill_path   (fs/unixify (effective-skill-dir ctx))}
    :defaults {:default_assignee          (when (contains? ctx :default-assignee)
                                            (:default-assignee ctx))
               :effective_create_assignee (effective-create-assignee ctx)

@@ -12,6 +12,13 @@
 (def ^:private project-root
   (or (System/getProperty "user.dir") "."))
 
+(def ^:private classpath
+  "`src` plus `resources` — commands that print bundled files (`help
+   <topic>`, `skill install`) read them off the classpath."
+  (str (fs/path project-root "src")
+       java.io.File/pathSeparator
+       (fs/path project-root "resources")))
+
 (defmacro with-tmp [bind & body]
   `(let [tmp# (str (fs/create-temp-dir))
          ~bind tmp#]
@@ -24,7 +31,7 @@
    commands which probe stdin (`add-note` without a text arg) do not
    block waiting for the parent's tty."
   [cwd & args]
-  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+  @(p/process (concat ["bb" "-cp" classpath
                        "-e"
                        (str "(require '[knot.main]) "
                             "(apply (resolve 'knot.main/-main) *command-line-args*)")
@@ -37,7 +44,7 @@
    instead of closing it. Use to exercise commands that read piped input
    (`add-note` with no text arg)."
   [cwd stdin-str & args]
-  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+  @(p/process (concat ["bb" "-cp" classpath
                        "-e"
                        (str "(require '[knot.main]) "
                             "(apply (resolve 'knot.main/-main) *command-line-args*)")
@@ -50,7 +57,7 @@
    the subprocess environment. Use to exercise env-driven behaviour
    such as `NO_COLOR`."
   [cwd extra-env & args]
-  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+  @(p/process (concat ["bb" "-cp" classpath
                        "-e"
                        (str "(require '[knot.main]) "
                             "(apply (resolve 'knot.main/-main) *command-line-args*)")
@@ -3738,3 +3745,77 @@
           (is (zero? exit) "a warning never changes the exit code")
           (is (str/includes? out "reserved_section"))
           (is (str/includes? out id)))))))
+
+(deftest skill-install-test
+  ;; Expected paths canonicalize tmp: knot's output resolves cwd first
+  ;; (macOS /var → /private/var, Windows 8.3 names), so the raw temp-dir
+  ;; string is not what the CLI prints.
+  (testing "with no dir, the skill lands in .claude/skills/knot and is listed"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out err]} (run-knot tmp "skill" "install")]
+        (is (zero? exit) (str "err=" err))
+        (is (str/includes? out (str (fs/path (fs/canonicalize tmp) ".claude" "skills" "knot"))))
+        (is (str/includes? out "SKILL.md"))
+        (is (str/includes? out "references/json.md"))
+        (is (str/blank? err) "no hint when the target is the effective skill dir")
+        (is (fs/regular-file? (fs/path tmp ".claude" "skills" "knot" "SKILL.md")))
+        (is (fs/regular-file? (fs/path tmp ".claude" "skills" "knot"
+                                       "agents" "openai.yaml"))))))
+
+  (testing "an explicit dir installs there and hints at :skill-dir on stderr"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit err]} (run-knot tmp "skill" "install" "agents/knot")]
+        (is (zero? exit))
+        (is (fs/regular-file? (fs/path tmp "agents" "knot" "SKILL.md")))
+        (is (str/includes? err ":skill-dir"))
+        (is (str/includes? err "\"agents/knot\"") "the hint echoes the dir as typed"))))
+
+  (testing "a configured :skill-dir is the default target, and gets no hint"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (spit (str (fs/path tmp ".knot.edn")) "{:skill-dir \"agents/knot\"}")
+      (let [{:keys [exit out err]} (run-knot tmp "skill" "install")]
+        (is (zero? exit) (str "err=" err))
+        (is (str/includes? out (str (fs/path (fs/canonicalize tmp) "agents" "knot"))))
+        (is (str/blank? err))
+        (is (fs/regular-file? (fs/path tmp "agents" "knot" "SKILL.md"))))))
+
+  (testing "--json returns the target dir and the written files"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out]} (run-knot tmp "skill" "install" "--json")
+            parsed (json/parse-string (str/trim out) true)]
+        (is (zero? exit))
+        (is (true? (:ok parsed)))
+        (is (= (fs/unixify (fs/path (fs/canonicalize tmp) ".claude" "skills" "knot"))
+               (get-in parsed [:data :dir])))
+        (is (= ["SKILL.md" "agents/openai.yaml" "references/autonomous.md"
+                "references/graph.md" "references/json.md"
+                "references/lifecycle.md" "references/writes.md"]
+               (get-in parsed [:data :files]))))))
+
+  (testing "without a project and without a dir, install refuses"
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "skill" "install")]
+        (is (= 1 exit))
+        (is (str/includes? err "no project found")))))
+
+  (testing "without a project, an explicit dir still installs"
+    (with-tmp tmp
+      (let [{:keys [exit]} (run-knot tmp "skill" "install" "here")]
+        (is (zero? exit))
+        (is (fs/regular-file? (fs/path tmp "here" "SKILL.md"))))))
+
+  (testing "bare `knot skill` prints the group help and exits 1"
+    (with-tmp tmp
+      (let [{:keys [exit out]} (run-knot tmp "skill")]
+        (is (= 1 exit))
+        (is (str/includes? out "knot skill install")))))
+
+  (testing "an unknown subcommand is an error"
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "skill" "uninstall")]
+        (is (= 1 exit))
+        (is (str/includes? err "unknown subcommand"))))))

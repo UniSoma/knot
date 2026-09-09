@@ -214,6 +214,7 @@
                   {:name :tickets-dir :desc "Override the default tickets directory name."}
                   {:name :force :coerce :boolean
                    :desc "Overwrite an existing .knot.edn."}]
+    :notes       ["Writing the config is all init does — install the agent skill separately with `knot skill install`."]
     :examples    [{:cmd "knot init"
                    :note "Create .knot.edn and .tickets/ in the current directory."}]}
 
@@ -707,6 +708,35 @@
     :exit-codes  [{:code 0 :when "schema emitted successfully"}
                   {:code 1 :when "no project found, invalid .knot.edn, or other failure"}]}
 
+   :skill
+   {:group       :project
+    :description "Manage the bundled agent skill."
+    :args        []
+    :restrict?   true
+    :flags       []
+    :subcommands [:skill/install]
+    :examples    [{:cmd "knot skill install"
+                   :note "Install the bundled skill into this project."}]
+    :exit-codes  [{:code 1 :when "no subcommand given — `skill` is a group; run a subcommand"}]}
+
+   :skill/install
+   {:group       :project
+    :description "Write the bundled agent skill into a directory (default: .claude/skills/knot)."
+    :args        [{:name "dir"}]
+    :restrict?   true
+    :flags       [{:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope ({dir, files}) instead of plain text."}]
+    :notes       ["knot owns the files it writes: every install overwrites SKILL.md, references/ and agents/openai.yaml in the target directory without asking. Nothing else in that directory is touched, and no file is ever deleted."
+                  "Without <dir>, the target is .knot.edn's :skill-dir (relative paths resolve from the project root, ~ expands), else <project-root>/.claude/skills/knot. An explicit <dir> always wins; when it differs from the effective :skill-dir, a stderr hint suggests recording it as :skill-dir so later installs default there."]
+    :examples    [{:cmd "knot skill install"
+                   :note "Install into .claude/skills/knot under the project root."}
+                  {:cmd "knot skill install ~/.claude/skills/knot"
+                   :note "Install once for every project on this machine."}
+                  {:cmd "knot skill install --json"
+                   :note "Same install, JSON envelope with the target dir and file list."}]
+    :exit-codes  [{:code 0 :when "files written"}
+                  {:code 1 :when "no project found (and no <dir> given), or a write failed"}]}
+
    :serve
    {:group       :project
     :description "Run the read-only Web UI on loopback (foreground; ctrl-c to stop)."
@@ -740,7 +770,7 @@
   "Top-level command order for `top-level-help-text`. Subcommand keys
    (e.g. `:dep/tree`) are intentionally absent — they render indented
    beneath their parent via the parent's `:subcommands` field."
-  [:init :prime :info :check :schema :serve
+  [:init :prime :info :check :schema :skill :serve
    :create :start :status :close :reopen :delete
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed

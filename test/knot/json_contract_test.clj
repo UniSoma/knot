@@ -38,7 +38,9 @@
    `{:exit n :out s :err s}`. Stdin is closed so commands probing stdin
    do not block."
   [cwd & args]
-  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src"))
+  @(p/process (concat ["bb" "-cp" (str (fs/path project-root "src")
+                                       java.io.File/pathSeparator
+                                       (fs/path project-root "resources"))
                        "-e"
                        (str "(require '[knot.main]) "
                             "(apply (resolve 'knot.main/-main) *command-line-args*)")
@@ -1167,19 +1169,43 @@
         ;; relative. Asserted explicitly so the next reader does not
         ;; "fix" it into an absolute path and break the config echo.
         (let [{:keys [cwd project_root config_path tickets_dir
-                      tickets_path archive_path]} (:paths data)]
+                      tickets_path archive_path skill_dir skill_path]} (:paths data)]
           (is (fs/absolute? project_root)
               (str "info paths.project_root must be absolute, got "
                    (pr-str project_root)))
           (doseq [[k v] [[:cwd cwd] [:config_path config_path]
                          [:tickets_path tickets_path]
-                         [:archive_path archive_path]]]
+                         [:archive_path archive_path]
+                         [:skill_path skill_path]]]
             (is (fs/absolute? v)
                 (str "info paths." (name k) " must be absolute, got "
                      (pr-str v))))
           (is (not (fs/absolute? tickets_dir))
               (str "info paths.tickets_dir echoes the config value and "
-                   "stays relative, got " (pr-str tickets_dir))))))))
+                   "stays relative, got " (pr-str tickets_dir)))
+          (is (nil? skill_dir)
+              (str "info paths.skill_dir echoes :skill-dir, absent here, "
+                   "got " (pr-str skill_dir))))))))
+
+(deftest data-shape-skill-install-test
+  ;; ADR 0016: `data.dir` is a path field, so it is absolute and
+  ;; POSIX-separated. `data.files` are names relative to it, not paths
+  ;; into the machine, and stay relative.
+  (testing "skill install --json — absolute dir, relative file names"
+    (with-tmp tmp
+      (run-knot tmp "init")
+      (let [{:keys [exit out]} (run-knot tmp "skill" "install" "--json")
+            parsed (json/parse-string (str/trim out) true)
+            {:keys [dir files]} (:data parsed)]
+        (is (zero? exit))
+        (is (true? (:ok parsed)))
+        (is (fs/absolute? dir)
+            (str "skill install data.dir must be absolute, got " (pr-str dir)))
+        (is (= (fs/unixify dir) dir)
+            (str "skill install data.dir must be POSIX-separated, got " (pr-str dir)))
+        (is (seq files))
+        (is (every? #(not (fs/absolute? %)) files)
+            "data.files name entries inside data.dir and stay relative")))))
 
 (deftest data-shape-delete-test
   ;; Pin AC#2 for delete --json: object envelope with :deleted

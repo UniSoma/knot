@@ -1,13 +1,15 @@
 (ns knot.cli-test
   (:require [babashka.fs :as fs]
             [cheshire.core :as cheshire]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.cli :as cli]
             [knot.config :as config]
             [knot.git :as git]
             [knot.store :as store]
-            [knot.ticket :as ticket]))
+            [knot.ticket :as ticket]
+            [knot.version :as version]))
 
 (defmacro with-tmp [bind & body]
   `(let [tmp# (str (fs/create-temp-dir))
@@ -5973,3 +5975,91 @@ Restart the daemon.
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"closed"
              (cli/view-cmd :list c {:component x-id :tty? false :color? false})))))))
+
+(deftest effective-skill-dir-test
+  (testing "without :skill-dir, the default is <root>/.claude/skills/knot"
+    (with-tmp tmp
+      (is (= (str (fs/path tmp ".claude" "skills" "knot"))
+             (cli/effective-skill-dir (ctx tmp))))))
+
+  (testing "a relative :skill-dir resolves from the project root"
+    (with-tmp tmp
+      (is (= (str (fs/path tmp "agents" "knot"))
+             (cli/effective-skill-dir (assoc (ctx tmp) :skill-dir "agents/knot"))))))
+
+  (testing "an absolute :skill-dir is used as-is"
+    (with-tmp tmp
+      (let [abs (str (fs/path tmp "elsewhere" "knot"))]
+        (is (= abs (cli/effective-skill-dir (assoc (ctx tmp) :skill-dir abs)))))))
+
+  (testing "an explicit dir wins and resolves against :cwd"
+    (with-tmp tmp
+      (is (= (str (fs/path tmp "sub" "here"))
+             (cli/resolve-skill-dir (assoc (ctx tmp) :cwd (str (fs/path tmp "sub"))
+                                           :skill-dir "agents/knot")
+                                    "here")))))
+
+  (testing "a ~-prefixed :skill-dir expands to the home directory"
+    (with-tmp tmp
+      (is (= (str (fs/path (fs/home) ".claude" "skills" "knot"))
+             (cli/effective-skill-dir (assoc (ctx tmp)
+                                             :skill-dir "~/.claude/skills/knot")))))))
+
+(deftest skill-install-cmd-test
+  (testing "with no dir, every skill file lands under the effective skill dir"
+    (with-tmp tmp
+      (let [out (cli/skill-install-cmd (ctx tmp) {})
+            dir (fs/path tmp ".claude" "skills" "knot")]
+        (is (str/includes? out (str dir)) "the target dir prints natively")
+        (doseq [f cli/skill-files]
+          (is (fs/regular-file? (fs/path dir f)) (str f " was not written"))
+          (is (str/includes? out f))))))
+
+  (testing "an explicit dir wins over the configured :skill-dir"
+    (with-tmp tmp
+      (let [out (cli/skill-install-cmd (assoc (ctx tmp) :skill-dir "agents/knot")
+                                       {:dir (str (fs/path tmp "elsewhere"))})]
+        (is (str/includes? out (str (fs/path tmp "elsewhere"))))
+        (is (fs/regular-file? (fs/path tmp "elsewhere" "SKILL.md")))
+        (is (not (fs/exists? (fs/path tmp "agents")))))))
+
+  (testing "--json carries the POSIX-normalized dir and the file list"
+    (with-tmp tmp
+      (let [parsed (cheshire/parse-string
+                    (cli/skill-install-cmd (ctx tmp) {:json? true}) true)]
+        (is (true? (:ok parsed)))
+        (is (= (fs/unixify (fs/path tmp ".claude" "skills" "knot"))
+               (get-in parsed [:data :dir])))
+        (is (= cli/skill-files (get-in parsed [:data :files]))))))
+
+  (testing "the installed SKILL.md carries the version stamp after its frontmatter"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (let [md (slurp (str (fs/path tmp ".claude" "skills" "knot" "SKILL.md")))]
+        (is (re-find (re-pattern (str "(?s)\\A---\\n.*?\\n---\\n<!-- installed by knot "
+                                      version/version " -->\\n"))
+                     md)))))
+
+  (testing "the other files are written verbatim, stamp-free"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (doseq [f cli/skill-files :when (not= f "SKILL.md")]
+        (is (= (slurp (io/resource (str "knot/skill/" f)))
+               (slurp (str (fs/path tmp ".claude" "skills" "knot" f))))
+            (str f " must be written verbatim")))))
+
+  (testing "installing over an existing directory overwrites the files"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (let [skill-md (str (fs/path tmp ".claude" "skills" "knot" "SKILL.md"))]
+        (spit skill-md "stale")
+        (cli/skill-install-cmd (ctx tmp) {})
+        (is (str/includes? (slurp skill-md) "# knot")))))
+
+  (testing "an unrelated file in the target directory survives an install"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (let [stray (str (fs/path tmp ".claude" "skills" "knot" "notes.md"))]
+        (spit stray "mine")
+        (cli/skill-install-cmd (ctx tmp) {})
+        (is (fs/exists? stray) "install writes its own files; it deletes nothing")))))

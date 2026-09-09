@@ -112,7 +112,7 @@ See the bundled skill's reference at
 [`.claude/skills/knot/references/json.md`](.claude/skills/knot/references/json.md)
 for the full envelope shape, per-command `data` payloads, and the error-code catalogue.
 The reference travels with the skill,
-so any project that copies `.claude/skills/knot/` gets the protocol contract alongside it.
+so any project that installs the skill gets the protocol contract alongside it.
 
 Listing commands (`list` / `ls`, `ready`, `blocked`, `closed`) emit ANSI color when stdout is a TTY;
 piping disables it automatically.
@@ -137,6 +137,7 @@ Pass `--no-color` or set `NO_COLOR` to any non-empty value to force plain output
 | `:types`             | `["bug" "feature" "task" "epic" "chore"]` | Allowed values for ticket `:type`.                                                                                                                        |
 | `:modes`             | `["afk" "hitl"]`                          | `afk` = agent-runnable; `hitl` = needs a human.                                                                                                           |
 | `:default-mode`      | `"hitl"`                                  | Must be a member of `:modes`.                                                                                                                             |
+| `:skill-dir`         | `".claude/skills/knot"`                   | Where `knot skill install` writes the agent skill. Relative paths resolve from the project root; `~` expands.                                              |
 
 Knot finds the project root by walking up from cwd until it meets `.knot.edn` or `.tickets/`.
 When it finds `.knot.edn`, that file's `:tickets-dir` controls where tickets live.
@@ -268,21 +269,19 @@ It contains the canonical reference
 (full intent table, lifecycle, graph operations, JSON usage, AFK/HITL, partial-ID rules, tool mapping).
 Claude Code loads it on demand when triggers fire, at no per-turn cost.
 
-To install the skill in your project, copy it to a location your agent loads from.
-For Claude Code, that's typically:
+The CLI carries the skill and writes it out on demand — no clone of this repo required:
 
 ```sh
-# Replace KNOT_REPO with the path to your local clone of UniSoma/knot.
-mkdir -p .claude/skills
-cp -r "$KNOT_REPO/.claude/skills/knot" .claude/skills/knot
+knot skill install
 ```
 
-Or for a global install on your machine:
+That writes `SKILL.md`, `references/` and `agents/openai.yaml` into `.claude/skills/knot/` under the project root,
+where Claude Code loads them from.
+Pass a directory to install anywhere else — `knot skill install ~/.claude/skills/knot` installs once for every project on the machine.
+Set `:skill-dir` in `.knot.edn` to make a different directory the default.
 
-```sh
-mkdir -p ~/.claude/skills
-cp -r "$KNOT_REPO/.claude/skills/knot" ~/.claude/skills/knot
-```
+Every install overwrites the files it writes: knot owns them, and re-running the command is how you take a newer
+version of the skill. Nothing else in the target directory is touched.
 
 The skill is plain markdown; nothing in it is project-specific, so the same file works in every knot-tracked project.
 

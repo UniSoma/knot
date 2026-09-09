@@ -214,6 +214,20 @@
         (is (contains? c :afk-mode)
             ":afk-mode is a known key — not dropped during select-keys"))))
 
+  (testing ":skill-dir is a known key and survives the merge"
+    (with-tmp tmp
+      (write-config! tmp {:skill-dir "~/.claude/skills/knot"})
+      (let [err (java.io.StringWriter.)
+            c   (binding [*err* err] (config/load-config tmp))]
+        (is (= "~/.claude/skills/knot" (:skill-dir c)))
+        (is (not (str/includes? (str err) "skill-dir"))
+            ":skill-dir must not be warned about as an unknown key"))))
+
+  (testing ":skill-dir must be a non-blank string when set"
+    (with-tmp tmp
+      (write-config! tmp {:skill-dir ""})
+      (is (str/includes? (load-throws tmp) "skill-dir"))))
+
   (testing ":prefix must be a non-empty [a-z0-9]+ string"
     (with-tmp tmp
       (write-config! tmp {:prefix "BAD!"})
