@@ -4481,7 +4481,10 @@ Restart the daemon.
    project-found flag. `project-name` is forwarded to the renderer when set."
   ([tmp] (prime-ctx tmp nil))
   ([tmp project-name]
-   (cond-> (assoc (ctx tmp) :project-found? true)
+   ;; :home points into the fixture so the skill search can't reach the
+   ;; developer's real ~/.claude/skills/knot and make the preamble
+   ;; machine-dependent.
+   (cond-> (assoc (ctx tmp) :project-found? true :home (str (fs/path tmp "home")))
      project-name (assoc :project-name project-name))))
 
 (deftest prime-cmd-text-shape-test
@@ -6063,3 +6066,100 @@ Restart the daemon.
         (spit stray "mine")
         (cli/skill-install-cmd (ctx tmp) {})
         (is (fs/exists? stray) "install writes its own files; it deletes nothing")))))
+
+(defn- install-skill-md!
+  "Drop a minimal SKILL.md under `dir` — enough for the skill search,
+   which looks for the file and never reads it."
+  [dir]
+  (fs/create-dirs dir)
+  (spit (str (fs/path dir "SKILL.md")) "---\nname: knot\n---\n"))
+
+(deftest installed-skill-dir-test
+  (testing "nil when no candidate directory holds a SKILL.md"
+    (with-tmp tmp
+      (is (nil? (cli/installed-skill-dir (assoc (ctx tmp) :home (str (fs/path tmp "home"))))))))
+
+  (testing "the project default is found"
+    (with-tmp tmp
+      (let [dir (fs/path tmp ".claude" "skills" "knot")]
+        (install-skill-md! dir)
+        (is (= (str dir)
+               (cli/installed-skill-dir (assoc (ctx tmp) :home (str (fs/path tmp "home")))))))))
+
+  (testing "the home default is the last resort"
+    (with-tmp tmp
+      (let [home (fs/path tmp "home")
+            dir  (fs/path home ".claude" "skills" "knot")]
+        (install-skill-md! dir)
+        (is (= (str dir)
+               (cli/installed-skill-dir (assoc (ctx tmp) :home (str home))))))))
+
+  (testing ":skill-dir wins over both defaults"
+    (with-tmp tmp
+      (let [home (fs/path tmp "home")]
+        (install-skill-md! (fs/path tmp ".claude" "skills" "knot"))
+        (install-skill-md! (fs/path home ".claude" "skills" "knot"))
+        (install-skill-md! (fs/path tmp "agents" "knot"))
+        (is (= (str (fs/path tmp "agents" "knot"))
+               (cli/installed-skill-dir (assoc (ctx tmp) :home (str home)
+                                               :skill-dir "agents/knot")))))))
+
+  (testing "a :skill-dir with no SKILL.md falls through to the next candidate"
+    (with-tmp tmp
+      (let [dir (fs/path tmp ".claude" "skills" "knot")]
+        (fs/create-dirs (fs/path tmp "agents" "knot"))
+        (install-skill-md! dir)
+        (is (= (str dir)
+               (cli/installed-skill-dir (assoc (ctx tmp) :home (str (fs/path tmp "home"))
+                                               :skill-dir "agents/knot")))))))
+
+  (testing "a directory without the file is not an installed skill"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".claude" "skills" "knot"))
+      (is (nil? (cli/installed-skill-dir (assoc (ctx tmp) :home (str (fs/path tmp "home"))))))))
+
+  (testing "without a project root, only the home candidate is searched"
+    (with-tmp tmp
+      (let [home (fs/path tmp "home")]
+        (install-skill-md! (fs/path home ".claude" "skills" "knot"))
+        (is (= (str (fs/path home ".claude" "skills" "knot"))
+               (cli/installed-skill-dir {:home (str home)})))))))
+
+(deftest prime-cmd-skill-pointer-test
+  (testing "no skill installed: the preamble routes to the topics and nudges the install"
+    (with-tmp tmp
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (str/includes? out "knot help topics"))
+        (is (str/includes? out "knot skill install")))))
+
+  (testing "skill installed: the preamble points at it"
+    (with-tmp tmp
+      (install-skill-md! (fs/path tmp ".claude" "skills" "knot"))
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (str/includes? out "invoke the `knot` skill"))
+        (is (not (str/includes? out "knot skill install"))))))
+
+  (testing "--json carries skill_installed and the resolved skill_dir"
+    (with-tmp tmp
+      (let [absent (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true)]
+        (is (false? (get-in absent [:data :skill_installed])))
+        (is (nil? (get-in absent [:data :skill_dir])))
+        (is (contains? (:data absent) :skill_dir)))
+      (install-skill-md! (fs/path tmp "agents" "knot"))
+      (let [ctx*   (assoc (prime-ctx tmp) :skill-dir "agents/knot")
+            parsed (cheshire/parse-string (cli/prime-cmd ctx* {:json? true}) true)]
+        (is (true? (get-in parsed [:data :skill_installed])))
+        (is (= (fs/unixify (fs/path tmp "agents" "knot"))
+               (get-in parsed [:data :skill_dir]))
+            ":skill-dir is honored ahead of the two default locations"))))
+
+  (testing "with no project found, the home candidate still answers"
+    (with-tmp tmp
+      (let [home (fs/path tmp "home")]
+        (install-skill-md! (fs/path home ".claude" "skills" "knot"))
+        (let [parsed (cheshire/parse-string
+                      (cli/prime-cmd {:project-found? false :home (str home)} {:json? true})
+                      true)]
+          (is (true? (get-in parsed [:data :skill_installed])))
+          (is (= (fs/unixify (fs/path home ".claude" "skills" "knot"))
+                 (get-in parsed [:data :skill_dir]))))))))

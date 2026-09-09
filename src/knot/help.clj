@@ -234,7 +234,8 @@
                   {:name :priority :coerce [:long] :desc "Filter all sections by priority 0-4 (repeatable)."}
                   {:name :parent   :coerce []
                    :desc "Filter to direct children of the given parent id (resolves partial ids; repeatable)."}]
-    :notes       ["Unlike list/ready/blocked, an unresolvable --parent does not exit 1 — prime is wired to SessionStart and always exits 0, so it degrades to the no-project primer instead."]
+    :notes       ["Unlike list/ready/blocked, an unresolvable --parent does not exit 1 — prime is wired to SessionStart and always exits 0, so it degrades to the no-project primer instead."
+                  "The preamble closes by pointing at the installed agent skill, or at `knot help topics` when there is none; --json reports the same search as skill_installed and skill_dir."]
     :examples    [{:cmd "knot prime"
                    :note "Print the markdown primer for the current project."}
                   {:cmd "knot prime --type bug --mode afk"

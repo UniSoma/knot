@@ -1751,7 +1751,7 @@
       (is (str/includes? preamble "--summary")))))
 
 (deftest prime-text-hitl-preamble-rows-test
-  (let [out (output/prime-text sample-prime-data)
+  (let [out (output/prime-text (assoc sample-prime-data :skill-installed? true))
         first-section (str/index-of out "## ")
         preamble (subs out 0 first-section)]
     (testing "hitl preamble keeps exactly the three intents chosen by irrecoverability"
@@ -1770,6 +1770,60 @@
       (doseq [cold [".knot.edn" "base32" "GH-"]]
         (is (not (str/includes? preamble cold))
             (str "`" cold "` belongs to the skill description, not to push"))))))
+
+(defn- prime-preamble
+  "The preamble of a rendered primer: everything above the first heading."
+  [data]
+  (let [out (output/prime-text data)]
+    (subs out 0 (str/index-of out "## "))))
+
+(deftest prime-text-skill-pointer-test
+  (testing "with the skill installed, both preambles point at it"
+    (doseq [mode [nil "afk"]]
+      (let [preamble (prime-preamble (assoc sample-prime-data
+                                            :mode mode
+                                            :skill-installed? true))]
+        (is (str/includes? preamble "invoke the `knot` skill")
+            (str "mode " (pr-str mode) ": installed skill is the pointer"))
+        (is (not (str/includes? preamble "knot help topics"))
+            "the topics fallback is not offered when the skill is installed")
+        (is (not (str/includes? preamble "knot skill install"))
+            "no install nudge when a skill is already installed"))))
+
+  (testing "without a skill, both preambles route to the bundled topics and nudge the install"
+    (doseq [mode [nil "afk"]]
+      (let [preamble (prime-preamble (assoc sample-prime-data :mode mode))]
+        (is (str/includes? preamble "knot help topics")
+            (str "mode " (pr-str mode) ": topics carry the judgment instead"))
+        (is (str/includes? preamble "knot skill install")
+            "the install nudge names the command")
+        (is (not (str/includes? preamble "invoke the `knot` skill"))
+            "nothing points at a skill that is not there")
+        ;; The fallback pointer is still push, and still disjoint from the
+        ;; skill description's cold triggers.
+        (doseq [cold [".knot.edn" "base32" "GH-"]]
+          (is (not (str/includes? preamble cold))
+              (str "`" cold "` belongs to the skill description, not to push"))))))
+
+  (testing "each mode keeps its own branch list either way"
+    (doseq [installed? [true false]]
+      (let [hitl (prime-preamble (assoc sample-prime-data :skill-installed? installed?))
+            afk  (prime-preamble (assoc sample-prime-data :mode "afk"
+                                        :skill-installed? installed?))]
+        (doseq [branch ["lifecycle gates" "deps vs links" "--json"]]
+          (is (str/includes? hitl branch) (str "hitl names " branch))
+          (is (str/includes? afk branch) (str "afk names " branch)))
+        (is (str/includes? hitl "autonomous mode")
+            "hitl points at the mode it is not in")
+        (is (not (str/includes? afk "autonomous mode"))
+            "afk is already autonomous — the branch would be dead weight"))))
+
+  (testing "the no-project preamble carries no pointer at all"
+    (let [data {:project {:found? false} :ready [] :skill-installed? true}
+          out  (output/prime-text data)]
+      (is (str/includes? out "knot init"))
+      (is (not (str/includes? out "invoke the `knot` skill"))
+          "there is no project to point anywhere from"))))
 
 (deftest prime-text-negative-space-test
   (testing "output explicitly tells the agent NOT to cat or hand-edit ticket files"
@@ -2271,6 +2325,25 @@
               (str/includes? section "recommend")
               (str/includes? section "confirm"))
           "Ready section nudges the agent about recommending the top entry"))))
+
+(deftest prime-json-skill-fields-test
+  (testing "no skill installed: skill_installed is false and skill_dir is null"
+    (let [parsed (json/parse-string (output/prime-json sample-prime-data) true)
+          data   (:data parsed)]
+      (is (false? (:skill_installed data)))
+      (is (contains? data :skill_dir)
+          "the key is always present so consumers can read it unconditionally")
+      (is (nil? (:skill_dir data)))))
+
+  (testing "skill installed: the flag is true and skill_dir names the directory"
+    (let [data (-> sample-prime-data
+                   (assoc :skill-installed? true
+                          :skill-dir "/home/dev/proj/.claude/skills/knot")
+                   output/prime-json
+                   (json/parse-string true)
+                   :data)]
+      (is (true? (:skill_installed data)))
+      (is (= "/home/dev/proj/.claude/skills/knot" (:skill_dir data))))))
 
 (deftest prime-json-shape-test
   (testing "renders a v0.3 success envelope wrapping the prime payload"

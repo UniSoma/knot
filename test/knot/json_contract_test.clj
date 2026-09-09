@@ -1094,7 +1094,15 @@
         (is (vector? (:ready data)))
         (is (boolean? (:ready_truncated data)))
         (is (integer? (:ready_remaining data)))
-        (is (vector? (:recently_closed data))))
+        (is (vector? (:recently_closed data)))
+        (is (boolean? (:skill_installed data)))
+        (is (contains? data :skill_dir)
+            "skill_dir is always present — string when a skill was found, null otherwise")
+        (is ((some-fn nil? string?) (:skill_dir data))))
+
+      (testing "prime --json — skill_dir agrees with skill_installed"
+        (is (= (boolean (:skill_dir data)) (:skill_installed data))
+            "a resolved directory and the flag are two views of one search"))
 
       (testing "prime --json — :project sub-keys"
         (let [project (:project data)]

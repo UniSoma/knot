@@ -1491,6 +1491,48 @@
   [limit]
   (if (and (integer? limit) (pos? limit)) limit prime-default-limit))
 
+(defn- absolutize-dir
+  "Normalized absolute path for a user-supplied directory: `~` expands,
+   and a relative path resolves against `base`."
+  [dir base]
+  (let [expanded (fs/expand-home dir)]
+    (str (fs/normalize (if (fs/absolute? expanded)
+                         (fs/path expanded)
+                         (fs/path base expanded))))))
+
+(defn effective-skill-dir
+  "Where `knot skill install` writes without an explicit directory:
+   `:skill-dir` from `.knot.edn` when set (relative to the project root),
+   else `<project-root>/.claude/skills/knot`."
+  [{:keys [project-root skill-dir]}]
+  (if skill-dir
+    (absolutize-dir skill-dir project-root)
+    (str (fs/path project-root ".claude" "skills" "knot"))))
+
+(defn installed-skill-dir
+  "The directory of the agent skill this project should point at, or nil
+   when no skill is installed. Candidates, first `SKILL.md` wins:
+   `:skill-dir` from `.knot.edn` (relative paths resolve from the project
+   root), `<project-root>/.claude/skills/knot`, then
+   `<home>/.claude/skills/knot`. `:home` is injectable so the search is
+   testable; it defaults to the real home directory."
+  [{:keys [project-root skill-dir home]}]
+  (->> [(when skill-dir (absolutize-dir skill-dir project-root))
+        (when project-root (str (fs/path project-root ".claude" "skills" "knot")))
+        (str (fs/path (or home (fs/home)) ".claude" "skills" "knot"))]
+       (filter some?)
+       (filter #(fs/regular-file? (fs/path % "SKILL.md")))
+       first))
+
+(defn- skill-pointer-fields
+  "The two renderer inputs behind `prime`'s closing pointer: whether a
+   skill is installed, and where. POSIX-separated, like every other path
+   in the JSON envelope."
+  [ctx]
+  (let [dir (installed-skill-dir ctx)]
+    {:skill-installed? (some? dir)
+     :skill-dir        (some-> dir fs/unixify)}))
+
 (defn prime-cmd
   "Render the agent context primer for the project. Returns a string for
    the markdown text or JSON payload. Pair with `main/prime-handler`,
@@ -1512,6 +1554,10 @@
    and scopes every section to direct children, so the parent itself is
    excluded.
 
+   The closing pointer is live: it routes to the installed skill when
+   there is one, else to `knot help topics`. `--json` reports the same
+   search as `skill_installed`/`skill_dir`.
+
    Filters apply uniformly across all four sections (in_progress,
    ready_to_close, ready, recently_closed). For ready, filters apply BEFORE the cap, so
    `--mode afk --limit 5` yields up to 5 afk-mode ready tickets. The
@@ -1519,14 +1565,15 @@
    the full ticket fields are available for matching."
   [ctx {:keys [json? mode limit] :as opts}]
   (if-not (:project-found? ctx)
-    (let [data {:project          {:found? false}
-                :in-progress      []
-                :ready-to-close   []
-                :ready            []
-                :ready-truncated? false
-                :ready-remaining  0
-                :active-status    (:active-status (config/defaults))
-                :afk-mode         (:afk-mode (config/defaults))}]
+    (let [data (merge {:project          {:found? false}
+                       :in-progress      []
+                       :ready-to-close   []
+                       :ready            []
+                       :ready-truncated? false
+                       :ready-remaining  0
+                       :active-status    (:active-status (config/defaults))
+                       :afk-mode         (:afk-mode (config/defaults))}
+                      (skill-pointer-fields ctx))]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))
@@ -1578,7 +1625,8 @@
                         :recently-closed  recently-closed*
                         :mode             mode
                         :active-status    active-status
-                        :afk-mode         afk-mode}]
+                        :afk-mode         afk-mode}
+          data         (merge data (skill-pointer-fields ctx))]
       (if json?
         (output/prime-json data)
         (output/prime-text data)))))
@@ -1624,24 +1672,6 @@
   (str/replace-first md
                      #"(?s)\A(---\n.*?\n---\n)"
                      (str "$1<!-- installed by knot " version/version " -->\n")))
-
-(defn- absolutize-dir
-  "Normalized absolute path for a user-supplied directory: `~` expands,
-   and a relative path resolves against `base`."
-  [dir base]
-  (let [expanded (fs/expand-home dir)]
-    (str (fs/normalize (if (fs/absolute? expanded)
-                         (fs/path expanded)
-                         (fs/path base expanded))))))
-
-(defn effective-skill-dir
-  "Where `knot skill install` writes without an explicit directory:
-   `:skill-dir` from `.knot.edn` when set (relative to the project root),
-   else `<project-root>/.claude/skills/knot`."
-  [{:keys [project-root skill-dir]}]
-  (if skill-dir
-    (absolutize-dir skill-dir project-root)
-    (str (fs/path project-root ".claude" "skills" "knot"))))
 
 (defn resolve-skill-dir
   "Absolute install directory for `dir` as typed on the command line: an

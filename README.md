@@ -169,7 +169,8 @@ knot prime --mode afk         # filter ready section to agent-runnable work
 knot prime --limit 5          # override the default ready cap of 20
 knot prime --json             # bare object with snake_case keys:
                               #   project, in_progress, ready_to_close, ready,
-                              #   ready_truncated, ready_remaining, recently_closed
+                              #   ready_truncated, ready_remaining, recently_closed,
+                              #   skill_installed, skill_dir
                               # JSON consumers should tolerate unknown keys;
                               # new ones may be added in future minor versions.
 ```
