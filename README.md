@@ -50,6 +50,11 @@ bbin uninstall knot
 `knot` requires babashka 1.3.0 or later.
 bb bundles the runtime dependencies, so install resolves no `:deps`.
 
+The install carries the agent-facing documentation with it.
+`knot help topics` lists the bundled concept guides and `knot help <topic>` prints one;
+`knot skill install` writes the same material into a project as an agent skill.
+See [AI-agent integration](#ai-agent-integration).
+
 ## Quick tour
 
 ```sh
@@ -151,10 +156,12 @@ so the agent recognizes the project, knows current state, and has the canonical 
 1. **Project rules** in `CLAUDE.md` / `AGENTS.md` (~12 lines, always loaded),
    which name knot as the tracker and forbid hand-editing `.tickets/`.
 2. **SessionStart hook** running `knot prime`, which injects live + ready tickets at the start of each session.
-3. **Skill** (`.claude/skills/knot/SKILL.md`), the canonical reference, loaded on demand by the agent.
+3. **Skill**, the canonical reference, installed with `knot skill install` and loaded on demand by the agent.
 
 Each layer carries different content because each costs differently (per-turn tokens, per-session, on-demand).
-Skip any one layer and Claude falls back to reading `.tickets/` files directly,
+Skip the skill and `knot prime` closes by pointing the agent at `knot help topics` instead,
+which prints the same material a guide at a time.
+Skip the project rules or the hook and Claude falls back to reading `.tickets/` files directly,
 which drifts from the CLI's invariants without warning.
 
 `knot prime` emits a markdown primer summarizing project state:
@@ -265,9 +272,8 @@ The tool-named anti-pattern (`Read`, `Write`, `Edit`, `cat`, `grep`, `sed`, `mv`
 
 ### Skill
 
-A `knot` skill is bundled with this repo at `.claude/skills/knot/SKILL.md`.
-It contains the canonical reference
-(full intent table, lifecycle, graph operations, JSON usage, AFK/HITL, partial-ID rules, tool mapping).
+The `knot` skill is the canonical reference: lifecycle gates, the dep graph, `--json` decision logic,
+autonomous conduct, and the write paths.
 Claude Code loads it on demand when triggers fire, at no per-turn cost.
 
 The CLI carries the skill and writes it out on demand — no clone of this repo required:
@@ -285,6 +291,13 @@ Every install overwrites the files it writes: knot owns them, and re-running the
 version of the skill. Nothing else in the target directory is touched.
 
 The skill is plain markdown; nothing in it is project-specific, so the same file works in every knot-tracked project.
+The installed `SKILL.md` carries an `<!-- installed by knot <version> -->` comment, so you can tell which version a project holds.
+
+The same files are the CLI's concept guides.
+`knot help topics` lists them with a one-line summary each and `knot help <topic>` prints one to stdout,
+so an agent with a shell reaches the reference in a project where nobody installed the skill.
+`SKILL.md` and its five `references/` files are one source, edited in one place and served both ways
+(see [ADR 0019](docs/adr/0019-cli-ships-the-pointer-help-topics-and-skill-install.md)).
 
 ## Concurrency
 
