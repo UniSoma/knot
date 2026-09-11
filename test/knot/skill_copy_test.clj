@@ -11,11 +11,11 @@
 (def ^:private copy-dir ".claude/skills/knot")
 
 (defn- relative-files
-  "Sorted set of every file under `dir`, as paths relative to it."
+  "Sorted set of every file under `dir`, as `/`-separated paths relative to it."
   [dir]
   (into (sorted-set)
         (comp (filter fs/regular-file?)
-              (map #(str (fs/relativize dir %))))
+              (map #(fs/unixify (fs/relativize dir %))))
         (fs/glob dir "**")))
 
 (deftest skill-source-layout-test
