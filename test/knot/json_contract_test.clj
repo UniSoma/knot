@@ -1098,7 +1098,11 @@
         (is (boolean? (:skill_installed data)))
         (is (contains? data :skill_dir)
             "skill_dir is always present — string when a skill was found, null otherwise")
-        (is ((some-fn nil? string?) (:skill_dir data))))
+        (is ((some-fn nil? string?) (:skill_dir data)))
+        (is (boolean? (:skill_stale data)))
+        (is (contains? data :skill_version)
+            "skill_version is always present — the stamp, or null")
+        (is ((some-fn nil? string?) (:skill_version data))))
 
       (testing "prime --json — skill_dir agrees with skill_installed"
         (is (= (boolean (:skill_dir data)) (:skill_installed data))

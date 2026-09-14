@@ -685,7 +685,8 @@
                   {:name :code     :coerce []
                    :desc "Filter by issue code (repeatable; unknown codes ok)."}]
     :notes       ["reserved_section is a warning: a body carries a ## Blockers, ## Blocking, ## Children or ## Linked heading, which knot show renders from the ticket's fields. Delete the section by hand — unlike legacy_acceptance_section there is no automatic fix, because the prose under a graph heading is usually narrative."
-                  "duplicate_section is a warning: one body carries the same ## heading twice or more, usually from an old --description write that replaced only the first copy. Body sections concatenate rather than clobber, so nothing downstream shows the duplication. Keep one copy by hand with update --body or knot edit."]
+                  "duplicate_section is a warning: one body carries the same ## heading twice or more, usually from an old --description write that replaced only the first copy. Body sections concatenate rather than clobber, so nothing downstream shows the duplication. Keep one copy by hand with update --body or knot edit."
+                  "skill_stale is a warning: the project's installed skill (:skill-dir, else .claude/skills/knot) carries a `<!-- installed by knot <version> -->` stamp that is missing, unreadable, or differs from this CLI's version, older or newer. Run `knot skill install` and commit. A copy under ~/.claude/skills/knot is never checked here; `knot prime` flags that one."]
     :examples    [{:cmd "knot check"
                    :note "Validate every ticket and config; exit 0/1/2."}
                   {:cmd "knot check kno-01abc kno-01def --json"

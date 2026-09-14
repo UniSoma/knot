@@ -6068,11 +6068,12 @@ Restart the daemon.
         (is (fs/exists? stray) "install writes its own files; it deletes nothing")))))
 
 (defn- install-skill-md!
-  "Drop a minimal SKILL.md under `dir` — enough for the skill search,
-   which looks for the file and never reads it."
+  "Drop a minimal SKILL.md under `dir`, stamped with the running version
+   so the skill search finds it and the stale check passes it."
   [dir]
   (fs/create-dirs dir)
-  (spit (str (fs/path dir "SKILL.md")) "---\nname: knot\n---\n"))
+  (spit (str (fs/path dir "SKILL.md"))
+        (str "---\nname: knot\n---\n<!-- installed by knot " version/version " -->\n")))
 
 (deftest installed-skill-dir-test
   (testing "nil when no candidate directory holds a SKILL.md"
@@ -6163,3 +6164,102 @@ Restart the daemon.
           (is (true? (get-in parsed [:data :skill_installed])))
           (is (= (fs/unixify (fs/path home ".claude" "skills" "knot"))
                  (get-in parsed [:data :skill_dir]))))))))
+
+(defn- write-stamped-skill-md!
+  "Drop a SKILL.md under `dir` stamped with `stamp`, or unstamped when nil."
+  [dir stamp]
+  (fs/create-dirs dir)
+  (spit (str (fs/path dir "SKILL.md"))
+        (str "---\nname: knot\n---\n"
+             (when stamp (str "<!-- installed by knot " stamp " -->\n"))
+             "# knot\n")))
+
+(defn- check-issues [ctx code]
+  (let [{:keys [exit stdout]} (cli/check-cmd ctx {:json? true})]
+    (is (zero? exit) "a stale skill warns and never fails")
+    (filterv #(= code (:code %))
+             (get-in (cheshire/parse-string stdout true) [:data :issues]))))
+
+(deftest check-cmd-skill-stale-test
+  (testing "a project copy with an older stamp surfaces skill_stale"
+    (with-tmp tmp
+      (let [dir (fs/path tmp ".claude" "skills" "knot")]
+        (write-stamped-skill-md! dir "0.0.1")
+        (let [[issue :as issues] (check-issues (ctx tmp) "skill_stale")]
+          (is (= 1 (count issues)))
+          (is (= "warning" (:severity issue)))
+          (is (= (fs/unixify (fs/path dir "SKILL.md")) (:path issue)))
+          (is (= "0.0.1" (:value issue)))))))
+
+  (testing "a missing stamp serializes value as null"
+    (with-tmp tmp
+      (write-stamped-skill-md! (fs/path tmp ".claude" "skills" "knot") nil)
+      (let [{:keys [stdout]} (cli/check-cmd (ctx tmp) {:json? true})]
+        (is (str/includes? stdout "\"value\":null")))))
+
+  (testing "a fresh knot skill install is not stale"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (is (= [] (check-issues (ctx tmp) "skill_stale")))))
+
+  (testing ":skill-dir wins over the project default"
+    (with-tmp tmp
+      (write-stamped-skill-md! (fs/path tmp "agents" "knot") "0.0.1")
+      (cli/skill-install-cmd (ctx tmp) {})
+      (is (= 1 (count (check-issues (assoc (ctx tmp) :skill-dir "agents/knot")
+                                    "skill_stale"))))))
+
+  (testing "a home-only install is silent: check targets the repository"
+    (with-tmp tmp
+      (let [home (fs/path tmp "home")]
+        (write-stamped-skill-md! (fs/path home ".claude" "skills" "knot") "0.0.1")
+        (is (= [] (check-issues (assoc (ctx tmp) :home (str home)) "skill_stale"))))))
+
+  (testing "no skill installed -> no issue"
+    (with-tmp tmp
+      (is (= [] (check-issues (ctx tmp) "skill_stale"))))))
+
+(deftest prime-cmd-skill-stale-test
+  (testing "a stale project copy: text names both versions and says commit; JSON flags it"
+    (with-tmp tmp
+      (write-stamped-skill-md! (fs/path tmp ".claude" "skills" "knot") "0.0.1")
+      (let [out  (cli/prime-cmd (prime-ctx tmp) {})
+            data (:data (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true))]
+        (is (str/includes? out "invoke the `knot` skill"))
+        (is (str/includes? out "0.0.1"))
+        (is (str/includes? out version/version))
+        (is (str/includes? out "run `knot skill install` and commit"))
+        (is (true? (:skill_stale data)))
+        (is (= "0.0.1" (:skill_version data))))))
+
+  (testing "a stale home copy: the fix names the home directory, no commit"
+    (with-tmp tmp
+      (write-stamped-skill-md! (fs/path tmp "home" ".claude" "skills" "knot") nil)
+      (let [out  (cli/prime-cmd (prime-ctx tmp) {})
+            data (:data (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true))]
+        (is (str/includes? out "run `knot skill install ~/.claude/skills/knot`"))
+        (is (not (str/includes? out "and commit")))
+        (is (true? (:skill_stale data)))
+        (is (contains? data :skill_version))
+        (is (nil? (:skill_version data))))))
+
+  (testing "a newer project copy is stale too"
+    (with-tmp tmp
+      (write-stamped-skill-md! (fs/path tmp ".claude" "skills" "knot") "999.0.0")
+      (let [out (cli/prime-cmd (prime-ctx tmp) {})]
+        (is (str/includes? out "from knot 999.0.0, newer than this CLI")))))
+
+  (testing "a fresh install carries no notice"
+    (with-tmp tmp
+      (cli/skill-install-cmd (ctx tmp) {})
+      (let [out  (cli/prime-cmd (prime-ctx tmp) {})
+            data (:data (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true))]
+        (is (not (str/includes? out "knot skill install")))
+        (is (false? (:skill_stale data)))
+        (is (= version/version (:skill_version data))))))
+
+  (testing "no skill installed: not stale, no version"
+    (with-tmp tmp
+      (let [data (:data (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true))]
+        (is (false? (:skill_stale data)))
+        (is (nil? (:skill_version data)))))))

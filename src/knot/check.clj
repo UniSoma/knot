@@ -10,7 +10,8 @@
             [knot.config :as config]
             [knot.query :as query]
             [knot.store :as store]
-            [knot.ticket :as ticket]))
+            [knot.ticket :as ticket]
+            [knot.version :as version]))
 
 (defn- dep-cycle-issue
   "Build a :dep_cycle error issue from a cycle path `[v ... v]`."
@@ -306,6 +307,59 @@
       :ids      []
       :message  (:message issue)}]))
 
+(def ^:private skill-stamp-re
+  #"<!-- installed by knot (\d+\.\d+\.\d+\S*) -->")
+
+(defn skill-stamp
+  "The knot version stamped into an installed SKILL.md's `text`, or nil
+   when the stamp is missing or unparseable (or `text` is nil)."
+  [text]
+  (some->> text (re-find skill-stamp-re) second))
+
+(defn skill-staleness
+  "How a skill stamped `stamp` relates to the CLI `version`: nil when they
+   are equal, else `:older`, `:newer`, or `:missing` for a nil stamp.
+   Staleness is plain inequality; the numeric comparison only picks the
+   direction for the message."
+  [stamp version]
+  (cond
+    (nil? stamp)      :missing
+    (= stamp version) nil
+    :else             (let [parts #(mapv parse-long (str/split % #"\."))]
+                        (if (neg? (compare (parts stamp) (parts version)))
+                          :older
+                          :newer))))
+
+(def project-skill-fix
+  "How a stale project copy of the skill is fixed."
+  "run `knot skill install` and commit")
+
+(defn skill-stale-message
+  "One clause naming a stale skill's stamp against the CLI `version`,
+   ending with `fix`. Shared by `knot check` and `knot prime`."
+  [staleness stamp version fix]
+  (str (if (= :missing staleness)
+         (str "the installed `knot` skill has a missing or unreadable version stamp (this CLI is "
+              version ")")
+         (str "the installed `knot` skill is from knot " stamp ", " (name staleness)
+              " than this CLI (" version ")"))
+       "; " fix))
+
+(defn- skill-stale-issues
+  "Global: a :skill_stale warning when the project's installed skill,
+   `{:path <SKILL.md> :text <s or nil>}`, is stamped other than `version`.
+   nil `skill` means no project copy, which is not an issue."
+  [skill version]
+  (when skill
+    (let [stamp (skill-stamp (:text skill))]
+      (when-let [staleness (skill-staleness stamp version)]
+        [{:severity :warning
+          :code     :skill_stale
+          :ids      []
+          :path     (:path skill)
+          :value    stamp
+          :message  (skill-stale-message staleness stamp version project-skill-fix)}]))))
+
 (defn- collect-all-ids
   "Set of every ticket id across the input. Used for unknown_id checks."
   [tickets]
@@ -400,15 +454,20 @@
      :scanned       — `{:live <n> :archive <n>}` to pass through
      :ids-filter    — set of ids to narrow the per-ticket tier; globals
                       always run on the full ticket set
+     :skill         — `{:path :text}` of the project's installed SKILL.md,
+                      nil when there is none
+     :version       — CLI version the skill stamp must match; defaults to
+                      `version/version`
    Returns `{:issues [...] :scanned {...}}`. Issues are always vectors,
    sorted: severity desc, then code, first-id, message ascending."
-  [{:keys [tickets parse-errors config scanned ids-filter]}]
+  [{:keys [tickets parse-errors config scanned ids-filter skill] :as input}]
   (let [tickets* (or tickets [])
         ctx      {:config     (or config {})
                   :all-ids    (collect-all-ids tickets*)
                   :ids-filter ids-filter}
         issues   (concat (cycle-issues tickets*)
                          (active-status-issues (or config {}))
+                         (skill-stale-issues skill (:version input version/version))
                          (per-ticket-issues ctx tickets*)
                          (parse-error-issues parse-errors))]
     {:issues  (vec (sort-by issue-sort-key issues))

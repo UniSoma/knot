@@ -1,5 +1,6 @@
 (ns knot.check-test
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [knot.check :as check]
             [knot.cli :as cli]
@@ -758,3 +759,62 @@
                     {:title "two" :done true}]
                    (:acceptance migrated-fm))
                 "the body bullets were lifted into structured frontmatter")))))))
+
+(defn- stamped-skill-md
+  "SKILL.md text as `knot skill install` writes it, stamped with `v`."
+  [v]
+  (str "---\nname: knot\n---\n<!-- installed by knot " v " -->\n# knot\n"))
+
+(deftest skill-stale-test
+  (let [path   "/p/.claude/skills/knot/SKILL.md"
+        stale  (fn [text & {:as extra}]
+                 (issues-of (check/run (merge {:tickets []
+                                               :skill   {:path path :text text}
+                                               :version "0.12.0"}
+                                              extra))
+                            :skill_stale))]
+    (testing "a stamp matching the CLI version -> no issue"
+      (is (= [] (stale (stamped-skill-md "0.12.0")))))
+
+    (testing "a pre-release CLI version still matches its own stamp"
+      (is (= [] (issues-of (check/run {:tickets [] :version "0.13.0-rc1"
+                                       :skill   {:path path :text (stamped-skill-md "0.13.0-rc1")}})
+                           :skill_stale))))
+
+    (testing "no project copy -> no issue"
+      (is (= [] (issues-of (check/run {:tickets [] :version "0.12.0"}) :skill_stale))))
+
+    (testing "an older stamp -> one global warning naming both versions"
+      (let [[issue :as issues] (stale (stamped-skill-md "0.9.0"))]
+        (is (= 1 (count issues)))
+        (is (= :warning (:severity issue)))
+        (is (= [] (:ids issue)))
+        (is (= path (:path issue)))
+        (is (= "0.9.0" (:value issue)))
+        (is (re-find #"older" (:message issue))
+            "versions compare numerically: 0.9.0 is older than 0.12.0")
+        (is (str/includes? (:message issue) "0.12.0"))
+        (is (str/ends-with? (:message issue) "run `knot skill install` and commit"))))
+
+    (testing "a newer stamp -> warning that says newer"
+      (let [[issue] (stale (stamped-skill-md "0.13.0"))]
+        (is (= "0.13.0" (:value issue)))
+        (is (re-find #"newer" (:message issue)))))
+
+    (testing "a missing stamp -> warning with a null value"
+      (let [[issue :as issues] (stale "---\nname: knot\n---\n# knot\n")]
+        (is (= 1 (count issues)))
+        (is (contains? issue :value))
+        (is (nil? (:value issue)))
+        (is (re-find #"missing or unreadable" (:message issue)))
+        (is (str/ends-with? (:message issue) "run `knot skill install` and commit"))))
+
+    (testing "an unparseable stamp or an unreadable file -> the missing warning"
+      (doseq [text [(stamped-skill-md "banana") nil]]
+        (let [[issue :as issues] (stale text)]
+          (is (= 1 (count issues)))
+          (is (nil? (:value issue)))
+          (is (re-find #"missing or unreadable" (:message issue))))))
+
+    (testing "positional ids do not skip the global check"
+      (is (= 1 (count (stale (stamped-skill-md "0.9.0") :ids-filter #{"kno-01x"})))))))

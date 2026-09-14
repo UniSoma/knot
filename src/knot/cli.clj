@@ -1361,6 +1361,56 @@
       (output/dep-tree-json tree)
       (output/dep-tree-text tree))))
 
+(defn- absolutize-dir
+  "Normalized absolute path for a user-supplied directory: `~` expands,
+   and a relative path resolves against `base`."
+  [dir base]
+  (let [expanded (fs/expand-home dir)]
+    (str (fs/normalize (if (fs/absolute? expanded)
+                         (fs/path expanded)
+                         (fs/path base expanded))))))
+
+(defn effective-skill-dir
+  "Where `knot skill install` writes without an explicit directory:
+   `:skill-dir` from `.knot.edn` when set (relative to the project root),
+   else `<project-root>/.claude/skills/knot`."
+  [{:keys [project-root skill-dir]}]
+  (if skill-dir
+    (absolutize-dir skill-dir project-root)
+    (str (fs/path project-root ".claude" "skills" "knot"))))
+
+(defn- holds-skill-md? [dir]
+  (fs/regular-file? (fs/path dir "SKILL.md")))
+
+(defn- project-skill-dir
+  "The project's own installed skill directory, or nil. Candidates, first
+   `SKILL.md` wins: `:skill-dir` from `.knot.edn` (relative paths resolve
+   from the project root), then `<project-root>/.claude/skills/knot`."
+  [{:keys [project-root skill-dir]}]
+  (->> [(when skill-dir (absolutize-dir skill-dir project-root))
+        (when project-root (str (fs/path project-root ".claude" "skills" "knot")))]
+       (filter some?)
+       (filter holds-skill-md?)
+       first))
+
+(defn installed-skill-dir
+  "The directory of the agent skill this project should point at, or nil
+   when no skill is installed: `project-skill-dir`, else
+   `<home>/.claude/skills/knot`. `:home` is injectable so the search is
+   testable; it defaults to the real home directory."
+  [{:keys [home] :as ctx}]
+  (or (project-skill-dir ctx)
+      (let [dir (str (fs/path (or home (fs/home)) ".claude" "skills" "knot"))]
+        (when (holds-skill-md? dir) dir))))
+
+(defn- read-skill-md
+  "`{:path :text}` for the SKILL.md under `dir`; `:text` is nil when the
+   file cannot be read, which counts as a missing stamp."
+  [dir]
+  (let [path (str (fs/path dir "SKILL.md"))]
+    {:path path
+     :text (try (slurp path) (catch Exception _ nil))}))
+
 (defn- jsonify-issue
   "Project an issue map into the JSON-friendly shape: stringify
    `:severity`, `:code`, `:field`; unixify `:path` so it matches the
@@ -1403,7 +1453,8 @@
    (errors in filtered view), or 2 (invalid filter spec). Cannot-scan
    exit-2 (no project, malformed `.knot.edn`) is the upstream caller's
    responsibility, not this fn's. Globals always run on the full ticket
-   set; the id list only narrows the per-ticket tier. The `--severity`
+   set; the id list only narrows the per-ticket tier. The skill_stale
+   global reads the project's skill copy only, never the home one. The `--severity`
    enum is closed (rejects unknown); `--code` is open (silently passes
    through; matches nothing if unrecognized)."
   [ctx {:keys [json? severity code ids]}]
@@ -1422,7 +1473,8 @@
                                   :parse-errors parse-errors
                                   :config       resolved
                                   :scanned      scanned
-                                  :ids-filter   (when (seq ids) (set ids))})
+                                  :ids-filter   (when (seq ids) (set ids))
+                                  :skill        (some-> (project-skill-dir resolved) read-skill-md)})
             filtered  (check/filter-issues (:issues result) spec)
             has-err?  (some #(= :error (:severity %)) filtered)
             scanned*  (:scanned result)
@@ -1491,47 +1543,28 @@
   [limit]
   (if (and (integer? limit) (pos? limit)) limit prime-default-limit))
 
-(defn- absolutize-dir
-  "Normalized absolute path for a user-supplied directory: `~` expands,
-   and a relative path resolves against `base`."
-  [dir base]
-  (let [expanded (fs/expand-home dir)]
-    (str (fs/normalize (if (fs/absolute? expanded)
-                         (fs/path expanded)
-                         (fs/path base expanded))))))
-
-(defn effective-skill-dir
-  "Where `knot skill install` writes without an explicit directory:
-   `:skill-dir` from `.knot.edn` when set (relative to the project root),
-   else `<project-root>/.claude/skills/knot`."
-  [{:keys [project-root skill-dir]}]
-  (if skill-dir
-    (absolutize-dir skill-dir project-root)
-    (str (fs/path project-root ".claude" "skills" "knot"))))
-
-(defn installed-skill-dir
-  "The directory of the agent skill this project should point at, or nil
-   when no skill is installed. Candidates, first `SKILL.md` wins:
-   `:skill-dir` from `.knot.edn` (relative paths resolve from the project
-   root), `<project-root>/.claude/skills/knot`, then
-   `<home>/.claude/skills/knot`. `:home` is injectable so the search is
-   testable; it defaults to the real home directory."
-  [{:keys [project-root skill-dir home]}]
-  (->> [(when skill-dir (absolutize-dir skill-dir project-root))
-        (when project-root (str (fs/path project-root ".claude" "skills" "knot")))
-        (str (fs/path (or home (fs/home)) ".claude" "skills" "knot"))]
-       (filter some?)
-       (filter #(fs/regular-file? (fs/path % "SKILL.md")))
-       first))
-
 (defn- skill-pointer-fields
-  "The two renderer inputs behind `prime`'s closing pointer: whether a
-   skill is installed, and where. POSIX-separated, like every other path
-   in the JSON envelope."
+  "The renderer inputs behind `prime`'s closing pointer: whether a skill
+   is installed, where (POSIX-separated, like every other path in the JSON
+   envelope), its version stamp, and whether that stamp is stale.
+   `:skill-notice` is the stale line; its fix depends on where the copy
+   lives: a project copy is reinstalled and committed, a home copy is
+   reinstalled in place."
   [ctx]
-  (let [dir (installed-skill-dir ctx)]
+  (let [dir       (installed-skill-dir ctx)
+        stamp     (some-> dir read-skill-md :text check/skill-stamp)
+        staleness (when dir (check/skill-staleness stamp version/version))
+        fix       (if (= dir (project-skill-dir ctx))
+                    check/project-skill-fix
+                    "run `knot skill install ~/.claude/skills/knot`")
+        notice    (when staleness
+                    (check/skill-stale-message staleness stamp version/version fix))]
     {:skill-installed? (some? dir)
-     :skill-dir        (some-> dir fs/unixify)}))
+     :skill-dir        (some-> dir fs/unixify)
+     :skill-version    stamp
+     :skill-stale?     (some? staleness)
+     :skill-notice     (when notice
+                         (str (str/upper-case (subs notice 0 1)) (subs notice 1) "."))}))
 
 (defn prime-cmd
   "Render the agent context primer for the project. Returns a string for
@@ -1555,8 +1588,9 @@
    excluded.
 
    The closing pointer is live: it routes to the installed skill when
-   there is one, else to `knot help topics`. `--json` reports the same
-   search as `skill_installed`/`skill_dir`.
+   there is one, else to `knot help topics`, with a line under it when
+   that skill's version stamp is stale. `--json` reports the same search
+   as `skill_installed`/`skill_dir`/`skill_stale`/`skill_version`.
 
    Filters apply uniformly across all four sections (in_progress,
    ready_to_close, ready, recently_closed). For ready, filters apply BEFORE the cap, so

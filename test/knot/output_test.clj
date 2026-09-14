@@ -2916,3 +2916,26 @@
       (is (not (str/includes? s "["))
           "info-text never emits ANSI color"))))
 
+
+(deftest prime-skill-stale-notice-test
+  (let [notice "The installed `knot` skill is from knot 0.0.1, older than this CLI (0.12.0); run `knot skill install` and commit."]
+    (testing "the notice sits on the line under the skill pointer, in both preambles"
+      (doseq [mode [nil "afk"]]
+        (let [preamble (prime-preamble (assoc sample-prime-data :mode mode
+                                              :skill-installed? true
+                                              :skill-notice notice))]
+          (is (str/includes? preamble (str "invoke the `knot` skill.\n" notice))))))
+    (testing "JSON carries skill_stale and skill_version beside skill_installed"
+      (let [data (:data (json/parse-string
+                         (output/prime-json (assoc sample-prime-data
+                                                   :skill-installed? true
+                                                   :skill-stale? true
+                                                   :skill-version "0.0.1"))
+                         true))]
+        (is (true? (:skill_stale data)))
+        (is (= "0.0.1" (:skill_version data)))))
+    (testing "defaults: not stale, null version"
+      (let [data (:data (json/parse-string (output/prime-json sample-prime-data) true))]
+        (is (false? (:skill_stale data)))
+        (is (contains? data :skill_version))
+        (is (nil? (:skill_version data)))))))

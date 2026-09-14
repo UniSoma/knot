@@ -715,11 +715,13 @@ Don't pick up `hitl` tickets — those need a human in the loop. The `mode` fiel
   "The preamble's closing paragraph for `branches`. With the skill
    installed, the agent is told to invoke it; without, the same judgment
    is reachable through `knot help topics`, plus a line naming the
-   command that installs the skill."
-  [branches installed?]
+   command that installs the skill. A stale installed skill adds `notice`
+   on the line under the pointer."
+  [branches installed? notice]
   (if installed?
-    (str "For the judgment the help text can't carry (" branches
-         "), invoke the `knot` skill.")
+    (cond-> (str "For the judgment the help text can't carry (" branches
+                 "), invoke the `knot` skill.")
+      notice (str "\n" notice))
     (str "For the judgment the help text can't carry (" branches
          "), run `knot help topics`.\n\n"
          "No `knot` skill is installed here — `knot skill install` writes one.")))
@@ -881,7 +883,7 @@ before issuing other Knot commands.")
    for AC slot). Caller controls sort and limit — this function does not
    reorder or truncate."
   [{:keys [project in-progress ready-to-close ready ready-truncated? ready-remaining
-           recently-closed mode afk-mode skill-installed?]
+           recently-closed mode afk-mode skill-installed? skill-notice]
     :or {afk-mode (:afk-mode (config/defaults))}}]
   (let [found? (:found? project)
         ;; Coerce mode through name+lower-case+trim so keywords (`:afk`),
@@ -896,10 +898,10 @@ before issuing other Knot commands.")
                    (not found?) prime-preamble-no-project
                    afk?         (str prime-preamble-afk "\n\n"
                                      (prime-pointer prime-pointer-branches-afk
-                                                    skill-installed?))
+                                                    skill-installed? skill-notice))
                    :else        (str prime-preamble-found "\n\n"
                                      (prime-pointer prime-pointer-branches-hitl
-                                                    skill-installed?)))
+                                                    skill-installed? skill-notice)))
         ip-nudge    (when found? (if afk?
                                    prime-in-progress-nudge-afk
                                    prime-in-progress-nudge-hitl))
@@ -988,7 +990,8 @@ before issuing other Knot commands.")
    envelope. Inside `:data`, keys are snake_case: `project`,
    `in_progress`, `ready_to_close`, `ready`, `ready_truncated`,
    `ready_remaining`, `recently_closed`, `skill_installed`,
-   `skill_dir` (the directory whose `SKILL.md` was found, or null).
+   `skill_dir` (the directory whose `SKILL.md` was found, or null),
+   `skill_stale` and `skill_version` (that `SKILL.md`'s stamp, or null).
    The preamble and command
    cheatsheet are omitted — JSON consumers are tools that know the
    schema by definition. `ready_to_close` shares the per-ticket shape
@@ -996,7 +999,7 @@ before issuing other Knot commands.")
    omitted from the prime projection (callers needing it use
    `ls --json` or `show --json`)."
   [{:keys [project in-progress ready-to-close ready ready-truncated? ready-remaining
-           recently-closed skill-installed? skill-dir]}]
+           recently-closed skill-installed? skill-dir skill-stale? skill-version]}]
   (envelope-str
    {:project          (jsonify-prime-project project)
     :in_progress      (mapv jsonify-prime-ticket in-progress)
@@ -1006,7 +1009,9 @@ before issuing other Knot commands.")
     :ready_remaining  (or ready-remaining 0)
     :recently_closed  (mapv jsonify-recently-closed (or recently-closed []))
     :skill_installed  (boolean skill-installed?)
-    :skill_dir        skill-dir}))
+    :skill_dir        skill-dir
+    :skill_stale      (boolean skill-stale?)
+    :skill_version    skill-version}))
 
 (defn- info-scalar
   "Format a scalar value for `info-text`: nil → `(none)`, anything else →
