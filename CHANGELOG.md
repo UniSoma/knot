@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added/Changed/Fixed/Removed
+
+## [0.13.0] - 2026-09-14
+
 ### Added
 
 - **`knot help topics` lists the bundled concept guides, `knot help <topic>` prints one.** Six noun-named guides ship inside the CLI and print verbatim to stdout, so the reference an agent needs is one command away in any project with `knot` installed, with no skill file and no clone of this repo. The `help` dispatcher still resolves commands, aliases and subcommands first, and a test forbids a topic named after any of them, so no future command can be shadowed by a guide. `knot --help` advertises the listing in one line. Prior art: `git help -g`, `gh help environment`, `jj help -k`.
