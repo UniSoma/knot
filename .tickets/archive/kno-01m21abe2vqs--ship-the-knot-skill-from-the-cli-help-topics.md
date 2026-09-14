@@ -1,12 +1,13 @@
 ---
 id: kno-01m21abe2vqs
 title: 'Ship the knot skill from the CLI: help topics, skill install, live prime pointer'
-status: open
+status: closed
 type: epic
 priority: 2
 mode: hitl
 created: '2026-09-08T20:11:33.851882355Z'
-updated: '2026-09-08T20:12:25.609950598Z'
+updated: '2026-09-14T13:51:15.606072356Z'
+closed: '2026-09-14T13:51:15.606072356Z'
 tags:
 - docs
 - cli
@@ -42,3 +43,9 @@ beads (`bd prime` = live state from the binary, `bd setup <agent>` = install mat
 A new ADR supersedes ADR 0017's "pull is generated from the registry" definition and its rejection of a CLI-produced pointer. AGENTS.md surface rule, README install section and CHANGELOG move in the same commit as the code. "Topic" stays documentation vocabulary in the ADR, not a CONTEXT.md term.
 
 Follow-up (separate hitl ticket): stale-skill check in `knot check` / `prime` off the version stamp.
+
+## Notes
+
+**2026-09-14T13:51:15.606072356Z**
+
+All five children shipped: the skill source lives in resources/knot/skill with a guarded committed copy, knot help <topic> and knot help topics print the bundled guides, knot skill install writes the versioned skill (honoring :skill-dir), knot prime's closing pointer depends on whether a skill is installed, and ADR 0019 records the CLI-produced pointer superseding ADR 0017. The stale-skill check stays open as kno-01m21ad0gzs4.

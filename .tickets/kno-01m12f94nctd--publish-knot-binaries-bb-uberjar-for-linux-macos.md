@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: hitl
 created: '2026-08-27T20:41:14.112974689Z'
-updated: '2026-08-27T20:41:14.112974689Z'
+updated: '2026-09-14T13:40:21.141925928Z'
 tags:
 - distribution
 - release
@@ -42,3 +42,9 @@ Each job runs `bb build:bb`, verifies the result (`--version` equals the tag, `-
 `build:bb` learns to emit `knot.exe` when the located bb is `bb.exe`, skips the POSIX chmod there, and uses `BB_BIN` for the uberjar step too. README `Install` gains a "Prebuilt binaries" subsection above the bbin path; `/release` gets a post-Step-11 check that the assets appeared.
 
 Out of scope: macOS code-signing/notarization, arm64 Linux, the jolt binary.
+
+## Notes
+
+**2026-09-14T13:40:21.141925928Z**
+
+Babashka 1.13.220 split the Linux bb into a dynamic build (needs glibc >= 2.28) and a static one. build:bb appends whichever bb it finds, so the linux-amd64 release asset must be built from the static bb to stay portable. setup-clojure installs linux-*-static today; if BB_BIN or another install path is used, pin the -static asset. CI moved to BB_VERSION 1.13.222.
