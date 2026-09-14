@@ -2,6 +2,7 @@
 .clj-kondo/.cache/
 .clj-kondo/imports
 .lsp/.cache/
+.nrepl-port
 *.class
 *.elc
 /slides/

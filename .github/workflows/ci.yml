@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BB_VERSION: 1.12.218
+  BB_VERSION: 1.13.222
   BBIN_VERSION: v0.2.5
 
 jobs:
