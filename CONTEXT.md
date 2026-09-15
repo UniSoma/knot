@@ -8,14 +8,18 @@
 
 **CI test**:
 The `bb test` suite run by `.github/workflows/ci.yml` on push to `main` and on every PR. Covers unit and integration tests across ubuntu/macos/windows. Gates merge, not release.
-_Avoid_: "the test suite" without qualifier — ambiguous with release-tag smoke.
+_Avoid_: "the test suite" without qualifier — ambiguous with the release gate.
 
 **Pre-push smoke**:
-The local single-platform check in `/release` Step 9 that the freshly-built `bbin install . --as knot-rc` binary starts and reports the expected version. Runs on the maintainer's machine before `git push --tags`. Prevention layer.
+The local single-platform check in `/release` Step 9 that a freshly built host **Release binary** starts and reports the expected version. Runs on the maintainer's machine before `git push --tags`. Prevention layer.
 
-**Release-tag smoke**:
-The `.github/workflows/release-smoke.yml` workflow triggered on tags matching `v*`. Installs bbin + knot from the just-pushed tag and runs a golden-path lifecycle smoke across ubuntu/macos/windows. Detection layer — a broken tag stays pushed; the signal is the Actions run status.
-_Avoid_: "the CI workflow" without qualifier.
+**Release gate**:
+The tag-triggered workflow that builds every **Release binary**, smoke-tests each one (and the bbin install) on its own platform, and publishes the GitHub Release only when all of them pass. A tag whose gate fails has no Release.
+_Avoid_: "release-tag smoke" (the retired detection-only workflow it replaced), "the CI workflow" without qualifier.
+
+**Release binary**:
+One babashka runtime for a given OS/arch with the knot uberjar appended, shipped as a release asset. Knot publishes one per platform babashka publishes.
+_Avoid_: "native binary" — suggests GraalVM native-image or jolt, which it is not.
 
 ### Ticket relationships
 

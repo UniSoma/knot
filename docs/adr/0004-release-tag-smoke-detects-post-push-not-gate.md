@@ -1,5 +1,7 @@
 # Release-tag smoke detects post-push, not as a release gate
 
+**[Superseded, 2026-09-15: see [0021](0021-release-binaries-appended-to-babashka-cross-built-and-gated.md). A release gate now builds and smoke-tests the release binaries and publishes the Release only when they pass.]**
+
 The release-tag smoke workflow (`.github/workflows/release-smoke.yml`) fires on `v*` tag push and runs the installed shim across ubuntu/macos/windows. It is *detection*, not *prevention*: the tag stays on origin regardless of smoke outcome, and the GitHub Release publication (`gh release create` in `/release` Step 11) is not gated on smoke status. Prevention is the job of pre-push smoke (`/release` Step 9, single-platform local) and `bb test` (`ci.yml`, pre-merge).
 
 ## Considered options
