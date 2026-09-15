@@ -30,19 +30,21 @@ requiring `jolt.time` by hand.
 
 ## Known gaps
 
-- `knot serve` does not run: http-kit is a Java library, and `MessageDigest`
-  needs jolt's separate crypto library. Every other command passes the full
-  `bb test` suite when the integration tests are pointed at the binary.
+- `knot help <topic>` and `knot skill install` fail with "Cannot open <nil> as
+  a Reader": they read the skill guides from `resources/` through
+  `io/resource`, and jolt only bakes resources listed under
+  `:jolt/build :embed` in `deps.edn` into the binary. Every other command
+  passes the full `bb test` suite when the integration tests are pointed at
+  the binary.
 - It is slower than babashka. `bb build:bb` makes the other kind of standalone
   binary — knot's uberjar appended to the `bb` executable — and against 158
   tickets it runs `--help` in 85 ms, `list`/`check` in 100–110 ms and `show`
   in 125 ms at 115–125 MB peak RSS; the jolt binary takes 130 ms, 210–255 ms
   and 275 ms at 190 MB. The gap is the YAML shim parsing tickets in Clojure
   rather than SnakeYAML. Jolt wins only on size: 18 MB vs 90 MB.
-- `--tree-shake` is requested but skipped. `knot.serve/start-server!` reaches
-  http-kit through `resolve` so the bb build does not load it at startup, and
-  `flatland.ordered.set` does the same internally; either runtime lookup makes
-  jolt keep the whole compiler image.
+- `--tree-shake` is requested but skipped. `flatland.ordered.set` reaches a
+  var through a runtime lookup, and that makes jolt keep the whole compiler
+  image.
   `--boot small` produced a binary of the same size.
 - Two jolt divergences shaped the source: `clojure.string/last-index-of`
   rejects a char argument and `Matcher.find(int)` ignores its start offset.

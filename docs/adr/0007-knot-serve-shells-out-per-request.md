@@ -1,5 +1,7 @@
 # knot serve shells out to `knot --json` per request
 
+**[Superseded, 2026-09-15: see [0020](0020-knot-has-no-browser-surface.md). `knot serve` was removed.]**
+
 Each `/api/*` route in `knot.serve` forks a child Babashka process running `knot <cmd> --json` and forwards stdout verbatim. A future reader sees a server inside the same project as `knot.cli` and reasonably wonders why we don't just `(require '[knot.cli])` and call query functions in-process — sub-millisecond instead of ~100–200ms per request, no child processes, no fork tax. We pick the slower path deliberately.
 
 The architectural payoff is three things. First, **version-skew safety**: a `knot serve` installed at v0.5 keeps working if the user upgrades `knot` itself to v0.6, as long as the envelope is stable. The envelope is already the documented contract for every external embedder (VSCode extension, Emacs xwidget, `knot.el` itself); making `knot serve` an external embedder too means we don't introduce a *second* coupling we'd have to keep stable. Second, **envelope discipline**: if `knot serve` finds the `--json` shape painful, we fix the envelope, which benefits every external consumer. An in-process server bypasses the envelope and lets it rot — pain points stop surfacing because we route around them. Third, **a permission boundary by construction**: whatever `knot --json` doesn't return, the server cannot leak. In-process, we'd have to remember not to import the wrong namespace; the boundary becomes a code-review concern instead of a process-isolation guarantee.

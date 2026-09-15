@@ -12,7 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added/Changed/Fixed/Removed
+### Removed
+
+- **BREAKING: `knot serve` is gone.** The read-only browser panel was an experiment that nothing consumed, and it was the only part of knot that ran a server. Its http-kit dependency was also the one command the jolt binary could not run. Use the CLI, `--json`, or `knot.el` instead. `knot serve` and `knot help serve` now report an unknown command. See ADR-0020, which supersedes ADR-0005, ADR-0006 and ADR-0007.
 
 ## [0.13.0] - 2026-09-14
 

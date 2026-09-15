@@ -1148,22 +1148,14 @@
         (let [text (slurp (str/trim out))]
           (is (str/includes? text "mode: hitl"))))))
 
-  (testing "knot serve --help discovers the registered command"
+  (testing "knot serve is no longer a command"
     (with-tmp tmp
-      (let [{:keys [exit out err]} (run-knot tmp "serve" "--help")]
-        (is (zero? exit) (str "serve --help err=" err))
-        (is (str/includes? out "knot serve")
-            "USAGE line names knot serve")
-        (is (str/includes? out "--port")
-            "help advertises --port")
-        (is (str/includes? out "--dev")
-            "help advertises --dev"))))
-
-  (testing "knot help serve resolves through the help router"
-    (with-tmp tmp
-      (let [{:keys [exit out err]} (run-knot tmp "help" "serve")]
-        (is (zero? exit) (str "help serve err=" err))
-        (is (str/includes? out "knot serve")))))
+      (let [{:keys [exit err]} (run-knot tmp "serve" "--help")]
+        (is (= 1 exit))
+        (is (str/includes? err "unknown command: serve")))
+      (let [{:keys [exit err]} (run-knot tmp "help" "serve")]
+        (is (= 1 exit))
+        (is (str/includes? err "unknown command: serve")))))
 
   (testing "knot create --help still works with :restrict? true"
     ;; The help router intercepts --help before parse-args runs, so
