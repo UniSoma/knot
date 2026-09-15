@@ -60,7 +60,7 @@ Re-run the installer to upgrade.
 
 ### Manual download
 
-Download `knot-<os>-<arch>.tar.gz` (or `knot-windows-amd64.zip`) and `SHA256SUMS` from the [latest release](https://github.com/UniSoma/knot/releases/latest), check the archive with `sha256sum -c --ignore-missing SHA256SUMS`, and put `knot` on your PATH.
+Download `knot-<os>-<arch>.tar.gz` (or `knot-windows-amd64.zip`) and `SHA256SUMS` from the [latest release](https://github.com/UniSoma/knot/releases/latest), check the archive with `sha256sum -c --ignore-missing SHA256SUMS` (`shasum -a 256 -c --ignore-missing SHA256SUMS` on macOS), and put `knot` on your PATH.
 
 The binaries are not signed.
 A browser download is quarantined, so clear the flag before the first run:

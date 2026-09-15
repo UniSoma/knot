@@ -6,7 +6,7 @@ type: task
 priority: 2
 mode: hitl
 created: '2026-08-27T20:41:14.112974689Z'
-updated: '2026-09-15T19:26:35.797065094Z'
+updated: '2026-09-15T19:33:17.580460790Z'
 tags:
 - distribution
 - release
@@ -91,3 +91,24 @@ macOS code-signing and notarization, Windows signing, `knot upgrade` and the upd
 **2026-09-14T13:40:21.141925928Z**
 
 Babashka 1.13.220 split the Linux bb into a dynamic build (needs glibc >= 2.28) and a static one. build:bb appends whichever bb it finds, so the linux-amd64 release asset must be built from the static bb to stay portable. setup-clojure installs linux-*-static today; if BB_BIN or another install path is used, pin the -static asset. CI moved to BB_VERSION 1.13.222.
+
+**2026-09-15T19:33:17.580460790Z**
+
+Implemented in 2a5f2e3 and 4da6d13; not yet pushed.
+
+Verified locally on linux-amd64:
+- bb build:release --target all wrote 5 archives, and sha256sum -c SHA256SUMS passes.
+- The tar archives keep mode 0755; the zip holds knot.exe.
+- --target host passes the new /release Step 9 checks.
+- install.sh installs pinned and latest releases from a local http.server and rejects a tampered SHA256SUMS.
+- The linux-amd64 binary passes --version, --help, help topics and the golden path.
+- bb test and clj-kondo pass.
+
+Not verified:
+- install.ps1 has never been run (no pwsh here).
+- The 4 non-linux-amd64 smoke legs have not run.
+- The runner labels ubuntu-24.04-arm and macos-15-intel are unconfirmed (arm runners need a public repo), and so is jq on the arm image.
+- The python-before-python3 order for Windows is untested.
+- bb.exe with an appended jar has never run. If the Windows leg prints babashka's version or errors, that is a design finding for ADR 0021, not a workflow bug.
+
+Next: push main (ci.yml exercises the .bb-version step), run release.yml from Actions with dry_run=true, flip AC 3/4/5 once every leg is green, and let the next /release cut prove AC 6. Then close.
