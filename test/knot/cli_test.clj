@@ -1882,7 +1882,7 @@
           (doseq [k [":tickets-dir" ":prefix" ":default-assignee"
                      ":default-type" ":default-priority" ":statuses"
                      ":terminal-statuses" ":active-status"
-                     ":types" ":modes" ":default-mode"]]
+                     ":types" ":modes" ":default-mode" ":skill-dir"]]
             (is (str/includes? content k)
                 (str "stub should mention " k)))
           ;; the stub should be self-documenting (contain comments)

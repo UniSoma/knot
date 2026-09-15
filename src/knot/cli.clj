@@ -1892,6 +1892,10 @@
      " ;; human-oriented intent table. Set to nil to disable the agent\n"
      " ;; preamble entirely. Must be a member of :modes (or nil).\n"
      " :afk-mode \"" (:afk-mode d) "\"\n"
+     "\n"
+     " ;; Where `knot skill install` writes the agent skill. Relative paths\n"
+     " ;; resolve from the project root; ~ expands.\n"
+     " ;; :skill-dir \".claude/skills/knot\"\n"
      "}\n")))
 
 (defn init-cmd
