@@ -220,6 +220,9 @@ smoke-tests each on its own platform plus the bbin install, and only then
 creates the GitHub Release with the archives, `SHA256SUMS`, and the tag
 annotation as its body. Do not create the Release by hand.
 
+The run can take a few seconds to register after the push; if the id comes
+back empty, wait and repeat.
+
 ```bash
 gh run watch "$(gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId -q '.[0].databaseId')"
 gh release view vX.Y.Z --json assets -q '.assets[].name'

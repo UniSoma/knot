@@ -53,7 +53,7 @@ Both scripts check the download against the release's `SHA256SUMS`.
 Set `KNOT_VERSION` to install a specific release instead of the latest, and `KNOT_INSTALL_DIR` to install somewhere else:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/UniSoma/knot/main/install.sh | KNOT_VERSION=0.13.0 sh
+curl -fsSL https://raw.githubusercontent.com/UniSoma/knot/main/install.sh | KNOT_VERSION=0.14.0 sh
 ```
 
 Re-run the installer to upgrade.

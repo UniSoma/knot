@@ -36,7 +36,7 @@ requiring `jolt.time` by hand.
   `:jolt/build :embed` in `deps.edn` into the binary. Every other command
   passes the full `bb test` suite when the integration tests are pointed at
   the binary.
-- It is slower than babashka. `bb build:bb` makes the other kind of standalone
+- It is slower than babashka. `bb build:release --target host` makes the other kind of standalone
   binary — knot's uberjar appended to the `bb` executable — and against 158
   tickets it runs `--help` in 85 ms, `list`/`check` in 100–110 ms and `show`
   in 125 ms at 115–125 MB peak RSS; the jolt binary takes 130 ms, 210–255 ms

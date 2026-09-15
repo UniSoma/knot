@@ -103,7 +103,8 @@ jobs:
           srv="$(mktemp -d)"
           mkdir -p "$srv/download/v$VERSION"
           cp dist/* "$srv/download/v$VERSION/"
-          py="$(command -v python3 || command -v python)"
+          # On Windows, python3 can resolve to the Microsoft Store stub.
+          py="$(command -v python || command -v python3)"
           "$py" -m http.server 8765 --bind 127.0.0.1 --directory "$srv" &
           server=$!
           trap 'kill "$server"' EXIT
