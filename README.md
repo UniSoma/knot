@@ -19,7 +19,7 @@ and adds what a local, agent-driven workflow needs:
 built-in JSON output, a configurable project schema, sortable collision-resistant IDs, dependency queries,
 and an `afk`/`hitl` mode field that marks what an agent can run alone.
 
-Knot is written in Clojure and distributed as a babashka script,
+Knot is written in Clojure and ships as a single executable for Linux, macOS and Windows,
 but it can track work for any project:
 Clojure, JavaScript, Python, writing, infrastructure, or anything else you keep in a directory.
 
@@ -28,14 +28,61 @@ If you need a fast local backlog that an editor, shell, git, and agent can all u
 
 ## Install
 
-Knot is distributed as a bbin-compatible babashka script:
+### Prebuilt binary
+
+Each release publishes a `knot` executable for Linux and macOS (amd64 and aarch64) and for Windows (amd64).
+It carries its own babashka runtime, so nothing else needs to be installed.
+
+On Linux or macOS:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/UniSoma/knot/main/install.sh | sh
+```
+
+The script installs to `~/.local/bin/knot` and warns if that directory is not on PATH.
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/UniSoma/knot/main/install.ps1 | iex
+```
+
+The script installs to `%LOCALAPPDATA%\Programs\knot\knot.exe` and adds that directory to your user PATH.
+
+Both scripts check the download against the release's `SHA256SUMS`.
+Set `KNOT_VERSION` to install a specific release instead of the latest, and `KNOT_INSTALL_DIR` to install somewhere else:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/UniSoma/knot/main/install.sh | KNOT_VERSION=0.13.0 sh
+```
+
+Re-run the installer to upgrade.
+
+### Manual download
+
+Download `knot-<os>-<arch>.tar.gz` (or `knot-windows-amd64.zip`) and `SHA256SUMS` from the [latest release](https://github.com/UniSoma/knot/releases/latest), check the archive with `sha256sum -c --ignore-missing SHA256SUMS`, and put `knot` on your PATH.
+
+The binaries are not signed.
+A browser download is quarantined, so clear the flag before the first run:
+
+```sh
+xattr -d com.apple.quarantine ./knot      # macOS
+```
+
+```powershell
+Unblock-File .\knot.exe                    # Windows
+```
+
+### With babashka
+
+If you already have babashka 1.3.0 or later, install with [bbin](https://github.com/babashka/bbin):
 
 ```sh
 bbin install https://github.com/UniSoma/knot.git
 ```
 
-That's it.
-bbin reads `:bbin/bin` from `bb.edn`, drops a babashka shim on PATH, and resolves runtime deps lazily on first run.
+bbin reads `:bbin/bin` from `bb.edn` and drops a babashka shim on PATH.
+bb bundles the runtime dependencies, so install resolves no `:deps`.
 To install from a working copy during development:
 
 ```sh
@@ -48,8 +95,7 @@ To uninstall:
 bbin uninstall knot
 ```
 
-`knot` requires babashka 1.3.0 or later.
-bb bundles the runtime dependencies, so install resolves no `:deps`.
+### Agent documentation
 
 The install carries the agent-facing documentation with it.
 `knot help topics` lists the bundled concept guides and `knot help <topic>` prints one.

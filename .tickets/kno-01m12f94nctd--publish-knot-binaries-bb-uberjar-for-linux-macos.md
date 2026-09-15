@@ -1,21 +1,21 @@
 ---
 id: kno-01m12f94nctd
 title: Publish knot release binaries for every babashka platform through a gated release workflow
-status: open
+status: in_progress
 type: task
 priority: 2
 mode: hitl
 created: '2026-08-27T20:41:14.112974689Z'
-updated: '2026-09-15T19:12:21.838756996Z'
+updated: '2026-09-15T19:26:35.797065094Z'
 tags:
 - distribution
 - release
 - ci
 acceptance:
 - title: bb build:release --target all on Linux writes the 5 platform archives and SHA256SUMS from upstream babashka at the .bb-version pin, each download verified against upstream sha256; --target host builds a runnable binary whose --version matches knot.version; build:bb is removed
-  done: false
+  done: true
 - title: ci.yml and the gate workflow read the babashka version from .bb-version
-  done: false
+  done: true
 - title: install.sh and install.ps1 install a chosen or latest release from KNOT_RELEASE_URL, verify SHA256SUMS, and honour KNOT_VERSION and KNOT_INSTALL_DIR
   done: false
 - title: Each of the 5 smoke legs installs its binary via the installer from a local HTTP server and passes --version, --help, help topics and the init/create/ls/show/start/close/check golden path; the bbin legs pass; release-smoke.yml is deleted
@@ -25,9 +25,9 @@ acceptance:
 - title: A pushed vX.Y.Z tag produces a GitHub Release with the 5 archives and SHA256SUMS and notes from the tag, created only after every smoke leg passes
   done: false
 - title: README Install covers installer, manual download with quarantine note, and bbin; /release Step 9, Step 11 and the upgrade-path template are updated
-  done: false
+  done: true
 - title: ADR 0021 is committed and ADR 0004 is marked superseded by it
-  done: false
+  done: true
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqzh3jgwf0

@@ -151,7 +151,10 @@ Release vX.Y.Z: <one-line theme>
 ## Upgrade path
 
 ```sh
-<bbin reinstall + per-release verification>
+curl -fsSL https://raw.githubusercontent.com/UniSoma/knot/main/install.sh | sh
+# Windows: irm https://raw.githubusercontent.com/UniSoma/knot/main/install.ps1 | iex
+# bbin: bbin install https://github.com/UniSoma/knot.git
+<per-release verification>
 ```
 
 ## Known follow-ups        # optional — omit when empty
@@ -188,21 +191,21 @@ git cat-file -p vX.Y.Z | grep -c '^## '   # should match the prose's `##` count
 
 ### Step 9: Pre-push smoke
 
-Install from the working copy and verify the binary starts and reports the
-new version. `info`/`check` are deliberately out of scope here — they'd
-either need a knot project or risk false-positive failures against this
-repo's own tickets. Full end-to-end coverage lives in the release-tag smoke
-CI workflow (separate from this slash command).
+Build the host release binary and verify it starts and reports the new
+version. `info`/`check` are deliberately out of scope here — they'd either
+need a knot project or risk false-positive failures against this repo's own
+tickets. Every platform, the installers and the golden path are covered by
+the release gate (`.github/workflows/release.yml`) after push.
 
 ```bash
-bbin install . --as knot-rc
-knot-rc --version | grep -q "X.Y.Z"   # grep-asserted version string
-knot-rc --help                        # exit 0
-bbin uninstall knot-rc                # unconditional, even on failure
+bb build:release --target host
+knot=$(ls target/release/*/knot)
+test "$("$knot" --version)" = "X.Y.Z"   # exact version string
+"$knot" --help > /dev/null              # exit 0
+"$knot" help topics | grep -q .         # bundled guides are in the jar
 ```
 
-If `--version` doesn't match or `--help` fails, abort the cut and uninstall
-before exiting.
+If any check fails, abort the cut.
 
 ### Step 10: Push
 
@@ -210,25 +213,27 @@ before exiting.
 git push origin main --tags
 ```
 
-### Step 11: Create GitHub Release
+### Step 11: Watch the release gate
 
-Prefer the `gh` CLI when available:
+The tag push starts the release gate. It builds the five release binaries,
+smoke-tests each on its own platform plus the bbin install, and only then
+creates the GitHub Release with the archives, `SHA256SUMS`, and the tag
+annotation as its body. Do not create the Release by hand.
 
 ```bash
-gh release create vX.Y.Z \
-  -F release-notes-vX.Y.Z.txt \
-  --title "vX.Y.Z" \
-  --verify-tag
+gh run watch "$(gh run list --workflow release.yml --branch vX.Y.Z --limit 1 --json databaseId -q '.[0].databaseId')"
+gh release view vX.Y.Z --json assets -q '.assets[].name'
 ```
 
-`--verify-tag` refuses to create a release for a tag that doesn't exist
-remotely — catches "forgot to push tags" mistakes.
+Expect `knot-linux-amd64.tar.gz`, `knot-linux-aarch64.tar.gz`,
+`knot-macos-amd64.tar.gz`, `knot-macos-aarch64.tar.gz`,
+`knot-windows-amd64.zip` and `SHA256SUMS`. Without `gh`, follow the run
+under the repo's Actions tab and check the assets on the Release page.
 
-Web-UI fallback when `gh` is not installed: open
-`github.com/<owner>/<repo>/releases/new`, paste `release-notes-vX.Y.Z.txt`
-verbatim into the body, set tag-target to `vX.Y.Z`, publish.
-
-Mark as "latest" (the default). No `--prerelease` flag.
+If the gate fails, no Release exists and the tag is a dead end. Delete it
+locally and on origin (`git tag -d vX.Y.Z && git push origin :refs/tags/vX.Y.Z`),
+fix on `main`, and cut again. If only the publish job failed, re-run it, or
+dispatch `release.yml` with `tag: vX.Y.Z` and `dry_run: false`.
 
 ### Step 12: Cleanup
 

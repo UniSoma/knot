@@ -1,0 +1,238 @@
+name: release
+
+# The release gate: build every release binary once, smoke-test each on its
+# own platform (plus the bbin install), and publish the GitHub Release only
+# when all of them pass. See docs/adr/0021.
+
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Build and smoke only; do not publish
+        type: boolean
+        default: true
+      tag:
+        description: Existing vX.Y.Z tag to build and publish (empty builds the selected ref)
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+env:
+  BBIN_VERSION: v0.2.5
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Read babashka version
+        run: echo "BB_VERSION=$(tr -d '[:space:]' < .bb-version)" >> "$GITHUB_ENV"
+
+      - name: Setup Babashka
+        uses: DeLaGuardo/setup-clojure@13.6.0
+        with:
+          bb: ${{ env.BB_VERSION }}
+
+      - name: Build release binaries
+        run: bb build:release --target all
+
+      - name: Check version
+        id: version
+        env:
+          TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+        run: |
+          set -euo pipefail
+          version="$(target/release/linux-amd64/knot --version)"
+          if [ -n "$TAG" ] && [ "$version" != "${TAG#v}" ]; then
+            echo "Version mismatch: tag=$TAG, --version=$version" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          cat dist/SHA256SUMS
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  smoke:
+    name: smoke (${{ matrix.target }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: linux-amd64 }
+          - { os: ubuntu-24.04-arm, target: linux-aarch64 }
+          - { os: macos-15-intel, target: macos-amd64 }
+          - { os: macos-latest, target: macos-aarch64 }
+          - { os: windows-latest, target: windows-amd64 }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # One step: a background server does not reliably outlive a step on Windows.
+      - name: Install from a local release server and smoke
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          srv="$(mktemp -d)"
+          mkdir -p "$srv/download/v$VERSION"
+          cp dist/* "$srv/download/v$VERSION/"
+          py="$(command -v python3 || command -v python)"
+          "$py" -m http.server 8765 --bind 127.0.0.1 --directory "$srv" &
+          server=$!
+          trap 'kill "$server"' EXIT
+          for _ in $(seq 30); do
+            curl -fsS -o /dev/null http://127.0.0.1:8765/ && break
+            sleep 1
+          done
+
+          export KNOT_RELEASE_URL=http://127.0.0.1:8765
+          export KNOT_VERSION="$VERSION"
+          export KNOT_INSTALL_DIR="$RUNNER_TEMP/knot-bin"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            pwsh -NoProfile -File install.ps1
+            knot="$(cygpath -u "$KNOT_INSTALL_DIR")/knot.exe"
+          else
+            sh install.sh
+            knot="$KNOT_INSTALL_DIR/knot"
+          fi
+
+          actual="$("$knot" --version)"
+          [ "$actual" = "$VERSION" ] || {
+            echo "Version mismatch: expected $VERSION, --version=$actual" >&2
+            exit 1
+          }
+          "$knot" --help > /dev/null
+          [ -n "$("$knot" help topics)" ] || { echo "knot help topics is empty" >&2; exit 1; }
+
+          cd "$(mktemp -d)"
+          "$knot" init
+          id="$("$knot" create 'CI smoke' --type chore --json | jq -r .data.id)"
+          "$knot" ls
+          "$knot" ls --json | jq -e '.ok == true and (.schema_version|type) == "number"'
+          "$knot" show "$id"
+          "$knot" start "$id"
+          "$knot" close "$id" --summary "smoke complete"
+          "$knot" check
+
+  bbin:
+    name: bbin (${{ matrix.os }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Read babashka version
+        run: echo "BB_VERSION=$(tr -d '[:space:]' < .bb-version)" >> "$GITHUB_ENV"
+
+      - name: Setup Babashka
+        uses: DeLaGuardo/setup-clojure@13.6.0
+        with:
+          bb: ${{ env.BB_VERSION }}
+
+      - name: Install bbin
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o "$HOME/.local/bin/bbin" \
+            "https://raw.githubusercontent.com/babashka/bbin/${BBIN_VERSION}/bbin"
+          chmod +x "$HOME/.local/bin/bbin"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            curl -fsSL -o "$HOME/.local/bin/bbin.bat" \
+              "https://raw.githubusercontent.com/babashka/bbin/${BBIN_VERSION}/bbin.bat"
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          # $GITHUB_PATH only takes effect in later steps, and ~/.local/bin
+          # is not on the Windows runner's PATH, so call bbin by full path.
+          "$HOME/.local/bin/bbin" --version
+
+      - name: Install knot from checkout
+        run: bbin install . --as knot-smoke
+
+      - name: Smoke
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          actual="$(knot-smoke --version)"
+          [ "$actual" = "$VERSION" ] || {
+            echo "Version mismatch: expected $VERSION, --version=$actual" >&2
+            exit 1
+          }
+          knot-smoke --help > /dev/null
+          cd "$(mktemp -d)"
+          knot-smoke init
+          id="$(knot-smoke create 'CI smoke' --type chore --json | jq -r .data.id)"
+          knot-smoke ls
+          knot-smoke ls --json | jq -e '.ok == true and (.schema_version|type) == "number"'
+          knot-smoke show "$id"
+          knot-smoke start "$id"
+          knot-smoke close "$id" --summary "smoke complete"
+          knot-smoke check
+
+  publish:
+    name: publish
+    needs: [build, smoke, bbin]
+    if: github.event_name == 'push' || inputs.dry_run == false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.build.outputs.tag }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [ -n "$TAG" ] || { echo "Publishing needs a tag; dispatch with the tag input" >&2; exit 1; }
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; nothing to publish"
+            exit 0
+          fi
+          # checkout fetches the tag as a lightweight ref; --notes-from-tag needs the annotation.
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          gh release create "$TAG" dist/* --title "$TAG" --verify-tag --notes-from-tag

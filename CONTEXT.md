@@ -110,7 +110,7 @@ _Avoid_: "the acceptance section" for something stored (the checklist is display
 
 ## Relationships
 
-- **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; **release-tag smoke** runs post-push on tag. All three are independent gates with distinct triggers and consumers — none implies the other.
+- **CI test** gates merge to `main`; **pre-push smoke** runs locally during `/release` before push; the **release gate** runs post-push on tag and decides whether the Release is published. All three are independent gates with distinct triggers and consumers — none implies the other.
 - **Parent** and **Deps** are orthogonal axes. A child may or may not also be a dep of its parent; a dep may or may not also be a child. If a child must finish before the parent's own work proceeds, it goes in the parent's `:deps` *explicitly* — composition does not imply sequencing.
 - An umbrella ticket can legitimately appear in `ready` while it has open **Children**: the umbrella's own work (integration, docs, summary) is what's ready, not the children.
 - **Links** never participate in readiness.

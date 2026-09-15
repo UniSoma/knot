@@ -16,5 +16,6 @@ jolt/.jolt/
 jolt/knot
 jolt/knot.build/
 
-# bb uberjar build outputs
+# bb uberjar and release build outputs
 target/
+dist/

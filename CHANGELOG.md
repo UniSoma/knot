@@ -12,7 +12,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Every release ships a `knot` executable per platform.** The GitHub Release carries `knot-linux-amd64.tar.gz`, `knot-linux-aarch64.tar.gz`, `knot-macos-amd64.tar.gz`, `knot-macos-aarch64.tar.gz`, `knot-windows-amd64.zip` and `SHA256SUMS`. Each binary is the knot uberjar appended to upstream babashka for that platform (the static build on Linux), so it runs without babashka or a JVM installed. Asset names carry no version, so `releases/latest/download/<asset>` is a stable URL. The binaries are unsigned. See ADR 0021.
+- **`install.sh` and `install.ps1` install the binary in one line.** They pick the asset for the machine, check it against `SHA256SUMS`, and install to `~/.local/bin` or `%LOCALAPPDATA%\Programs\knot`. `KNOT_VERSION` pins a release, `KNOT_INSTALL_DIR` changes the target, and `KNOT_RELEASE_URL` points at another releases base. On an Apple silicon Mac running under Rosetta, `install.sh` still picks the arm64 build.
+- **`bb build:release [--target all|host|<os>-<arch>]` builds the release assets into `dist/`.** It downloads babashka at the version in `.bb-version`, checks each download against upstream's sha256, and keeps the unpacked binaries under `target/release/<target>/`.
+
+### Changed
+
+- **A release is published by the release gate, not by hand.** `.github/workflows/release.yml` runs on a `vX.Y.Z` tag push: one Linux job builds every asset, each binary is installed through its installer from a local HTTP server and smoke-tested on its own platform, the bbin install is smoke-tested on ubuntu, macOS and Windows, and only then is the GitHub Release created with the tag annotation as its notes. A failed gate leaves the tag without a Release. `workflow_dispatch` runs the gate as a dry run by default, or publishes an existing tag. ADR 0021 supersedes ADR 0004.
+- **CI reads the babashka version from `.bb-version`,** the same pin the release build uses, so tests run on the babashka that ships.
+
 ### Removed
+
+- **`bb build:bb`,** replaced by `bb build:release --target host`.
+- **`.github/workflows/release-smoke.yml`.** Its bbin smoke now runs inside the release gate.
 
 - **BREAKING: `knot serve` is gone.** The read-only browser panel was an experiment that nothing consumed, and it was the only part of knot that ran a server. Its http-kit dependency was also the one command the jolt binary could not run. Use the CLI, `--json`, or `knot.el` instead. `knot serve` and `knot help serve` now report an unknown command. See ADR-0020, which supersedes ADR-0005, ADR-0006 and ADR-0007.
 

@@ -9,9 +9,6 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  BB_VERSION: 1.13.222
-
 jobs:
   test:
     name: bb test (${{ matrix.os }})
@@ -25,6 +22,9 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v5
+
+      - name: Read babashka version
+        run: echo "BB_VERSION=$(tr -d '[:space:]' < .bb-version)" >> "$GITHUB_ENV"
 
       - name: Setup Babashka
         uses: DeLaGuardo/setup-clojure@13.6.0
