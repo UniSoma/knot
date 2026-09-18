@@ -348,7 +348,8 @@
     :dep :dep/tree :undep
     :link :unlink
     :ready :blocked :closed
-    :add-note :edit})
+    :add-note :edit
+    :document :document/add :document/show :document/put :document/rm :document/ls})
 
 (deftest registry-parity-test
   (testing "every dispatched command has a registry entry"
@@ -363,9 +364,9 @@
     (is (= ["ls"] (:aliases (get help/registry :list))))))
 
 (deftest registry-shape-test
-  (testing "every entry has a :group from the canonical five"
+  (testing "every entry has a :group from the canonical set"
     (doseq [[k entry] help/registry]
-      (is (contains? #{:project :lifecycle :graph :listing :notes}
+      (is (contains? #{:project :lifecycle :graph :listing :notes :documents}
                      (:group entry))
           (str k " has invalid :group " (:group entry)))))
 
@@ -910,3 +911,29 @@
   (testing "top-level help advertises the concept guides"
     (let [{:keys [out]} (run-knot "--help")]
       (is (str/includes? out "knot help topics")))))
+
+(deftest document-group-registry-test
+  (testing "the group registers its five subcommands"
+    (is (= [:document/add :document/show :document/put :document/rm :document/ls]
+           (get-in help/registry [:document :subcommands])))
+    (doseq [k (get-in help/registry [:document :subcommands])]
+      (is (contains? help/registry k) (str "missing subcommand entry: " k))))
+
+  (testing "no doc or docs alias is registered"
+    ;; `doc` already means documentation in this repo — two guards named
+    ;; doc_flags_test and doc_codes_test — and an alias would make prose
+    ;; about either resolve to this command group.
+    (is (nil? (help/resolve-key help/registry "doc")))
+    (is (nil? (help/resolve-key help/registry "docs")))
+    (is (nil? (:aliases (get help/registry :document)))))
+
+  (testing "put declares the flags its total-replace semantics require"
+    (let [flags (set (map :name (get-in help/registry [:document/put :flags])))]
+      (is (contains? flags :title))
+      (is (contains? flags :type))
+      (is (contains? flags :json))))
+
+  (testing "the replace-is-total and never-creates caveats live in put's notes"
+    (let [notes (str/join " " (get-in help/registry [:document/put :notes]))]
+      (is (str/includes? notes "not a merge"))
+      (is (str/includes? notes "never creates")))))

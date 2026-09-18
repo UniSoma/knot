@@ -330,7 +330,7 @@
     :restrict?   true
     :flags       [{:name :summary :desc "Closing summary (terminal transitions only)."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates. When a gate fires on an active→terminal transition, --summary is required (the override leaves a record); on *→active transitions, --summary is not required. With no gate to bypass, --force is a no-op."}
+                   :desc "Bypass the acceptance, open-children and required-documents gates. When a gate fires on an active→terminal transition, --summary is required (the override leaves a record); on *→active transitions, --summary is not required. With no gate to bypass, --force is a no-op."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
     :examples    [{:cmd "knot status kno-01abc in_progress"
                    :note "Move a ticket into in_progress."}
@@ -347,9 +347,10 @@
                   {:name :if-unassigned :coerce :boolean
                    :desc "Only transition when the ticket has no assignee; otherwise write nothing and exit 1 (already_assigned)."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the open-children gate (no --summary required at start)."}
+                   :desc "Bypass the open-children and required-documents gates (no --summary required at start)."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope instead of the saved path."}]
-    :notes       ["--if-unassigned is the conditional claim: the assignee is read before any gate and before the write, so a losing claim leaves the file untouched."
+    :notes       ["A project may require documents before this transition: .knot.edn's :required-docs names the doc types a ticket must own, and the start is refused until they are attached. --force overrides."
+                  "--if-unassigned is the conditional claim: the assignee is read before any gate and before the write, so a losing claim leaves the file untouched."
                   "Any existing assignee loses the claim, including your own — two agents polling the same frontier cannot both win a ticket."
                   "Under --json the failure is {ok:false, error:{code:\"already_assigned\", current_assignee:\"<holder>\"}}; without it the message goes to stderr."]
     :examples    [{:cmd "knot start kno-01abc"
@@ -368,7 +369,7 @@
                   {:name :external-ref :coerce []
                    :desc "Record an external reference alongside the ones already on the ticket (repeatable; idempotent). Never replaces. A blank value is rejected."}
                   {:name :force :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates; requires --summary when a gate fires. With no gate to bypass, --force is a no-op."}
+                   :desc "Bypass the acceptance, open-children and required-documents gates; requires --summary when a gate fires. With no gate to bypass, --force is a no-op."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope (with meta.archived_to) instead of the saved path."}]
     :notes       ["--external-ref appends here, unlike `knot update --external-ref`, which replaces the whole list. The status change, the --summary note and the ref land in one write."
                   "git:<sha> is the convention for the commit that closed the ticket. knot stores the string verbatim: it does not parse it, verify the sha, or read git HEAD for you."
@@ -737,7 +738,100 @@
                   {:cmd "knot skill install --json"
                    :note "Same install, JSON envelope with the target dir and file list."}]
     :exit-codes  [{:code 0 :when "files written"}
-                  {:code 1 :when "no project found (and no <dir> given), or a write failed"}]}})
+                  {:code 1 :when "no project found (and no <dir> given), or a write failed"}]}
+
+   :document
+   {:group       :documents
+    :description "Manage the documents attached to a ticket."
+    :args        []
+    :restrict?   true
+    :flags       []
+    :subcommands [:document/add :document/show :document/put :document/rm :document/ls]
+    :notes       ["A document is a whole markdown file owned by one ticket, stored under .knot.edn's :docs-dir (default <tickets-dir>/docs) in a directory named for the owning ticket. Its type must be one of :doc-types."
+                  "The command is `document`; no `doc` or `docs` alias exists."]
+    :examples    [{:cmd "knot document ls kno-01abc"
+                   :note "List the documents a ticket owns."}]
+    :exit-codes  [{:code 1 :when "no subcommand given — `document` is a group; run a subcommand"}]}
+
+   :document/add
+   {:group       :documents
+    :description "Attach a new document to a ticket (text arg, stdin, or editor)."
+    :args        [{:name "ticket" :required true}
+                  {:name "text" :variadic true}]
+    :restrict?   true
+    :flags       [{:name :title :desc "Document title. Also derives the filename slug."}
+                  {:name :type  :desc "Document type; must be one of .knot.edn's :doc-types. Defaults to :default-doc-type."}
+                  {:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope (the new document's metadata) instead of the saved path."}]
+    :notes       ["The body arrives by the same layered input as a note: the text argument wins; otherwise stdin when stdin is not a tty; otherwise $VISUAL/$EDITOR."
+                  "A blank body is a valid empty document, not a cancellation — unlike a note, a document has somewhere to live."
+                  "A document body is opaque: the ## heading rules that guard ticket bodies do not apply to it."]
+    :examples    [{:cmd "knot document add kno-01abc --title \"Rollout plan\" --type plan \"step one\""
+                   :note "Attach a plan with an inline body."}
+                  {:cmd "knot document add kno-01abc --title \"Design\" < design.md"
+                   :note "Attach a document from a file on stdin."}]
+    :exit-codes  [{:code 0 :when "document written"}
+                  {:code 1 :when "no ticket matches, or the type is not in :doc-types"}]}
+
+   :document/show
+   {:group       :documents
+    :description "Print one document, body included."
+    :args        [{:name "selector" :required true}]
+    :restrict?   true
+    :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope carrying the metadata and the body."}]
+    :notes       ["A selector is a document id, a unique prefix of one, or — with --ticket — an exact title. An ambiguous selector is refused with the candidates named, never resolved to a first match."]
+    :examples    [{:cmd "knot document show kno-d01abc"
+                   :note "Print a document by id."}
+                  {:cmd "knot document show \"Rollout plan\" --ticket kno-01abc"
+                   :note "Print a document by title within its ticket."}]
+    :exit-codes  [{:code 0 :when "document printed"}
+                  {:code 1 :when "no document matches, or the selector is ambiguous"}]}
+
+   :document/put
+   {:group       :documents
+    :description "Replace a document's title, type and body together."
+    :args        [{:name "selector" :required true}
+                  {:name "text" :variadic true}]
+    :restrict?   true
+    :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
+                  {:name :title :desc "Replacement title. Required — the replace is total."}
+                  {:name :type  :desc "Replacement type. Required — the replace is total."}
+                  {:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope (the replaced document's metadata) instead of the saved path."}]
+    :notes       ["This is a replace, not a merge: --title and --type are both required, and the body is replaced by whatever the layered input resolves to. Nothing is carried over from the stored document except its id, its owning ticket and its creation timestamp."
+                  "A selector matching no document is refused. put never creates — that is `knot document add`."
+                  "A retitle does not rename the file; the filename slug is recovered from the existing file, exactly as it is for tickets."]
+    :examples    [{:cmd "knot document put kno-d01abc --title \"Rollout plan v2\" --type plan \"new body\""
+                   :note "Replace the whole document."}]
+    :exit-codes  [{:code 0 :when "document replaced"}
+                  {:code 1 :when "no document matches, the selector is ambiguous, --title/--type is missing, or the type is not in :doc-types"}]}
+
+   :document/rm
+   {:group       :documents
+    :description "Delete one document."
+    :args        [{:name "selector" :required true}]
+    :restrict?   true
+    :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
+                  {:name :json :coerce :boolean :desc "Emit a JSON envelope ({deleted: {id, path}}) instead of the removed path."}]
+    :notes       ["An ambiguous selector is refused instead of deleting a first match. Git is the undo path."]
+    :examples    [{:cmd "knot document rm kno-d01abc"
+                   :note "Delete a document by id."}]
+    :exit-codes  [{:code 0 :when "document removed"}
+                  {:code 1 :when "no document matches, or the selector is ambiguous"}]}
+
+   :document/ls
+   {:group       :documents
+    :description "List the documents a ticket owns."
+    :args        [{:name "ticket" :required true}]
+    :restrict?   true
+    :flags       [{:name :json :coerce :boolean
+                   :desc "Emit a JSON envelope ({ticket, documents}) instead of the text table."}]
+    :notes       ["A ticket owning no documents lists an empty set and exits 0: absent and empty are the same answer."]
+    :examples    [{:cmd "knot document ls kno-01abc"
+                   :note "List one ticket's documents."}]
+    :exit-codes  [{:code 0 :when "documents listed (possibly none)"}
+                  {:code 1 :when "no ticket matches"}]}})
 
 (def ^:private group-order
   "Canonical group order and display headers. The renderer walks this
@@ -746,7 +840,8 @@
    [:lifecycle "Lifecycle"]
    [:graph     "Graph"]
    [:listing   "Listing"]
-   [:notes     "Notes"]])
+   [:notes     "Notes"]
+   [:documents "Documents"]])
 
 (def command-order
   "Top-level command order for `top-level-help-text`. Subcommand keys
@@ -756,7 +851,8 @@
    :create :start :status :close :reopen :delete
    :dep :undep :link :unlink
    :list :show :ready :blocked :closed
-   :add-note :edit :update])
+   :add-note :edit :update
+   :document])
 
 (defn- cmd-line-label
   "Render a top-level/subcommand line label: cmd-name + required positionals."

@@ -8,6 +8,7 @@
             [clojure.string :as str]
             [knot.acceptance :as acceptance]
             [knot.config :as config]
+            [knot.doc :as doc]
             [knot.query :as query]
             [knot.store :as store]
             [knot.ticket :as ticket]
@@ -228,12 +229,15 @@
    Criteria` is left to `:legacy_acceptance_section`: that one has an
    automatic fix (`migrate-ac`) and these do not — the prose under a
    graph heading is usually narrative, so only a human can decide what
-   survives."
+   survives. `Documents` is left to `:legacy_documents_section` for the
+   opposite reason: it became reserved after projects could already have
+   written one, so it warns under its own code with its own remedy rather
+   than under the code for a heading that was always refused."
   [_ctx ticket]
   (let [{:keys [id]} (:frontmatter ticket)]
     (when id
       (for [heading (ticket/reserved-sections (:body ticket))
-            :when   (not= heading "Acceptance Criteria")]
+            :when   (not (#{"Acceptance Criteria" "Documents"} heading))]
         {:severity :warning
          :code     :reserved_section
          :ids      [id]
@@ -259,13 +263,32 @@
                         "keep one copy with `knot update --body` — "
                         "git is the undo path")}))))
 
+(defn- check-legacy-documents-section
+  "Per-ticket warning: a body that already carried a `## Documents`
+   heading before the heading was reserved. Mirrors
+   `check-legacy-acceptance` — warning not error, its own code, the
+   remedy named, self-clearing once the heading is gone. Erroring would
+   break `check` on upgrade for projects that did nothing wrong. The
+   remedy is manual: knot ships no conversion command."
+  [_ctx ticket]
+  (let [{:keys [id]} (:frontmatter ticket)]
+    (when (and id (some #{"Documents"} (ticket/reserved-sections (:body ticket))))
+      [{:severity :warning
+        :code     :legacy_documents_section
+        :ids      [id]
+        :message  (str "legacy '## Documents' body section found; knot show "
+                       "now renders that section from the document corpus — "
+                       "remove the heading and re-add its content with "
+                       "`knot document add`")}])))
+
 (def ^:private per-ticket-validators
   "Functions of `[ctx ticket]` -> seq of issues. `ctx` carries
    `:config` (merged) and `:all-ids` (set of every known id)."
   [check-status check-type check-mode check-priority
    check-required-fields check-terminal-outside-archive
    check-unknown-id check-acceptance check-legacy-acceptance
-   check-reserved-sections check-duplicate-sections])
+   check-reserved-sections check-duplicate-sections
+   check-legacy-documents-section])
 
 (defn- per-ticket-issues
   "Run every per-ticket validator against every ticket. When `ids-filter`
@@ -280,6 +303,104 @@
                    (when (keep? t)
                      (mapcat #(% ctx t) per-ticket-validators)))
                  tickets))))
+
+(defn- check-doc-type
+  "Per-document: `:type` must appear in `:doc-types`. Deliberately not
+   `check-enum` — that reads a scalar field on a TICKET, and its
+   `(seq allowed)` guard skips validation entirely on an empty list, which
+   is exactly the hole `:doc-types`' default exists to close. Here an empty
+   allow-list rejects every type instead."
+  [{:keys [config]} doc]
+  (let [{:keys [id type]} (:frontmatter doc)
+        allowed (:doc-types config)]
+    (when-not (contains? (set allowed) type)
+      [{:severity :error
+        :code     :invalid_doc_type
+        :ids      [id]
+        :path     (:path doc)
+        :message  (str "document " (pr-str id) " has type " (pr-str type)
+                       ", not one of " (pr-str (vec allowed)))}])))
+
+(defn- check-doc-placement
+  "Per-document, in precedence order. The agreement check runs first: where
+   the owner directory and the authoritative `:ticket` field disagree the
+   answer is misplacement, whatever either id resolves to. Only when they
+   agree can an unresolvable id mean an orphan. Reversing this yields two
+   issues with contradictory repairs for one file."
+  [{:keys [all-ids]} doc]
+  (let [{:keys [id ticket]} (:frontmatter doc)
+        dir (:owner-dir doc)]
+    (cond
+      (not= dir ticket)
+      [{:severity :error
+        :code     :doc_directory_mismatch
+        :ids      [id]
+        :path     (:path doc)
+        ;; A document with NO :ticket field lands here, not in the
+        ;; orphan branch, which is correct — but `(pr-str nil)` renders as
+        ;; the literal "nil", so say "has no ticket field" instead.
+        :message  (str "document " (pr-str id) " sits under " (pr-str dir)
+                       (if (nil? ticket)
+                         " but has no ticket field"
+                         (str " but its ticket field names " (pr-str ticket))))}]
+
+      (not (contains? all-ids ticket))
+      [{:severity :error
+        :code     :doc_unknown_ticket
+        :ids      [id]
+        :path     (:path doc)
+        :message  (str "document " (pr-str id) " names ticket " (pr-str ticket)
+                       ", which resolves to no ticket")}])))
+
+(def ^:private per-document-validators
+  "Functions of `[ctx doc]` -> seq of issues, run over every document."
+  [check-doc-type check-doc-placement])
+
+(defn- check-duplicate-doc-ids
+  "Whole-corpus: two files claiming one document id. The backstop for the
+   ambiguity resolver's worst input — a hand-copy, or a merge conflict
+   resolved by keeping both sides."
+  [docs]
+  (->> docs
+       (group-by #(get-in % [:frontmatter :id]))
+       (keep (fn [[id group]]
+               (when (< 1 (count group))
+                 {:severity :error
+                  :code     :duplicate_doc_id
+                  :ids      [id]
+                  :message  (str "document id " (pr-str id) " is claimed by "
+                                 (count group) " files: "
+                                 (str/join ", " (sort (map :path group))))})))
+       vec))
+
+(defn- per-document-issues
+  "Run every per-document validator against every document, plus the one
+   whole-corpus arm. Documents are their own tier: `:ids-filter` narrows the
+   per-ticket tier and leaves globals alone, and this sits with the globals
+   — a document fault is reported wherever it is, so `knot check <id>`
+   cannot hide a misfiled document by not naming its directory."
+  [ctx docs]
+  (concat (mapcat (fn [d] (mapcat #(% ctx d) per-document-validators)) docs)
+          (check-duplicate-doc-ids docs)))
+
+(defn- stranded-docs-issues
+  "Whole-project warning: documents exist at the default corpus location
+   while `:docs-dir` points somewhere that holds none. A warning rather
+   than an error because nothing is corrupt and the repair is a judgment
+   call: move the files, or fix the key."
+  [{:keys [count root]}]
+  (when (and count (pos? count))
+    [{:severity :warning
+      :code     :unreachable_documents
+      :ids      []
+      :path     root
+      :message  (if (= 1 count)
+                  (str "1 document at " root " is outside the configured"
+                       " :docs-dir, so no knot command can see it; move it"
+                       " or correct the key")
+                  (str count " documents at " root " are outside the"
+                       " configured :docs-dir, so no knot command can see"
+                       " them; move them or correct the key"))}]))
 
 (defn- severity-rank
   "Sort helper: 0 for :error, 1 for :warning. errors first. Unknown
@@ -424,34 +545,97 @@
        :error {:path    (str path)
                :message (or (.getMessage e) (.toString e))}})))
 
+(defn- try-load-doc
+  "Tolerantly load one document file. Annotates with the path and with the
+   owner directory the file was found in — the placement check compares
+   that directory against the `:ticket` the file itself claims, so the
+   loader is the only place it can be captured."
+  [path]
+  (try
+    (let [parsed (ticket/parse (slurp (str path)))]
+      {:ok? true
+       :doc (assoc parsed
+                   :path      (str path)
+                   :owner-dir (str (fs/file-name (fs/parent path))))})
+    (catch Exception e
+      {:ok?   false
+       :error {:path    (str path)
+               :message (or (.getMessage e) (.toString e))}})))
+
 (defn scan
   "Tolerant per-file loader. Walks `<project-root>/<tickets-dir>` and its
    `archive/` subdirectory, parses every `*.md` file individually, and
-   collects successes and parse failures separately. Returns
-   `{:tickets [...] :parse-errors [...] :scanned {:live n :archive n}}`.
+   collects successes and parse failures separately. Documents under
+   `docs/<owning-ticket-id>/` are collected into their own slot by a third
+   glob: they are markdown with frontmatter too, and without a separate arm
+   every one of them would be validated as a malformed ticket.
+
+   A document filename found in the ticket directory or in `archive/` is
+   routed to the document slot too, by filename and not by location.
+   It is a misplaced document, and diagnosing it as a ticket would report
+   a missing status and an out-of-list type — two issues whose repair is
+   to add ticket fields to a file that is not a ticket. Classified as a
+   document it draws one issue naming the misplacement, which is the
+   repair the operator actually needs.
+
+   `:scanned` keeps counting by directory, not by classification: `:live`
+   and `:archive` are what those two globs found, misplaced documents
+   included, and `:docs` is the `docs/` tree alone. A count of files
+   attempted is what an operator can check against `ls`. Returns
+   `{:tickets [...] :documents [...] :parse-errors [...]
+     :scanned {:live n :archive n :docs n}}`. `docs-root` is the resolved
+   document corpus root, which `.knot.edn`'s `:docs-dir` may place outside
+   the tickets directory entirely.
    `:scanned` counts files attempted (parse failures included)."
-  [project-root tickets-dir]
+  [project-root tickets-dir docs-root]
   (let [live      (fs/path project-root tickets-dir)
         archive   (fs/path project-root tickets-dir store/archive-subdir)
-        live-glob    (when (fs/directory? live)    (vec (fs/glob live    "*.md")))
-        archive-glob (when (fs/directory? archive) (vec (fs/glob archive "*.md")))
+        docs-root (fs/path docs-root)
+        live-glob    (when (fs/directory? live)      (vec (fs/glob live    "*.md")))
+        archive-glob (when (fs/directory? archive)   (vec (fs/glob archive "*.md")))
+        docs-glob    (when (fs/directory? docs-root) (vec (fs/glob docs-root "*/*.md")))
+        ;; `doc/id-of` returns nil for a ticket filename: a ticket id is
+        ;; `<prefix>-01…` and the pattern requires `-d` straight after the
+        ;; prefix, which `[a-z0-9]+` cannot cross a hyphen to reach.
+        doc-file?    (fn [p] (some? (doc/id-of (str (fs/file-name p)))))
+        misplaced    (vec (filter doc-file? (concat (or live-glob [])
+                                                    (or archive-glob []))))
         load-each (fn [paths archived?]
-                    (mapv #(try-load-file % archived?) paths))
+                    (mapv #(try-load-file % archived?)
+                          (remove doc-file? paths)))
         results   (concat (load-each (or live-glob []) false)
-                          (load-each (or archive-glob []) true))]
+                          (load-each (or archive-glob []) true))
+        doc-results (mapv try-load-doc (concat (or docs-glob []) misplaced))
+        ;; A `:docs-dir` that points somewhere empty makes every document
+        ;; surface honestly report nothing. Without this, `check` agrees
+        ;; with them and calls the project healthy while the corpus sits
+        ;; where nothing will look again. Only the default location is
+        ;; probed: it is the one place documents can have been written
+        ;; before the key was set or mistyped.
+        default-root (fs/path project-root tickets-dir store/docs-subdir)
+        stranded     (when (and (not= (str default-root) (str docs-root))
+                                (empty? docs-glob)
+                                (fs/directory? default-root))
+                       (vec (fs/glob default-root "*/*.md")))]
     {:tickets      (vec (keep #(when (:ok? %) (:ticket %)) results))
-     :parse-errors (vec (keep #(when-not (:ok? %) (:error %)) results))
+     :documents    (vec (keep #(when (:ok? %) (:doc %)) doc-results))
+     :stranded-docs {:count (count stranded) :root (str default-root)}
+     :parse-errors (vec (concat (keep #(when-not (:ok? %) (:error %)) results)
+                                (keep #(when-not (:ok? %) (:error %)) doc-results)))
      :scanned      {:live    (count (or live-glob []))
-                    :archive (count (or archive-glob []))}}))
+                    :archive (count (or archive-glob []))
+                    :docs    (count (or docs-glob []))}}))
 
 (defn run
   "Run integrity checks against an already-loaded project view.
    Inputs (all keys optional except `:tickets`):
      :tickets       — vector of parsed `{:frontmatter ... :body ... :path ...
                       :archived? <bool>}` maps
+     :documents     — vector of parsed `{:frontmatter ... :body ... :path ...
+                      :owner-dir <s>}` maps, one per document file
      :parse-errors  — vector of `{:path <s> :message <s?>}` from the loader
      :config        — merged config with `:statuses` etc.
-     :scanned       — `{:live <n> :archive <n>}` to pass through
+     :scanned       — `{:live <n> :archive <n> :docs <n>}` to pass through
      :ids-filter    — set of ids to narrow the per-ticket tier; globals
                       always run on the full ticket set
      :skill         — `{:path :text}` of the project's installed SKILL.md,
@@ -460,15 +644,19 @@
                       `version/version`
    Returns `{:issues [...] :scanned {...}}`. Issues are always vectors,
    sorted: severity desc, then code, first-id, message ascending."
-  [{:keys [tickets parse-errors config scanned ids-filter skill] :as input}]
+  [{:keys [tickets documents parse-errors config scanned ids-filter skill
+           stranded-docs] :as input}]
   (let [tickets* (or tickets [])
+        docs*    (or documents [])
         ctx      {:config     (or config {})
                   :all-ids    (collect-all-ids tickets*)
                   :ids-filter ids-filter}
         issues   (concat (cycle-issues tickets*)
                          (active-status-issues (or config {}))
                          (skill-stale-issues skill (:version input version/version))
+                         (stranded-docs-issues stranded-docs)
+                         (per-document-issues ctx docs*)
                          (per-ticket-issues ctx tickets*)
                          (parse-error-issues parse-errors))]
     {:issues  (vec (sort-by issue-sort-key issues))
-     :scanned (or scanned {:live 0 :archive 0})}))
+     :scanned (merge {:live 0 :archive 0 :docs 0} scanned)}))

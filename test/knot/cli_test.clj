@@ -4,6 +4,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [knot.check :as check]
             [knot.cli :as cli]
             [knot.config :as config]
             [knot.git :as git]
@@ -23,6 +24,12 @@
           :prefix       "kno"
           :now          "2026-04-28T10:00:00Z"
           :assignee     nil}))
+
+(defn- droot
+  "The default document corpus root for a sandbox project. `:docs-dir` is
+   nil in these tests, so this is what `store/docs-root` resolves to."
+  [tmp]
+  (store/docs-root tmp ".tickets" nil))
 
 (deftest create-cmd-test
   (testing "create with a title writes a ticket file under .tickets/"
@@ -1882,9 +1889,15 @@
           (doseq [k [":tickets-dir" ":prefix" ":default-assignee"
                      ":default-type" ":default-priority" ":statuses"
                      ":terminal-statuses" ":active-status"
-                     ":types" ":modes" ":default-mode" ":skill-dir"]]
+                     ":types" ":modes" ":default-mode" ":skill-dir"
+                     ":doc-types" ":default-doc-type"]]
             (is (str/includes? content k)
                 (str "stub should mention " k)))
+          ;; The stub is the only destination with no structural guard, so
+          ;; pin it against the registry, not against this list.
+          (doseq [k config/known-keys]
+            (is (str/includes? content (str k))
+                (str "stub should mention every known key, missing " k)))
           ;; the stub should be self-documenting (contain comments)
           (is (str/includes? content ";")
               "stub should include EDN line comments")))))
@@ -2561,7 +2574,7 @@ Restart the daemon.
         (is (= 1   (:schema_version parsed)))
         (is (true? (:ok parsed)))
         (is (= [] (get-in parsed [:data :issues])))
-        (is (= {:live 1 :archive 0} (get-in parsed [:data :scanned])))))))
+        (is (= {:live 1 :archive 0 :docs 0} (get-in parsed [:data :scanned])))))))
 
 (deftest check-cmd-json-errors-test
   (testing "check-cmd --json with errors: ok:false coexists with :data, exit 1"
@@ -6263,3 +6276,672 @@ Restart the daemon.
       (let [data (:data (cheshire/parse-string (cli/prime-cmd (prime-ctx tmp) {:json? true}) true))]
         (is (false? (:skill_stale data)))
         (is (nil? (:skill_version data)))))))
+
+(defn- mk-owner!
+  "Create a ticket and return its full id — documents need a real owner."
+  [tmp title]
+  (get-in (ticket/parse (slurp (cli/create-cmd (ctx tmp) {:title title})))
+          [:frontmatter :id]))
+
+(defn- doc-id
+  "The document id recorded inside the file at `path`."
+  [path]
+  (get-in (ticket/parse (slurp path)) [:frontmatter :id]))
+
+(defn- create-doc
+  [tmp owner title type body]
+  (cli/document-add-cmd (ctx tmp) {:ticket owner :title title :type type :text body}))
+
+(def ^:private adversarial-doc-body
+  "Everything the frontmatter envelope could mangle: a fence-looking line, a
+   heading knot reserves on a ticket, and trailing whitespace."
+  "line one\n\n---\n\n## Blockers\n\ntrailing  \n")
+
+(deftest document-add-cmd-test
+  (testing "add writes under docs/<owner-id>/ with the document's own id leading"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "A design note" "spec" "body")
+            fm    (:frontmatter (ticket/parse (slurp p)))]
+        (is (fs/exists? p))
+        (is (str/includes? p (str (fs/path ".tickets" "docs" owner))))
+        (is (str/ends-with? p (str (:id fm) "--a-design-note.md")))
+        (is (= owner (:ticket fm)))
+        (is (= "A design note" (:title fm)))
+        (is (= "spec" (:type fm)))
+        (is (= "2026-04-28T10:00:00Z" (:created fm)))
+        (is (= "2026-04-28T10:00:00Z" (:updated fm))))))
+
+  (testing "an omitted type falls back to :default-doc-type"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (cli/document-add-cmd (ctx tmp) {:ticket owner :title "T" :text "b"})]
+        (is (= "other" (get-in (ticket/parse (slurp p)) [:frontmatter :type]))))))
+
+  (testing "a partial owning-ticket id resolves to the full one"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (cli/document-add-cmd (ctx tmp) {:ticket (subs owner 0 9)
+                                                   :title "T" :type "spec" :text "b"})]
+        (is (= owner (get-in (ticket/parse (slurp p)) [:frontmatter :ticket]))))))
+
+  (testing "an owning ticket that resolves to nothing is refused, not filed as an orphan"
+    (with-tmp tmp
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (cli/document-add-cmd (ctx tmp) {:ticket "kno-01nope" :title "T"
+                                                    :type "spec" :text "b"})))
+      (is (empty? (store/load-all-docs (droot tmp))))))
+
+  (testing "a type outside the allow-list is refused before anything is written"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            e     (try (create-doc tmp owner "T" "wat" "b") nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :invalid-doc-type (:kind (ex-data e))))
+        (is (= "wat" (:value (ex-data e))))
+        (is (empty? (store/load-all-docs (droot tmp)))))))
+
+  (testing "--json returns the document envelope instead of the path"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            d     (cheshire/parse-string
+                   (cli/document-add-cmd (ctx tmp) {:ticket owner :title "T" :type "spec"
+                                                    :text "b" :json? true})
+                   true)]
+        (is (true? (:ok d)))
+        (is (= owner (get-in d [:data :ticket])))
+        (is (= "spec" (get-in d [:data :type])))))))
+
+(deftest document-body-input-layers-test
+  (testing "a body arrives by argument, by stdin and by injected editor"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")]
+        (doseq [opts [{:text adversarial-doc-body}
+                      {:stdin-tty? false :stdin-reader-fn (constantly adversarial-doc-body)}
+                      {:stdin-tty? true :editor-fn (constantly adversarial-doc-body)}]]
+          (let [p (cli/document-add-cmd (ctx tmp)
+                                        (merge {:ticket owner :title "T" :type "spec"} opts))]
+            (is (= adversarial-doc-body (:body (ticket/parse (slurp p))))
+                (str "body must survive verbatim via " (pr-str (keys opts)))))))))
+
+  (testing "a document body may carry a heading a ticket body would refuse"
+    ;; The reserved-heading rule guards ticket bodies, where `show` renders
+    ;; those sections from the graph. A document is a whole file with no
+    ;; derived sections, so its body is opaque.
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "T" "spec" "## Blockers\n\nprose\n")]
+        (is (str/includes? (:body (ticket/parse (slurp p))) "## Blockers")))))
+
+  (testing "a blank body is a valid empty document, not a cancellation"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "T" "spec" "")]
+        (is (fs/exists? p))
+        (is (= "" (:body (ticket/parse (slurp p)))))))))
+
+(deftest document-put-refuses-missing-target-test
+  (testing "replace never upserts: a mistyped selector must not create a second document"
+    (with-tmp tmp
+      (let [e (try (cli/document-put-cmd (ctx tmp) {:id "kno-dnope" :title "T"
+                                                    :type "spec" :text "b"})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :doc-not-found (:kind (ex-data e))))
+        (is (empty? (store/load-all-docs (droot tmp)))))))
+
+  (testing "replace is total: title and type are required, never merged from the stored doc"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "Old" "spec" "one")]
+        (doseq [missing [{:type "spec"} {:title "New"}]]
+          (let [e (try (cli/document-put-cmd (ctx tmp)
+                                             (merge {:id (doc-id p) :text "two"} missing))
+                       nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+            (is (= :invalid-argument (:kind (ex-data e))))))
+        (is (= "one" (:body (ticket/parse (slurp p))))
+            "a refused replace must leave the stored document alone"))))
+
+  (testing "a type outside the allow-list is refused"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "Old" "spec" "one")
+            e     (try (cli/document-put-cmd (ctx tmp) {:id (doc-id p) :title "New"
+                                                        :type "wat" :text "two"})
+                       nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :invalid-doc-type (:kind (ex-data e))))
+        (is (= "one" (:body (ticket/parse (slurp p)))))))))
+
+(deftest document-put-preserves-created-test
+  (testing "replace is total over fields but preserves the creation stamp"
+    (with-tmp tmp
+      (let [owner   (mk-owner! tmp "Owner")
+            p       (create-doc tmp owner "Old" "spec" "one")
+            created (get-in (ticket/parse (slurp p)) [:frontmatter :created])
+            _       (cli/document-put-cmd (assoc (ctx tmp) :now "2026-05-01T00:00:00Z")
+                                          {:id (doc-id p) :title "New"
+                                           :type "plan" :text "two"})
+            after   (:frontmatter (ticket/parse (slurp p)))]
+        (is (= created (:created after)))
+        (is (= "2026-05-01T00:00:00Z" (:updated after)))
+        (is (= "New" (:title after)))
+        (is (= "plan" (:type after)))
+        (is (= "two" (:body (ticket/parse (slurp p))))))))
+
+  (testing "a retitle does not rename the file and leaves no second document"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "Old" "spec" "one")]
+        (cli/document-put-cmd (ctx tmp) {:id (doc-id p) :title "Completely different"
+                                         :type "spec" :text "one"})
+        (is (fs/exists? p))
+        (is (= 1 (count (store/load-docs-for (droot tmp) owner))))))))
+
+(deftest document-selector-test
+  (testing "a document resolves by a unique id prefix, and by owner-plus-title"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "Design" "spec" "one")
+            did   (doc-id p)]
+        (is (= did (get-in (cheshire/parse-string
+                            (cli/document-show-cmd (ctx tmp) {:id (subs did 0 8) :json? true})
+                            true)
+                           [:data :id])))
+        (is (= did (get-in (cheshire/parse-string
+                            (cli/document-show-cmd (ctx tmp) {:id "Design" :ticket owner
+                                                              :json? true})
+                            true)
+                           [:data :id]))))))
+
+  (testing "an ambiguous selector is refused with its candidates named"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            a     (create-doc tmp owner "Design" "spec" "one")
+            b     (create-doc tmp owner "Design" "plan" "two")
+            e     (try (cli/document-show-cmd (ctx tmp) {:id "Design" :ticket owner}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :ambiguous-doc (:kind (ex-data e))))
+        (is (= (sort [(doc-id a) (doc-id b)]) (sort (:candidates (ex-data e)))))))))
+
+(deftest document-show-cmd-test
+  (testing "text mode renders the document file, body included"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "T" "spec" adversarial-doc-body)
+            out   (cli/document-show-cmd (ctx tmp) {:id (doc-id p)})]
+        (is (= (slurp p) out)))))
+
+  (testing "--json carries the body alongside the metadata"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "T" "spec" "the body")
+            d     (cheshire/parse-string
+                   (cli/document-show-cmd (ctx tmp) {:id (doc-id p) :json? true}) true)]
+        (is (= "the body" (get-in d [:data :body])))
+        (is (= owner (get-in d [:data :ticket])))))))
+
+(deftest document-rm-cmd-test
+  (testing "delete removes exactly one and leaves siblings byte-identical"
+    (with-tmp tmp
+      (let [owner   (mk-owner! tmp "Owner")
+            a       (create-doc tmp owner "A" "spec" "a")
+            b       (create-doc tmp owner "B" "spec" "b")
+            a-bytes (slurp a)]
+        (cli/document-rm-cmd (ctx tmp) {:id (doc-id b)})
+        (is (not (fs/exists? b)))
+        (is (fs/exists? a))
+        (is (= a-bytes (slurp a))))))
+
+  (testing "a selector matching nothing is refused and removes nothing"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            a     (create-doc tmp owner "A" "spec" "a")
+            e     (try (cli/document-rm-cmd (ctx tmp) {:id "kno-dnope"}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :doc-not-found (:kind (ex-data e))))
+        (is (fs/exists? a)))))
+
+  (testing "--json reports the removed id and path"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            a     (create-doc tmp owner "A" "spec" "a")
+            did   (doc-id a)
+            d     (cheshire/parse-string
+                   (cli/document-rm-cmd (ctx tmp) {:id did :json? true}) true)]
+        (is (= did (get-in d [:data :deleted :id])))
+        (is (str/ends-with? (get-in d [:data :deleted :path]) ".md"))
+        (is (not (fs/exists? a)))))))
+
+(deftest document-ls-cmd-test
+  (testing "ls lists one owner's documents, ordered by filename"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            other (mk-owner! tmp "Other")
+            _     (create-doc tmp owner "Bravo" "spec" "b")
+            _     (create-doc tmp owner "Alpha" "plan" "a")
+            _     (create-doc tmp other "Gamma" "spec" "g")
+            d     (cheshire/parse-string
+                   (cli/document-ls-cmd (ctx tmp) {:ticket owner :json? true}) true)]
+        (is (= owner (get-in d [:data :ticket])))
+        (is (= ["Bravo" "Alpha"] (mapv :title (get-in d [:data :documents])))
+            "filename order — the id leads, and ids are minted monotonically")
+        (is (not-any? #{"Gamma"} (map :title (get-in d [:data :documents])))))))
+
+  (testing "a ticket with no documents lists an empty array, not an error"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            d     (cheshire/parse-string
+                   (cli/document-ls-cmd (ctx tmp) {:ticket owner :json? true}) true)]
+        (is (= [] (get-in d [:data :documents])))))))
+
+(deftest delete-refuses-while-documents-exist-test
+  (testing "a bare delete refuses and enumerates the owned documents"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "A" "spec" "a")
+            e     (try (cli/delete-cmd (ctx tmp) {:id owner}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))
+            data  (ex-data e)]
+        (is (= :has-incoming-refs (:kind data)))
+        (is (= [(doc-id p)] (:documents data)))
+        (is (fs/exists? p) "nothing is removed by a refused delete")
+        (is (some? (store/find-existing-path tmp ".tickets" owner))))))
+
+  (testing "the refusal message names the documents, and its verb agrees"
+    ;; Nothing pinned this sentence before, which is how `1 X prevent` shipped.
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            msg   (fn [] (try (cli/delete-cmd (ctx tmp) {:id owner}) nil
+                              (catch clojure.lang.ExceptionInfo ex (.getMessage ex))))]
+        (create-doc tmp owner "A" "spec" "a")
+        (is (= (str "1 attached document prevents deletion of " owner) (msg))
+            "a single singular subject takes a singular verb")
+        (create-doc tmp owner "B" "spec" "b")
+        (is (= (str "2 attached documents prevent deletion of " owner) (msg))))))
+
+  (testing "referrers and documents combine into one compound subject"
+    (with-tmp tmp
+      (let [owner    (mk-owner! tmp "Owner")
+            referrer (mk-owner! tmp "Referrer")]
+        (create-doc tmp owner "A" "spec" "a")
+        (cli/dep-cmd (ctx tmp) {:from referrer :to owner})
+        (let [e (try (cli/delete-cmd (ctx tmp) {:id owner}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= (str "1 incoming reference and 1 attached document prevent deletion of " owner)
+                 (.getMessage e))
+              "two clauses are a compound subject and take the plural whatever the counts")))))
+
+  (testing "a ticket owning no documents still deletes cleanly"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            r     (cli/delete-cmd (ctx tmp) {:id owner})]
+        (is (nil? (store/find-existing-path tmp ".tickets" owner)))
+        (is (= [] (:documents r)))))))
+
+(deftest cascade-removes-documents-after-the-ticket-test
+  (testing "an interrupted cascade leaves reportable orphans, never documents under a live ticket"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            _     (create-doc tmp owner "A" "spec" "a")
+            calls (atom 0)]
+        (try
+          (with-redefs [store/delete-doc!
+                        (fn [& _args]
+                          (swap! calls inc)
+                          (throw (ex-info "simulated document removal failure"
+                                          {:kind ::simulated})))]
+            (cli/delete-cmd (ctx tmp) {:id owner :cascade? true})
+            (is false "delete-cmd should re-throw on document removal failure"))
+          (catch clojure.lang.ExceptionInfo e
+            (is (= ::simulated (:kind (ex-data e))))))
+        (is (nil? (store/find-existing-path tmp ".tickets" owner))
+            "the ticket is already gone — documents are removed last")
+        (is (= 1 @calls)
+            "the document-removal path was entered exactly once, so ::simulated came from there")
+        (is (seq (store/load-all-docs (droot tmp)))
+            "the documents survive the interrupted cascade")
+        ;; AC-20's second half. Reportability is the whole justification in
+        ;; ADR 0022 — documents-last is acceptable BECAUSE the intermediate
+        ;; state is reportable — so assert the thing the ADR rests on.
+        (let [scanned (check/scan tmp ".tickets" (droot tmp))
+              issues  (:issues (check/run (assoc scanned :config (config/defaults))))]
+          (is (some #(= :doc_unknown_ticket (:code %)) issues)
+              "the orphaned documents are reported under the orphan code")))))
+
+  (testing "a successful cascade removes the ticket and then its documents"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            a     (create-doc tmp owner "A" "spec" "a")
+            b     (create-doc tmp owner "B" "spec" "b")
+            ids   (sort [(doc-id a) (doc-id b)])
+            r     (cli/delete-cmd (ctx tmp) {:id owner :cascade? true})]
+        (is (nil? (store/find-existing-path tmp ".tickets" owner)))
+        (is (not (fs/exists? a)))
+        (is (not (fs/exists? b)))
+        (is (= ids (sort (:documents r))))
+        (is (empty? (store/load-all-docs (droot tmp)))))))
+
+  (testing "--json reports the removed documents"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            _     (create-doc tmp owner "A" "spec" "a")
+            d     (cheshire/parse-string
+                   (cli/delete-cmd (ctx tmp) {:id owner :cascade? true :json? true}) true)]
+        (is (= 1 (count (get-in d [:data :documents]))))
+        (is (= owner (get-in d [:data :deleted :id])))))))
+
+(deftest document-rm-refuses-an-ambiguous-selector-test
+  ;; AC-9c's second half. The no-match branch was covered; this is the one
+  ;; where picking a first match would silently delete the wrong file.
+  (testing "rm refuses an ambiguous selector and removes nothing"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            a     (create-doc tmp owner "Design" "spec" "a")
+            b     (create-doc tmp owner "Design" "plan" "b")
+            e     (try (cli/document-rm-cmd (ctx tmp) {:id "Design" :ticket owner}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :ambiguous-doc (:kind (ex-data e))))
+        (is (= (sort [(doc-id a) (doc-id b)]) (sort (:candidates (ex-data e)))))
+        (is (fs/exists? a) "both documents must survive a refused delete")
+        (is (fs/exists? b))
+        (is (= 2 (count (store/load-docs-for (droot tmp) owner))))))))
+
+(deftest retitled-document-slug-is-not-a-check-issue-test
+  ;; AC-9a / R16. A retitle leaves the filename alone, so the slug stops
+  ;; matching the title by design. This pins that `check` stays silent about
+  ;; it — today that holds because no slug validator exists, which is
+  ;; protection by absence; this test turns it into protection by assertion,
+  ;; so adding one later fails here rather than in a user's project.
+  (testing "a slug that no longer matches its title draws no issue"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            p     (create-doc tmp owner "Original title" "spec" "body")]
+        (cli/document-put-cmd (ctx tmp) {:id (doc-id p)
+                                         :title "Completely unrelated now"
+                                         :type "spec" :text "body"})
+        (is (str/includes? p "original-title")
+            "the filename still carries the ORIGINAL slug")
+        (is (= "Completely unrelated now"
+               (get-in (ticket/parse (slurp p)) [:frontmatter :title])))
+        (let [scanned (check/scan tmp ".tickets" (droot tmp))
+              issues  (:issues (check/run (assoc scanned :config (config/defaults))))]
+          (is (empty? issues)
+              (str "check must stay silent about a stale slug, got " (pr-str issues))))))))
+
+(deftest document-put-on-a-misplaced-document-test
+  ;; R10: the ticket field is authoritative, the directory is a locator.
+  ;; Recomputing the write path from the field made `put` fail doc_not_found
+  ;; on a document that plainly exists.
+  (testing "a document filed under the wrong owner can still be replaced"
+    (with-tmp tmp
+      (let [a     (mk-owner! tmp "Alpha")
+            b     (mk-owner! tmp "Bravo")
+            p     (create-doc tmp a "Design" "spec" "one")
+            did   (doc-id p)
+            ;; Move the file under Bravo while its frontmatter still names Alpha.
+            moved (str (fs/path (store/owner-dir (droot tmp) b) (fs/file-name p)))]
+        (fs/create-dirs (store/owner-dir (droot tmp) b))
+        (fs/move p moved)
+        (is (= moved (cli/document-put-cmd (ctx tmp) {:id did :title "Design v2"
+                                                      :type "plan" :text "two"}))
+            "the replace writes the file that exists, not one recomputed from the field")
+        (is (= "two" (:body (ticket/parse (slurp moved)))))
+        (is (= 1 (count (store/load-all-docs (droot tmp))))
+            "no second file is created under the named owner")
+        (let [scanned (check/scan tmp ".tickets" (droot tmp))
+              codes   (mapv :code (:issues (check/run (assoc scanned :config (config/defaults)))))]
+          (is (= [:doc_directory_mismatch] codes)
+              "the replace does not quietly relocate the file, so check still reports it"))))))
+
+(deftest info-counts-documents-test
+  ;; `info.counts` is the only surface that answers "does this project use
+  ;; documents at all". `show` is per-ticket and `check --scanned.docs` is a
+  ;; health-run byproduct.
+  (testing "doc_count reports the document corpus, and is 0 when there is none"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [d (:data (cheshire/parse-string (cli/info-cmd (ctx tmp) {:json? true}) true))]
+        (is (= 0 (get-in d [:counts :doc_count]))
+            "the key is always present, not omitted on an empty corpus"))))
+
+  (testing "documents across several owners are counted"
+    (with-tmp tmp
+      (let [a (mk-owner! tmp "Alpha")
+            b (mk-owner! tmp "Bravo")]
+        (create-doc tmp a "One" "spec" "1")
+        (create-doc tmp a "Two" "plan" "2")
+        (create-doc tmp b "Three" "spec" "3")
+        (let [{:keys [counts]} (:data (cheshire/parse-string
+                                       (cli/info-cmd (ctx tmp) {:json? true}) true))]
+          (is (= 3 (:doc_count counts)))
+          (is (= 2 (:live_count counts)) "the two owning tickets")
+          (is (= 2 (:total_count counts))
+              "total_count stays live + archive — documents are a separate corpus")))))
+
+  (testing "counts stay a raw listing: a misplaced document lands in live_count"
+    ;; `counts` does not parse or classify — the docstring on count-md-files
+    ;; says so and the JSON protocol repeats it. A document sitting in the
+    ;; ticket directory is therefore counted as a file there and not as a
+    ;; document, and `knot check` is what diagnoses it. Pinned so nobody
+    ;; "fixes" counts into a second, slower classifier.
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-d01bbb--misplaced.md"))
+            "---\nid: kno-d01bbb\nticket: kno-01aaa\ntitle: T\ntype: spec\n---\n\nbody\n")
+      (let [{:keys [counts]} (:data (cheshire/parse-string
+                                     (cli/info-cmd (ctx tmp) {:json? true}) true))]
+        (is (= 1 (:live_count counts)))
+        (is (= 0 (:doc_count counts))))))
+
+  (testing "info exposes :required-docs, so the gate is discoverable before it refuses"
+    ;; An agent that cannot see the requirement finds out by being refused.
+    (with-tmp tmp
+      (let [c (assoc (ctx tmp) :required-docs {"in_progress" ["spec"]})
+            d (:data (cheshire/parse-string (cli/info-cmd c {:json? true}) true))]
+        (is (= {:in_progress ["spec"]} (get-in d [:allowed_values :required_docs]))
+            "keyed by target status, listing the types that status demands"))
+      (is (str/includes? (cli/info-cmd (assoc (ctx tmp)
+                                              :required-docs {"in_progress" ["spec"]})
+                                       {})
+                         "Required docs: in_progress: spec"))))
+
+  (testing "the text surface carries it too"
+    (with-tmp tmp
+      (let [a (mk-owner! tmp "Alpha")]
+        (create-doc tmp a "One" "spec" "1")
+        (is (str/includes? (cli/info-cmd (ctx tmp) {}) "Doc count: 1"))))))
+
+(deftest show-and-ls-honour-the-authoritative-ticket-field-test
+  ;; R10: the `ticket` field is authoritative, the directory is a locator.
+  ;; A document filed under Alpha while its frontmatter names Bravo is not
+  ;; Alpha's to list — listing it there would make `show` assert an ownership
+  ;; the document itself denies. It appears under neither, and `check` is
+  ;; what reports the misfiling.
+  (testing "a document whose field names another ticket is not listed under its directory"
+    (with-tmp tmp
+      (let [a   (mk-owner! tmp "Alpha")
+            b   (mk-owner! tmp "Bravo")
+            p   (create-doc tmp a "Design" "spec" "body")
+            ;; Repoint the field at Bravo, leaving the file under Alpha.
+            doc (ticket/parse (slurp p))]
+        (spit p (ticket/render (assoc-in doc [:frontmatter :ticket] b)))
+        (let [shown (get-in (cheshire/parse-string
+                             (cli/show-cmd (ctx tmp) {:id a :json? true}) true)
+                            [:data :documents])
+              listed (get-in (cheshire/parse-string
+                              (cli/document-ls-cmd (ctx tmp) {:ticket a :json? true}) true)
+                             [:data :documents])]
+          (is (= [] shown) "show must not claim it for the directory's ticket")
+          (is (= [] listed) "nor must ls"))
+        (is (not (str/includes? (cli/show-cmd (ctx tmp) {:id a}) "## Documents"))
+            "and the text mode agrees — both modes name the same documents")
+        (let [scanned (check/scan tmp ".tickets" (droot tmp))
+              codes   (mapv :code (:issues (check/run (assoc scanned :config (config/defaults)))))]
+          (is (= [:doc_directory_mismatch] codes)
+              "the misfiling is reported, so it is not silently lost")))))
+
+  (testing "a correctly filed document is still listed"
+    (with-tmp tmp
+      (let [a (mk-owner! tmp "Alpha")]
+        (create-doc tmp a "Design" "spec" "body")
+        (is (= ["Design"]
+               (mapv :title (get-in (cheshire/parse-string
+                                     (cli/show-cmd (ctx tmp) {:id a :json? true}) true)
+                                    [:data :documents])))
+            "the filter must not be a no-op that happens to pass")))))
+
+(defn- ctx+required-docs
+  "A sandbox ctx whose config requires `types` before a transition to
+   `target`."
+  [tmp target types]
+  (assoc (ctx tmp) :required-docs {target types}))
+
+(deftest required-docs-gate-test
+  ;; Reason the allow-list exists: a type means nothing until something
+  ;; refuses to proceed without it. This gates a start the way acceptance
+  ;; gates a close.
+  (testing "start is refused while a required type is missing"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec" "plan"])
+            e     (try (cli/start-cmd c {:id owner}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))
+            data  (ex-data e)]
+        (is (= true (:missing-required-docs data)))
+        (is (= ["plan" "spec"] (sort (:missing-doc-types data))))
+        (is (= "open" (get-in (store/load-one tmp ".tickets" owner)
+                              [:frontmatter :status]))
+            "a refused start must not have moved the ticket"))))
+
+  (testing "attaching the required types opens the gate"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (create-doc tmp owner "Design" "spec" "body")
+        (is (some? (cli/start-cmd c {:id owner})))
+        (is (= "in_progress" (get-in (store/load-one tmp ".tickets" owner)
+                                     [:frontmatter :status]))))))
+
+  (testing "only the missing types are named, not every required one"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec" "plan"])]
+        (create-doc tmp owner "Design" "spec" "body")
+        (let [e (try (cli/start-cmd c {:id owner}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= ["plan"] (:missing-doc-types (ex-data e))))))))
+
+  (testing "--force overrides, and needs no summary on a start"
+    ;; Matches gate-open-children!: a start is provisional (ADR 0003), so
+    ;; unlike a close it does not demand a recorded reason.
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (is (some? (cli/start-cmd c {:id owner :force? true})))
+        (is (= "in_progress" (get-in (store/load-one tmp ".tickets" owner)
+                                     [:frontmatter :status]))))))
+
+  (testing "a ticket already in the target status is not re-gated"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (cli/start-cmd c {:id owner :force? true})
+        (is (some? (cli/status-cmd c {:id owner :status "in_progress"}))
+            "re-entering the same status must not fire the gate"))))
+
+  (testing "a transition to an ungated status is unaffected"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (is (some? (cli/close-cmd c {:id owner :summary "done"}))
+            "no requirement is configured for the terminal status"))))
+
+  (testing "no :required-docs means no gate anywhere"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")]
+        (is (some? (cli/start-cmd (ctx tmp) {:id owner})))))))
+
+(deftest required-docs-gate-covers-every-transition-path-test
+  ;; `start`, `status` and `update --status` all reach the same transition.
+  ;; A gate wired into some of them is not a gate: the ungated path is a
+  ;; documented bypass.
+  (testing "update --status is gated exactly as start is"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])
+            e     (try (cli/update-cmd c {:id owner :status "in_progress"}) nil
+                       (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= true (:missing-required-docs (ex-data e)))
+            "update --status must fire the same gate `start` does")
+        (is (= ["spec"] (:missing-doc-types (ex-data e))))
+        (is (= "open" (get-in (store/load-one tmp ".tickets" owner)
+                              [:frontmatter :status]))
+            "and must not have moved the ticket"))))
+
+  (testing "update --status --force overrides, as start --force does"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (is (some? (cli/update-cmd c {:id owner :status "in_progress" :force? true})))
+        (is (= "in_progress" (get-in (store/load-one tmp ".tickets" owner)
+                                     [:frontmatter :status]))))))
+
+  (testing "an update that does not touch status is never gated"
+    (with-tmp tmp
+      (let [owner (mk-owner! tmp "Owner")
+            c     (ctx+required-docs tmp "in_progress" ["spec"])]
+        (is (some? (cli/update-cmd c {:id owner :title "Renamed"}))
+            "a title change must not be blocked by a transition gate"))))
+
+  (testing "all three commands agree once the document is attached"
+    (with-tmp tmp
+      (doseq [cmd [:start :status :update]]
+        (let [owner (mk-owner! tmp (str "Owner " (name cmd)))
+              c     (ctx+required-docs tmp "in_progress" ["spec"])]
+          (create-doc tmp owner "Design" "spec" "body")
+          (is (some? (case cmd
+                       :start  (cli/start-cmd c {:id owner})
+                       :status (cli/status-cmd c {:id owner :status "in_progress"})
+                       :update (cli/update-cmd c {:id owner :status "in_progress"})))
+              (str (name cmd) " should proceed once the requirement is met")))))))
+
+(deftest required-docs-gate-honours-ownership-test
+  ;; The gate must read ownership the way every other surface does: the
+  ;; document's own `ticket` field, never the directory it sits in.
+  ;; Otherwise a ticket satisfies its gate with a document that belongs to
+  ;; someone else.
+  (testing "a document filed under B but owned by A does not open B's gate"
+    (with-tmp tmp
+      (let [a (mk-owner! tmp "Alpha")
+            b (mk-owner! tmp "Bravo")
+            c (ctx+required-docs tmp "in_progress" ["spec"])]
+        ;; Plant A's document inside B's directory.
+        (let [dir (store/owner-dir (store/docs-root tmp ".tickets" nil) b)]
+          (fs/create-dirs dir)
+          (spit (str (fs/path dir "kno-dmis--p.md"))
+                (str "---\nid: kno-dmis\nticket: " a
+                     "\ntitle: T\ntype: spec\ncreated: x\nupdated: y\n---\n\nbody\n")))
+        (let [e (try (cli/start-cmd c {:id b}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= true (:missing-required-docs (ex-data e)))
+              "B must not pass its gate on a document whose ticket field names A"))
+        (let [e (try (cli/start-cmd c {:id a}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= true (:missing-required-docs (ex-data e)))
+              "and A must not pass either — the document is not in A's directory")))))
+
+  (testing "update --status honours ownership identically"
+    (with-tmp tmp
+      (let [a (mk-owner! tmp "Alpha")
+            b (mk-owner! tmp "Bravo")
+            c (ctx+required-docs tmp "in_progress" ["spec"])]
+        (let [dir (store/owner-dir (store/docs-root tmp ".tickets" nil) b)]
+          (fs/create-dirs dir)
+          (spit (str (fs/path dir "kno-dmis--p.md"))
+                (str "---\nid: kno-dmis\nticket: " a
+                     "\ntitle: T\ntype: spec\ncreated: x\nupdated: y\n---\n\nbody\n")))
+        (let [e (try (cli/update-cmd c {:id b :status "in_progress"}) nil
+                     (catch clojure.lang.ExceptionInfo ex ex))]
+          (is (= true (:missing-required-docs (ex-data e)))))))))

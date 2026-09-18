@@ -6,7 +6,7 @@
    The guard pins the code *set* only; the per-command attribution column
    of the error table is prose and is not checked."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :as t :refer [deftest is testing]]))
 
 (def ^:private doc-path "resources/knot/skill/references/json.md")
 
@@ -44,11 +44,17 @@
     (into (codes #":code\s+:([a-z_]+)" src)
           (codes #"\(check-enum\s+:([a-z_]+)" src))))
 
-(defn- documented-error-codes []
-  (codes table-row-re (doc-section (slurp doc-path) "## Error codes" "## Per-command")))
+(defn- documented-error-codes
+  "Codes named in the error-code table. The 1-arity takes the document text
+   so the guard can be driven against a synthetic catalogue; the 0-arity is
+   what the real guard calls."
+  ([] (documented-error-codes (slurp doc-path)))
+  ([doc] (codes table-row-re (doc-section doc "## Error codes" "## Per-command"))))
 
-(defn- documented-check-codes []
-  (codes table-row-re (doc-section (slurp doc-path) "### `check` shape" "## Example")))
+(defn- documented-check-codes
+  "Codes named in the check-code table. Same two arities, same reason."
+  ([] (documented-check-codes (slurp doc-path)))
+  ([doc] (codes table-row-re (doc-section doc "### `check` shape" "## Example"))))
 
 (deftest error-code-catalogue-matches-source-test
   (let [src (emitted-error-codes)
@@ -73,3 +79,57 @@
     (testing "every catalogue row names an emitted check code"
       (is (empty? (remove src doc))
           (str "documented but never emitted: " (pr-str (remove src doc)))))))
+
+(defn- run-guard
+  "Run one of this namespace's own guard vars in isolation and return its
+   `{:pass :fail :error}` counters. Output is captured so a deliberately
+   failed guard does not print alarming text into a green run."
+  [v]
+  (binding [t/*report-counters*   (ref t/*initial-report-counters*)
+            t/*testing-contexts* (list)
+            t/*test-out*         (java.io.StringWriter.)]
+    (t/test-var v)
+    @t/*report-counters*))
+
+(deftest catalogue-guard-fails-on-an-undocumented-code-test
+  ;; AC-14c. The guard is the only thing standing between a new code and a
+  ;; silently stale catalogue, so the guard itself has to be shown to fail.
+  ;; This drives the real deftest var under substituted sources instead of
+  ;; re-implementing its comparison: a re-implementation would certify this
+  ;; helper and still pass if the real assertion were weakened or no-opped,
+  ;; which is exactly the hole being closed.
+  (testing "the check guard goes red when an emitted code has no catalogue row"
+    (with-redefs [emitted-check-codes    (constantly (sorted-set "dep_cycle" "invented_doc_code"))
+                  documented-check-codes (constantly (sorted-set "dep_cycle"))]
+      (let [r (run-guard #'check-code-catalogue-matches-source-test)]
+        (is (pos? (+ (:fail r) (:error r)))
+            "the catalogue guard must fail when a code is emitted but undocumented"))))
+
+  (testing "the check guard goes red when a catalogue row names no emitted code"
+    (with-redefs [emitted-check-codes    (constantly (sorted-set "dep_cycle"))
+                  documented-check-codes (constantly (sorted-set "dep_cycle" "retired_code"))]
+      (let [r (run-guard #'check-code-catalogue-matches-source-test)]
+        (is (pos? (+ (:fail r) (:error r)))
+            "the reverse direction must fail too, or a renamed code leaves a stale row"))))
+
+  (testing "the error guard goes red when an emitted code has no catalogue row"
+    (with-redefs [emitted-error-codes    (constantly (sorted-set "not_found" "invented_doc_code"))
+                  documented-error-codes (constantly (sorted-set "not_found"))]
+      (let [r (run-guard #'error-code-catalogue-matches-source-test)]
+        (is (pos? (+ (:fail r) (:error r)))))))
+
+  (testing "and it passes when the two sides agree — the self-test is not vacuously red"
+    (with-redefs [emitted-check-codes    (constantly (sorted-set "dep_cycle"))
+                  documented-check-codes (constantly (sorted-set "dep_cycle"))]
+      (let [r (run-guard #'check-code-catalogue-matches-source-test)]
+        (is (zero? (+ (:fail r) (:error r)))
+            "a guard that always fails would pass the three cases above for the wrong reason")))))
+
+(deftest documented-code-readers-take-text-test
+  (testing "the 1-arity reads the catalogue it is handed, not the file on disk"
+    (let [synthetic (str "## Error codes\n\n| `made_up_code` | x | y | z |\n\n"
+                         "## Per-command\n\n"
+                         "### `check` shape\n\n| `made_up_check` | x | y |\n\n"
+                         "## Example\n")]
+      (is (= #{"made_up_code"} (set (documented-error-codes synthetic))))
+      (is (= #{"made_up_check"} (set (documented-check-codes synthetic)))))))

@@ -193,6 +193,10 @@ The defaults work with no config.
 | `:types`             | `["bug" "feature" "task" "epic" "chore"]` | Allowed values for ticket `:type`.                                                                                                                        |
 | `:modes`             | `["afk" "hitl"]`                          | `afk` = agent-runnable; `hitl` = needs a human.                                                                                                           |
 | `:default-mode`      | `"hitl"`                                  | Must be a member of `:modes`.                                                                                                                             |
+| `:doc-types`         | `["spec" "plan" "other"]`                 | Allowed values for a document's `type`. Must be non-empty — an empty list would refuse every document.                                                     |
+| `:default-doc-type`  | `"other"`                                 | Must be a member of `:doc-types`. Used when `--type` is omitted.                                                                                          |
+| `:required-docs`     | `{}`                                      | Documents a ticket must own before entering a status, e.g. `{"in_progress" ["spec"]}`. Keys must be in `:statuses`, values in `:doc-types`. `--force` overrides. |
+| `:docs-dir`          | `<tickets-dir>/docs`                      | Where documents live. Relative paths resolve from the project root and `~` expands, but the result must stay inside the project — a `.knot.edn` travels with the repo, so a clone cannot be made to read or write outside it. Unset, it follows `:tickets-dir`. Documents never move when a ticket closes. |
 | `:skill-dir`         | `".claude/skills/knot"`                   | Where `knot skill install` writes the agent skill. Relative paths resolve from the project root; `~` expands.                                              |
 
 Knot finds the project root by walking up from cwd until it meets `.knot.edn` or `.tickets/`.

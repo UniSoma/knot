@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [knot.config :as config]))
+            [knot.config :as config]
+            [knot.store :as store]))
 
 (defn- mkdir-p! [path]
   (fs/create-dirs path))
@@ -369,3 +370,130 @@
       (let [deep (str (fs/path tmp "x" "y"))]
         (mkdir-p! deep)
         (is (nil? (config/discover-within deep tmp)))))))
+
+(deftest doc-type-defaults-test
+  (testing "defaults carry a non-empty allow-list and a member default"
+    (let [d (config/defaults)]
+      (is (= ["spec" "plan" "other"] (:doc-types d)))
+      (is (= "other" (:default-doc-type d)))
+      (is (contains? (set (:doc-types d)) (:default-doc-type d))
+          "the default must be a member, or the allow-list cannot be enforced"))))
+
+(deftest doc-type-known-keys-test
+  (testing "both keys are recognised, so neither is warned about and dropped"
+    (with-tmp tmp
+      (spit (str (fs/path tmp ".knot.edn"))
+            (pr-str {:doc-types ["spec" "other"] :default-doc-type "other"}))
+      (let [{:keys [config]} (config/discover tmp)]
+        (is (= ["spec" "other"] (:doc-types config)))
+        (is (= "other" (:default-doc-type config)))))))
+
+(deftest doc-type-validation-test
+  (testing "a default outside its own list fails at command start"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #":default-doc-type must be one of :doc-types"
+         (config/validate! (assoc (config/defaults)
+                                  :doc-types ["spec"] :default-doc-type "other")))))
+  (testing "an empty allow-list is refused instead of silently disabling the gate"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo #":doc-types must be a non-empty list"
+         (config/validate! (assoc (config/defaults) :doc-types [])))))
+  (testing "a well-formed pair validates"
+    (is (map? (config/validate! (assoc (config/defaults)
+                                       :doc-types ["a" "b"] :default-doc-type "b"))))))
+
+(deftest docs-dir-config-test
+  (testing "the default is nil, meaning <tickets-dir>/docs"
+    (is (contains? (config/defaults) :docs-dir))
+    (is (nil? (:docs-dir (config/defaults))))
+    (testing "so a renamed tickets dir carries the document corpus with it"
+      (is (= (str (fs/path "/p" "issues" "docs"))
+             (store/docs-root "/p" "issues" nil)))))
+
+  (testing "a configured value resolves against the project root"
+    (is (= (str (fs/path "/p" "docs" "tickets"))
+           (store/docs-root "/p" ".tickets" "docs/tickets"))))
+
+  (testing "an absolute configured value inside the project is taken as-is"
+    ;; Outside the project it is refused — see
+    ;; docs-dir-must-stay-inside-the-project-test.
+    (is (= (str (fs/path "/p" "elsewhere" "docs"))
+           (store/docs-root "/p" ".tickets" "/p/elsewhere/docs"))))
+
+  (testing ":docs-dir is a known key, so it draws no unknown-key warning"
+    (is (contains? @#'config/known-keys :docs-dir)))
+
+  (testing "a blank :docs-dir is refused; nil is not"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (config/validate! (assoc (config/defaults) :docs-dir "   "))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (config/validate! (assoc (config/defaults) :docs-dir 7))))
+    (is (map? (config/validate! (assoc (config/defaults) :docs-dir nil))))))
+
+(deftest required-docs-config-test
+  (testing "the default is an empty map, so no project gains a gate by upgrading"
+    (is (= {} (:required-docs (config/defaults))))
+    (is (contains? @#'config/known-keys :required-docs)))
+
+  (testing "a valid mapping passes"
+    (is (map? (config/validate!
+               (assoc (config/defaults) :required-docs {"in_progress" ["spec"]})))))
+
+  (testing "a key outside :statuses is refused"
+    ;; An unknown status silently gates nothing, which is worse than an
+    ;; error: the project believes it is protected and isn't.
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required-docs"
+                          (config/validate!
+                           (assoc (config/defaults) :required-docs {"nope" ["spec"]})))))
+
+  (testing "a type outside :doc-types is refused"
+    ;; An unknown type gates forever: nothing can ever satisfy it.
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not in :doc-types"
+                          (config/validate!
+                           (assoc (config/defaults)
+                                  :required-docs {"in_progress" ["blueprint"]})))))
+
+  (testing "a non-map and an empty type list are both refused"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required-docs"
+                          (config/validate!
+                           (assoc (config/defaults) :required-docs ["spec"]))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required-docs"
+                          (config/validate!
+                           (assoc (config/defaults) :required-docs {"in_progress" []}))))))
+
+(deftest docs-dir-must-stay-inside-the-project-test
+  ;; A .knot.edn travels with the repo. Cloning someone's project and
+  ;; running knot in it must not read or write outside that project, so a
+  ;; :docs-dir that escapes the root is refused rather than resolved.
+  (testing "a relative path that climbs out is refused"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (store/docs-root "/p/proj" ".tickets" "../outside"))))
+
+  (testing "an absolute path outside the project is refused"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (store/docs-root "/p/proj" ".tickets" "/etc"))))
+
+  (testing "a home-relative path is refused unless home is inside the project"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (store/docs-root "/p/proj" ".tickets" "~/private"))))
+
+  (testing "paths inside the project are accepted, including deep ones"
+    (is (= (str (fs/path "/p/proj" "docs" "tickets"))
+           (store/docs-root "/p/proj" ".tickets" "docs/tickets")))
+    (is (= (str (fs/path "/p/proj" "a" "b" "c"))
+           (store/docs-root "/p/proj" ".tickets" "a/b/c")))
+    (is (= (str (fs/path "/p/proj" "docs"))
+           (store/docs-root "/p/proj" ".tickets" "./docs"))))
+
+  (testing "an absolute path that happens to be inside the project is accepted"
+    (is (= (str (fs/path "/p/proj" "docs"))
+           (store/docs-root "/p/proj" ".tickets" "/p/proj/docs"))))
+
+  (testing "the default is unaffected"
+    (is (= (str (fs/path "/p/proj" ".tickets" "docs"))
+           (store/docs-root "/p/proj" ".tickets" nil))))
+
+  (testing "a sibling directory sharing a name prefix is not mistaken for inside"
+    ;; /p/proj-evil starts with /p/proj as a string but is not under it.
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
+                          (store/docs-root "/p/proj" ".tickets" "/p/proj-evil/docs")))))
