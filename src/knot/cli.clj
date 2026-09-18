@@ -9,6 +9,7 @@
             [knot.acceptance :as acceptance]
             [knot.check :as check]
             [knot.config :as config]
+            [knot.doc :as doc]
             [knot.git :as git]
             [knot.listing :as listing]
             [knot.output :as output]
@@ -127,15 +128,26 @@
    present (even with a nil value, which means \"no default — do not
    consult git\"); else git `user.name`."
   [ctx]
-  (let [defaults (config/defaults)]
-    (merge defaults
-           {:assignee (when-not (contains? ctx :assignee)
-                        (if (contains? ctx :default-assignee)
-                          (:default-assignee ctx)
-                          (git/user-name)))}
-           ctx
-           ;; deterministic 'now' for tests; fall back to wall clock
-           (when-not (:now ctx) {:now (now-iso)}))))
+  (let [defaults (config/defaults)
+        merged   (merge defaults
+                        {:assignee (when-not (contains? ctx :assignee)
+                                     (if (contains? ctx :default-assignee)
+                                       (:default-assignee ctx)
+                                       (git/user-name)))}
+                        ctx
+                        ;; deterministic 'now' for tests; fall back to wall clock
+                        (when-not (:now ctx) {:now (now-iso)}))]
+    ;; The document corpus root is derived from three config values, so it
+    ;; is resolved once here rather than at each of the fifteen call sites
+    ;; that need it. `knot.store` still never reads config: it is handed an
+    ;; already-resolved root.
+    (cond-> merged
+      ;; A ctx without a project root cannot name a corpus, and some callers
+      ;; build one before discovery has run.
+      (:project-root merged)
+      (assoc :docs-root (store/docs-root (:project-root merged)
+                                         (:tickets-dir merged)
+                                         (:docs-dir merged))))))
 
 (defn- add-link
   "Add `other` to `ticket`'s `:links`, idempotent. Returns the updated
@@ -299,19 +311,32 @@
    when no matching ticket exists; throws `ex-info` with `:kind :ambiguous`
    when the partial id matches more than one ticket. Output includes the
    four computed inverse sections — Blockers, Blocking, Children, Linked
-   — for both human and JSON modes. Broken `:deps`/`:parent` references
+   — and the ticket's documents, for both human and JSON modes. Broken `:deps`/`:parent` references
    emit one stderr warning each — they never abort the command."
   [ctx opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses]} (resolve-ctx ctx)
+  (let [{:keys [project-root tickets-dir terminal-statuses docs-root]} (resolve-ctx ctx)
         loaded (resolve-or-nil project-root tickets-dir (:id opts))]
     (when loaded
       (let [all       (store/load-all project-root tickets-dir)
             inverses* (query/inverses loaded all)
+            ;; Scoped to this ticket on purpose: `load-all-docs` sits
+            ;; beside this loader with a similar name and would produce
+            ;; the same output here, while turning the most common read
+            ;; into a whole-corpus parse. Nothing downstream can catch
+            ;; that swap. The directory scopes the read; the `ticket`
+            ;; field decides ownership, so the result is filtered by it —
+            ;; a document filed under this ticket while claiming another
+            ;; is not this ticket's to list, and `check` reports it.
+            docs      (query/documents-for
+                       (store/load-docs-for
+                        docs-root
+                        (get-in loaded [:frontmatter :id]))
+                       (get-in loaded [:frontmatter :id]))
             loaded    (first (listing/attach-children-progress [loaded] all terminal-statuses))]
         (warn-broken-refs! loaded all)
         (if (:json? opts)
-          (output/show-json loaded inverses*)
-          (output/show-text loaded inverses*))))))
+          (output/show-json loaded inverses* docs)
+          (output/show-text loaded inverses* docs))))))
 
 (defn- first-terminal-status
   "Return the first status from `statuses` that is also in `terminal-statuses`,
@@ -431,6 +456,76 @@
 
       :else :bypass)))
 
+(defn- missing-required-docs
+  "The required document types `target` demands that `ticket-docs` does not
+   supply, sorted. One computation shared by the gate and the bypass
+   warning: two would drift, and they would drift into disagreeing about
+   what the operator was just told."
+  [required-docs target ticket-docs]
+  (let [present (set (keep #(get-in % [:frontmatter :type]) ticket-docs))]
+    (vec (sort (remove present (get required-docs target))))))
+
+(defn- gate-required-docs!
+  "Evaluate the required-documents gate for a status transition. Fires on
+   `* -> target` when `:required-docs` names `target` and the ticket is
+   missing a document of any type it lists. Re-entering a status the ticket
+   already holds does not fire: the gate guards the move into a status, not
+   residence in it.
+
+   This is what makes `:doc-types` more than a spell-checker. An allow-list
+   that nothing refuses to act on only stops a typo; a transition that
+   refuses without a spec is the reason to have named the type at all.
+
+   `--force` overrides and needs no summary, matching
+   `gate-open-children!` on a start: ADR 0003 makes a start provisional, so
+   it does not demand a recorded reason the way a close does. Returns
+   `:bypass` when the gate would fire but is forced through (caller emits a
+   stderr warning); returns nil otherwise. `:ticket-docs` may be a delay:
+   it is forced only when `target` carries a requirement, so a project with
+   no `:required-docs` never reads the corpus."
+  [{:keys [source target ticket-docs required-docs force?]}]
+  (let [;; Deref only when this target actually carries a requirement. The
+        ;; question is the gate's own, so it is asked here rather than in
+        ;; each caller: a caller that forgot to ask would hand over nil and
+        ;; the gate would silently find nothing missing.
+        missing (when (seq (get required-docs target))
+                  (missing-required-docs required-docs target (force ticket-docs)))
+        fires?  (and (not= source target) (seq missing))]
+    (cond
+      (not fires?) nil
+
+      (not force?)
+      (throw (ex-info
+              (str (count missing) " required document type"
+                   (when (> (count missing) 1) "s")
+                   " missing: " (str/join ", " missing))
+              {:missing-required-docs true
+               :missing-doc-types     missing
+               :target                target}))
+
+      :else :bypass)))
+
+(defn- warn-required-docs-bypass!
+  [missing target]
+  (warn! (str "knot: forcing transition to " target " without "
+              (str/join ", " (sort missing))
+              "; attach with `knot document add`.")))
+
+(defn- run-required-docs-gate!
+  "Evaluate the required-documents gate for a transition and emit the
+   bypass warning when it is forced through. Both transition paths call
+   this rather than repeating the block: `update --status` reaching the
+   same transition as `start` while skipping the gate is exactly the bug
+   this shape prevents."
+  [{:keys [source target ticket-docs required-docs force?]}]
+  (when (= :bypass (gate-required-docs! {:source        source
+                                         :target        target
+                                         :ticket-docs   ticket-docs
+                                         :required-docs required-docs
+                                         :force?        force?}))
+    (warn-required-docs-bypass!
+     (missing-required-docs required-docs target (force ticket-docs)) target)))
+
 (defn- clear-when
   "Set-or-clear convention for the optional frontmatter fields: drop `k`
    from `fm` when `(pred v)`, else set it to `v`. Shared by `status-cmd`
@@ -513,7 +608,8 @@
    matches (json mode does not change the not-found contract; the
    handler emits the envelope)."
   [ctx {:keys [id status summary json? force? assignee] :as opts}]
-  (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
+  (let [{:keys [project-root tickets-dir active-status terminal-statuses
+                docs-root required-docs now]}
         (resolve-ctx ctx)]
     (when (and (some? summary)
                (not (contains? (or terminal-statuses #{}) status)))
@@ -553,6 +649,21 @@
                        (warn-open-children-bypass!
                         (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
+            ;; Read the corpus only when a requirement is configured for this
+            ;; target, so the gate costs nothing in the common case where
+            ;; :required-docs is empty.
+            ;; Directory-scoped read, then filtered by the authoritative
+            ;; `ticket` field, exactly as `show` and `document ls` do. The
+            ;; directory scopes; the field decides. Unfiltered, a ticket
+            ;; passes its gate on a document that belongs to another one.
+            docs*    (delay (query/documents-for
+                             (store/load-docs-meta-for docs-root full-id)
+                             full-id))
+            _        (run-required-docs-gate! {:source        source
+                                                 :target        status
+                                                 :ticket-docs   docs*
+                                                 :required-docs required-docs
+                                                 :force?        force?})
             new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
                        (contains? opts :assignee)
                        (clear-when :assignee str/blank? assignee)
@@ -773,35 +884,58 @@
    or partial). Strict-resolves the id (throws `:not-found` /
    `:ambiguous` ex-info on failure). Without `:cascade?`, refuses
    (throws `:has-incoming-refs`) when any other ticket — live or
-   archived — names this id in `:parent`, `:deps`, or `:links`. With
+   archived — names this id in `:parent`, `:deps`, or `:links`, or when
+   the target owns any documents; the ex-data carries `:referrers` and
+   `:documents` so the caller can report both. With
    `:cascade?`, rewrites every referrer first to drop the target from
    `:deps`/`:links` and dissoc `:parent`, dropping the field key when
    the resulting list is empty (mirrors `undep`/`unlink`); the save
-   bumps each referrer's `:updated`. Write order is referrers first
-   (alphabetical by id), target last — so a partial-cleanup failure
-   never leaves dangling references against a no-longer-existent
-   target. Returns `{:path <removed-path> :cleaned [{:id, :fields
-   [<kw>...]} ...]}`; `cleaned` is `[]` when no rewrites happened.
+   bumps each referrer's `:updated`.
+
+   Write order is referrers first (alphabetical by id), then the target,
+   then its documents. The asymmetry is forced, not chosen: a referrer is
+   *rewritten*, so it must be consistent before the target disappears; a
+   document is *destroyed*, so it must outlive the target — an interrupted
+   cascade then leaves orphans `knot check` reports instead of a live
+   ticket silently missing documents. See ADR 0022.
+
+   Returns `{:path <removed-path> :cleaned [{:id, :fields [<kw>...]} ...]
+   :documents [<id>...]}`; `cleaned` and `documents` are `[]` when there
+   were none.
 
    With `:json? true`, returns a v0.3 success-envelope JSON string
    wrapping `{:deleted {:id <id> :path <posix-path>} :cleaned [{:id,
-   :fields [<string>...]}]}` under `:data` (field names serialized as
-   strings)."
+   :fields [<string>...]}] :documents [<id>...]}` under `:data` (field
+   names serialized as strings)."
   [ctx {:keys [id json? cascade?]}]
-  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+  (let [{:keys [project-root tickets-dir terminal-statuses docs-root now]}
         (resolve-ctx ctx)
         loaded   (store/resolve-id project-root tickets-dir id)
         full-id  (get-in loaded [:frontmatter :id])
         all      (store/load-all project-root tickets-dir)
-        refs     (incoming-refs all full-id)]
-    (when (and (seq refs) (not cascade?))
-      (throw (ex-info (str (count refs)
-                           " incoming reference"
-                           (when (> (count refs) 1) "s")
-                           " prevent deletion of " full-id)
+        refs     (incoming-refs all full-id)
+        docs     (store/load-docs-for
+                  docs-root full-id)
+        doc-ids  (mapv #(get-in % [:frontmatter :id]) docs)]
+    (when (and (or (seq refs) (seq docs)) (not cascade?))
+      (let [clauses (remove nil?
+                            [(when (seq refs)
+                               (str (count refs) " incoming reference"
+                                    (when (> (count refs) 1) "s")))
+                             (when (seq docs)
+                               (str (count docs) " attached document"
+                                    (when (> (count docs) 1) "s")))])
+            ;; One singular clause takes a singular verb; two clauses are a
+            ;; compound subject and take the plural whatever the counts.
+            verb    (if (and (= 1 (count clauses))
+                             (= 1 (+ (count refs) (count docs))))
+                      " prevents deletion of "
+                      " prevent deletion of ")]
+      (throw (ex-info (str (str/join " and " clauses) verb full-id)
                       {:kind      :has-incoming-refs
                        :id        full-id
-                       :referrers refs})))
+                       :referrers refs
+                       :documents doc-ids}))))
     (let [grouped   (->> refs
                          (group-by :id)
                          (sort-by key)
@@ -833,13 +967,22 @@
           (throw e)))
       (let [path    (store/find-existing-path project-root tickets-dir full-id)
             deleted (store/delete! path)
+            ;; Documents go last, after the ticket is already unlinked. The
+            ;; reverse order destroys documents beneath a still-live ticket
+            ;; if the run is interrupted — unrecoverable AND undetectable,
+            ;; because nothing is stored on the ticket (the relation is read
+            ;; backwards), so a ticket that lost documents is byte-identical
+            ;; to one that never had any. Documents-last leaves orphans that
+            ;; `knot check` reports under :doc_unknown_ticket. See ADR 0022.
+            _       (doseq [d docs] (store/delete-doc! (:path d)))
             rows    @cleaned]
         (if json?
           (output/envelope-str
-           {:deleted {:id   full-id
-                      :path (fs/unixify deleted)}
-            :cleaned (mapv (fn [r] (update r :fields #(mapv name %))) rows)})
-          {:path deleted :cleaned rows})))))
+           {:deleted   {:id   full-id
+                        :path (fs/unixify deleted)}
+            :cleaned   (mapv (fn [r] (update r :fields #(mapv name %))) rows)
+            :documents doc-ids})
+          {:path deleted :cleaned rows :documents doc-ids})))))
 
 (defn- resolve-note-content
   "Resolve the note content string from the layered input options:
@@ -1180,7 +1323,8 @@
                              :add-external-ref :remove-external-ref)
   (validate-ac-delta-opts! opts)
   (validate-ac-flip-opts! opts)
-  (let [{:keys [project-root tickets-dir active-status terminal-statuses now]}
+  (let [{:keys [project-root tickets-dir active-status terminal-statuses
+                docs-root required-docs now]}
         (resolve-ctx ctx)]
     (when (and (some? (:summary opts))
                (contains? opts :status)
@@ -1232,6 +1376,23 @@
                        (warn-open-children-bypass!
                         (if (= source active-status) :close :start)
                         (open-child-ids loaded @all terminal-statuses)))
+            ;; `update --status` reaches the same transition `start` and
+            ;; `status` do, so it takes the same gate. Wiring it into some
+            ;; paths and not others makes the ungated one a documented
+            ;; bypass.
+            ;; Directory-scoped read, then filtered by the authoritative
+            ;; `ticket` field, exactly as `show` and `document ls` do. The
+            ;; directory scopes; the field decides. Unfiltered, a ticket
+            ;; passes its gate on a document that belongs to another one.
+            docs*    (delay (query/documents-for
+                             (store/load-docs-meta-for docs-root full-id)
+                             full-id))
+            _        (when (contains? opts :status)
+                       (run-required-docs-gate! {:source        source
+                                                 :target        target
+                                                 :ticket-docs   docs*
+                                                 :required-docs required-docs
+                                                 :force?        (:force? opts)}))
             fm**     (cond-> fm*
                        (contains? opts :status) (assoc :status target))
             body0    (update-body (:body loaded) opts)
@@ -1315,13 +1476,20 @@
    values — see `listing/criteria`), `:limit`, and the table options."
   [source ctx opts]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir terminal-statuses now]} resolved
+        {:keys [project-root tickets-dir terminal-statuses docs-root now]} resolved
         all    (store/load-all project-root tickets-dir)
-        result (listing/rows all terminal-statuses
-                             {:source  source
-                              :scope   (select-keys opts [:closure :via :component])
-                              :filters (listing/criteria opts)
-                              :limit   (:limit opts)})]
+        ;; Frontmatter only: a listing needs each document's type and
+        ;; nothing else, and the bodies are the large part by design.
+        ;; Attached after `rows` so the view stays a pure function of the
+        ;; ticket corpus and the filesystem read stays in this layer.
+        docs   (store/load-all-docs-meta
+                docs-root)
+        result (-> (listing/rows all terminal-statuses
+                                 {:source  source
+                                  :scope   (select-keys opts [:closure :via :component])
+                                  :filters (listing/criteria opts)
+                                  :limit   (:limit opts)})
+                   (listing/attach-doc-types docs))]
     (if (:json? opts)
       (output/ls-json result)
       (output/ls-table (annotate-age-days result now)
@@ -1459,7 +1627,7 @@
    through; matches nothing if unrecognized)."
   [ctx {:keys [json? severity code ids]}]
   (let [resolved (resolve-ctx ctx)
-        {:keys [project-root tickets-dir]} resolved
+        {:keys [project-root tickets-dir docs-root]} resolved
         spec     {:severity (->kw-set severity)
                   :code     (->kw-set code)}]
     (if-let [bad (check/validate-filter-spec spec)]
@@ -1468,13 +1636,18 @@
       ;; path in `main/check-handler`. Cannot-scan errors, by contrast,
       ;; route to stdout as an envelope under --json.
       {:exit 2 :stdout nil :stderr (str "knot check: " (:error bad))}
-      (let [{:keys [tickets parse-errors scanned]} (check/scan project-root tickets-dir)
-            result    (check/run {:tickets      tickets
-                                  :parse-errors parse-errors
-                                  :config       resolved
-                                  :scanned      scanned
-                                  :ids-filter   (when (seq ids) (set ids))
-                                  :skill        (some-> (project-skill-dir resolved) read-skill-md)})
+      ;; The whole scan result is merged rather than rebuilt key by key.
+      ;; Naming the keys here has dropped a new one twice: `:documents`
+      ;; disarmed every document arm while `:scanned :docs` kept counting,
+      ;; and `:stranded-docs` silently disabled the unreachable-corpus
+      ;; warning. Both times the unit tests passed, because they call
+      ;; `check/run` directly.
+      (let [result    (check/run
+                       (merge (check/scan project-root tickets-dir docs-root)
+                              {:config     resolved
+                               :ids-filter (when (seq ids) (set ids))
+                               :skill      (some-> (project-skill-dir resolved)
+                                                   read-skill-md)}))
             filtered  (check/filter-issues (:issues result) spec)
             has-err?  (some #(= :error (:severity %)) filtered)
             scanned*  (:scanned result)
@@ -1612,7 +1785,7 @@
         (output/prime-json data)
         (output/prime-text data)))
     (let [{:keys [project-root tickets-dir terminal-statuses active-status
-                  prefix project-name now afk-mode]} (resolve-ctx ctx)
+                  prefix project-name now afk-mode docs-root]} (resolve-ctx ctx)
           all          (store/load-all project-root tickets-dir)
           archive-cnt  (count-archive all terminal-statuses)
           live-cnt     (- (count all) archive-cnt)
@@ -1630,10 +1803,16 @@
           {ready-to-close* true
            in-progress*    false} (group-by (fn [t] (query/ready-to-close? t active-status))
                                             active*)
-          in-progress*    (vec in-progress*)
-          ready-to-close* (vec ready-to-close*)
+          ;; Frontmatter only, read once and shared by all three sections.
+          ;; An agent reading prime is deciding what to pick up, and whether
+          ;; a ticket already has a spec is part of that decision.
+          doc-meta     (store/load-all-docs-meta
+                        docs-root)
+          in-progress*    (listing/attach-doc-types (vec in-progress*) doc-meta)
+          ready-to-close* (listing/attach-doc-types (vec ready-to-close*) doc-meta)
           ready*       (query/ready all terminal-statuses)
-          ready-filtered (query/filter-tickets ready* criteria)
+          ready-filtered (listing/attach-doc-types
+                          (vec (query/filter-tickets ready* criteria)) doc-meta)
           cap          (prime-cap limit)
           ready-shown  (vec (take cap ready-filtered))
           ready-total  (count ready-filtered)
@@ -1676,15 +1855,19 @@
     (git/user-name)))
 
 (defn- count-md-files
-  "Count top-level `*.md` files directly in `dir`. Does not recurse and
-   does not parse — a malformed ticket still counts. Returns 0 if `dir`
-   is missing."
-  [dir]
-  (if-not (fs/directory? dir)
-    0
-    (count (filter #(and (fs/regular-file? %)
-                         (str/ends-with? (str (fs/file-name %)) ".md"))
-                   (fs/glob dir "*.md")))))
+  "Count `*.md` files under `dir` matching `pattern`, which defaults to the
+   top-level `\"*.md\"`; the document corpus passes `\"*/*.md\"` to reach one
+   level down, across every owner directory. Does not parse — a malformed
+   ticket or document still counts — and does not classify, so a document
+   filed in the ticket directory counts there and `knot check` is what
+   diagnoses it. Returns 0 if `dir` is missing."
+  ([dir] (count-md-files dir "*.md"))
+  ([dir pattern]
+   (if-not (fs/directory? dir)
+     0
+     (count (filter #(and (fs/regular-file? %)
+                          (str/ends-with? (str (fs/file-name %)) ".md"))
+                    (fs/glob dir pattern))))))
 
 (def skill-files
   "Every file of the bundled agent skill, as classpath paths under
@@ -1736,45 +1919,64 @@
 (defn- info-data
   "Build the snake_case data map used by both `output/info-text` and
    `output/info-json`. Five fixed sections: project, paths, defaults,
-   allowed_values, counts."
+   allowed_values, counts. The document config keys ride the existing
+   sections instead of a sixth: `:doc-types` is an allow-list like
+   `:types`, and `:default-doc-type` a default like `:default-type`."
   [{:keys [project-root prefix project-name config-present? cwd tickets-dir
            default-type default-priority default-mode
-           statuses terminal-statuses active-status types modes afk-mode]
+           statuses terminal-statuses active-status types modes afk-mode
+           doc-types default-doc-type docs-dir required-docs]
     :as ctx}]
-  {:project {:knot_version   version/version
-             :name           project-name
-             :prefix         prefix
-             :config_present (boolean config-present?)}
-   :paths {:cwd          (fs/unixify cwd)
-           :project_root (fs/unixify project-root)
-           :config_path  (fs/unixify (fs/path project-root ".knot.edn"))
-           :tickets_dir  (fs/unixify tickets-dir)
-           :tickets_path (fs/unixify (fs/path project-root tickets-dir))
-           :archive_path (fs/unixify (fs/path project-root tickets-dir store/archive-subdir))
-           :skill_dir    (:skill-dir ctx)
-           :skill_path   (fs/unixify (effective-skill-dir ctx))}
-   :defaults {:default_assignee          (when (contains? ctx :default-assignee)
-                                           (:default-assignee ctx))
-              :effective_create_assignee (effective-create-assignee ctx)
-              :default_type              default-type
-              :default_priority          default-priority
-              :default_mode              default-mode}
-   :allowed_values {:statuses          (vec statuses)
-                    :active_status     active-status
-                    ;; Normalize the terminal-statuses set to an ordered
-                    ;; array by filtering :statuses in display order.
-                    :terminal_statuses (vec (filter (set terminal-statuses) statuses))
-                    :types             (vec types)
-                    :modes             (vec modes)
-                    :afk_mode          afk-mode
-                    :priority_range    {:min 0 :max 4}}
-   :counts (let [tickets-path (fs/path project-root tickets-dir)
-                 archive-path (fs/path tickets-path store/archive-subdir)
-                 live    (count-md-files tickets-path)
-                 archive (count-md-files archive-path)]
-             {:live_count    live
-              :archive_count archive
-              :total_count   (+ live archive)})})
+  ;; `info-data` takes a raw ctx, not `resolve-ctx` output, so it derives the
+  ;; corpus root itself rather than reading the key `resolve-ctx` adds.
+  (let [docs-root* (store/docs-root project-root tickets-dir docs-dir)]
+      {:project {:knot_version   version/version
+               :name           project-name
+               :prefix         prefix
+               :config_present (boolean config-present?)}
+     :paths {:cwd          (fs/unixify cwd)
+             :project_root (fs/unixify project-root)
+             :config_path  (fs/unixify (fs/path project-root ".knot.edn"))
+             :tickets_dir  (fs/unixify tickets-dir)
+             :tickets_path (fs/unixify (fs/path project-root tickets-dir))
+             :archive_path (fs/unixify (fs/path project-root tickets-dir store/archive-subdir))
+             :docs_path    (fs/unixify docs-root*)
+             :skill_dir    (:skill-dir ctx)
+             :skill_path   (fs/unixify (effective-skill-dir ctx))}
+     :defaults {:default_assignee          (when (contains? ctx :default-assignee)
+                                             (:default-assignee ctx))
+                :effective_create_assignee (effective-create-assignee ctx)
+                :default_type              default-type
+                :default_priority          default-priority
+                :default_mode              default-mode
+                :default_doc_type          default-doc-type}
+     :allowed_values {:statuses          (vec statuses)
+                      :active_status     active-status
+                      ;; Normalize the terminal-statuses set to an ordered
+                      ;; array by filtering :statuses in display order.
+                      :terminal_statuses (vec (filter (set terminal-statuses) statuses))
+                      :types             (vec types)
+                      :modes             (vec modes)
+                      :afk_mode          afk-mode
+                      :doc_types         (vec doc-types)
+                      ;; A gate nobody can see is a gate that surprises the
+                      ;; caller by refusing. Keyed by target status, values
+                      ;; in declaration order.
+                      :required_docs     (into {} (map (fn [[k v]] [k (vec v)]))
+                                               required-docs)
+                      :priority_range    {:min 0 :max 4}}
+     :counts (let [tickets-path (fs/path project-root tickets-dir)
+                   archive-path (fs/path tickets-path store/archive-subdir)
+                   docs-path    (fs/path docs-root*)
+                   live    (count-md-files tickets-path)
+                   archive (count-md-files archive-path)]
+               {:live_count    live
+                :archive_count archive
+                ;; Deliberately not folded into total_count: documents are a
+                ;; separate corpus, and a consumer reading total_count today
+                ;; means tickets.
+                :total_count   (+ live archive)
+                :doc_count     (count-md-files docs-path "*/*.md")})}))
 
 (defn info-cmd
   "Report the project's effective runtime configuration and allowed values.
@@ -1803,9 +2005,12 @@
    and `:updated` is preserved for unchanged files. Returns
    `{:migrated <n> :unchanged <n> :total <n>}`."
   [ctx _opts]
-  (let [{:keys [project-root tickets-dir terminal-statuses now]}
+  (let [{:keys [project-root tickets-dir terminal-statuses docs-root now]}
         (resolve-ctx ctx)
-        scan-result (check/scan project-root tickets-dir)
+        ;; migrate-ac only reads `:tickets`, but `scan` needs a corpus root
+        ;; to glob, so it gets the configured one rather than a guess.
+        scan-result (check/scan project-root tickets-dir
+                                docs-root)
         tickets     (:tickets scan-result)
         results     (vec (for [t tickets
                                :let [migrated (acceptance/migrate-ticket t)
@@ -1893,6 +2098,31 @@
      " ;; preamble entirely. Must be a member of :modes (or nil).\n"
      " :afk-mode \"" (:afk-mode d) "\"\n"
      "\n"
+     " ;; Allowed values for the :type field on each document attached to a\n"
+     " ;; ticket (`knot document add`). Must be non-empty — unlike the ticket\n"
+     " ;; enums there is no skip-when-empty branch, so an empty list refuses\n"
+     " ;; every document.\n"
+     " :doc-types " (pr-str (:doc-types d)) "\n"
+     "\n"
+     " ;; Default document type when `knot document add` omits --type\n"
+     " ;; (must be in :doc-types above).\n"
+     " :default-doc-type \"" (:default-doc-type d) "\"\n"
+     "\n"
+     " ;; Where documents live. Commented out means <tickets-dir>/docs, so\n"
+     " ;; renaming :tickets-dir carries them with it. Set it to keep this\n"
+     " ;; writing wherever the project already keeps long-form writing.\n"
+     " ;; Relative paths resolve from the project root and ~ expands, but\n"
+     " ;; the result must stay inside the project.\n"
+     " ;; Documents never move when a ticket closes, wherever they live.\n"
+     " ;; :docs-dir \"docs/tickets\"\n"
+     "\n"
+     " ;; Documents a ticket must own before it may enter a status, keyed by\n"
+     " ;; target status. Refuses the transition until every named type is\n"
+     " ;; attached; --force overrides. Keys must be in :statuses and values\n"
+     " ;; in :doc-types. Empty means no gate.\n"
+     " ;; :required-docs {\"in_progress\" [\"spec\"]}\n"
+     " :required-docs " (pr-str (:required-docs d)) "\n"
+     "\n"
      " ;; Where `knot skill install` writes the agent skill. Relative paths\n"
      " ;; resolve from the project root; ~ expands.\n"
      " ;; :skill-dir \".claude/skills/knot\"\n"
@@ -1918,3 +2148,166 @@
       (fs/create-dirs (fs/path project-root td))
       (spit target (stub-config opts))
       target)))
+
+;; A document is a whole markdown file owned by one ticket, not a section of
+;; one. Two rules follow from that and diverge from the ticket write surface:
+;; a document body is opaque, so the reserved-heading refusal that guards
+;; ticket bodies does not apply to it; and the update replaces title, type
+;; and body together, so a missing one is an error, not a silent carry-over
+;; from the stored document.
+
+(defn- validate-doc-type!
+  "Refuse a type outside `:doc-types` before anything is written."
+  [doc-types type]
+  (when-not (contains? (set doc-types) type)
+    (throw (ex-info (str "invalid document type " (pr-str type)
+                         ": expected one of " (str/join ", " doc-types))
+                    {:kind :invalid-doc-type :value type :allowed (vec doc-types)}))))
+
+(defn- resolve-owner!
+  "Strict-resolve the owning ticket id, so a partial id works and a ticket
+   that resolves to nothing is refused, not filed as an orphan the
+   next `knot check` would report."
+  [project-root tickets-dir input]
+  (get-in (store/resolve-id project-root tickets-dir input) [:frontmatter :id]))
+
+(defn- resolve-doc!
+  "Resolve a document selector, re-tagging `store/resolve-doc`'s generic
+   `:kind` so the envelope names the document corpus and not the ticket
+   one — `not_found` on a document selector would send the reader looking
+   for a ticket."
+  [docs-root selector owner-id]
+  (try
+    (store/resolve-doc docs-root selector owner-id)
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (throw (ex-info (.getMessage e)
+                        (assoc data :kind (case (:kind data)
+                                            :not-found :doc-not-found
+                                            :ambiguous :ambiguous-doc
+                                            (:kind data)))))))))
+
+(defn- doc->json
+  "The metadata view of a document. Never carries the body — `document
+   show` adds it explicitly, and every other surface is a listing."
+  [d]
+  (let [{:keys [id ticket title type created updated]} (:frontmatter d)]
+    {:id id :ticket ticket :title title :type type
+     :created created :updated updated}))
+
+(defn document-add-cmd
+  "Create a document owned by the ticket `(:ticket opts)` (full or partial
+   id). The type defaults to `:default-doc-type` and is checked against
+   `:doc-types` before any write. The body uses the same layered input as
+   note content: explicit `:text` wins; otherwise stdin when `:stdin-tty?`
+   is false; otherwise the editor. A blank body is a valid empty document,
+   not a cancellation — unlike a note, which has nowhere to land.
+
+   Returns the written path, or with `:json? true` a success envelope
+   carrying the document's metadata."
+  [ctx {:keys [ticket title type json?] :as opts}]
+  (let [{:keys [project-root prefix tickets-dir doc-types default-doc-type
+                docs-root now]}
+        (resolve-ctx ctx)
+        owner (resolve-owner! project-root tickets-dir ticket)
+        type* (or type default-doc-type)]
+    (validate-doc-type! doc-types type*)
+    (let [body (resolve-note-content opts (str "Adding a document to " owner "."))
+          path (store/save-new-doc!
+                docs-root
+                #(doc/generate-id prefix)
+                (fn [id] {:doc {:frontmatter {:id id :ticket owner
+                                              :title title :type type*}
+                                :body body}})
+                {:now now})]
+      (if json?
+        (output/envelope-str (doc->json (ticket/parse (slurp path))))
+        path))))
+
+(defn document-show-cmd
+  "Render the document `(:id opts)` resolves to. `:ticket` narrows an
+   owner-plus-title selector. Text mode prints the file as stored; `:json?`
+   emits the metadata plus the body."
+  [ctx {:keys [id ticket json?]}]
+  (let [{:keys [project-root tickets-dir docs-root]} (resolve-ctx ctx)
+        owner (when ticket (resolve-owner! project-root tickets-dir ticket))
+        d     (resolve-doc! docs-root
+                            id owner)]
+    (if json?
+      (output/envelope-str (assoc (doc->json d) :body (:body d)))
+      (ticket/render {:frontmatter (:frontmatter d) :body (:body d)}))))
+
+(defn document-put-cmd
+  "Replace a document: title, type and body together. Refuses a selector
+   that matches nothing — creation is `document add`, and an update that
+   silently created would let a mistyped selector produce a second document
+   whose replaced body looks correct. `:title` and `:type` are required for
+   the same reason this is a replace: carrying either over from the
+   stored document would make this a merge. `:created` is preserved and
+   `:updated` bumps."
+  [ctx {:keys [id ticket title type json?] :as opts}]
+  (let [{:keys [project-root tickets-dir doc-types docs-root now]} (resolve-ctx ctx)
+        root docs-root]
+    ;; No command prefix on either message: `main`'s document router adds
+    ;; one, and both would print.
+    (when (str/blank? title)
+      (throw (ex-info "--title is required"
+                      {:kind :invalid-argument :field :title})))
+    (when (str/blank? type)
+      (throw (ex-info "--type is required"
+                      {:kind :invalid-argument :field :type})))
+    (validate-doc-type! doc-types type)
+    (let [owner    (when ticket (resolve-owner! project-root tickets-dir ticket))
+          existing (resolve-doc! root id owner)
+          fm       (:frontmatter existing)
+          body     (resolve-note-content
+                    opts (str "Replacing document " (:id fm) "."))
+          path     (store/save-doc! root
+                                    ;; `:path` is carried through from the
+                                    ;; resolved document so the replace writes
+                                    ;; the file that was found, not one
+                                    ;; recomputed from the owning ticket — the
+                                    ;; two differ for a misplaced document.
+                                    {:frontmatter (assoc fm :title title :type type)
+                                     :body        body
+                                     :path        (:path existing)}
+                                    {:now now})]
+      (if json?
+        (output/envelope-str (doc->json (ticket/parse (slurp path))))
+        path))))
+
+(defn document-rm-cmd
+  "Delete the one document `(:id opts)` resolves to. Refuses an ambiguous
+   selector rather than deleting a first match."
+  [ctx {:keys [id ticket json?]}]
+  (let [{:keys [project-root tickets-dir docs-root]} (resolve-ctx ctx)
+        owner   (when ticket (resolve-owner! project-root tickets-dir ticket))
+        d       (resolve-doc! docs-root
+                              id owner)
+        removed (store/delete-doc! (:path d))]
+    (if json?
+      (output/envelope-str {:deleted {:id   (get-in d [:frontmatter :id])
+                                      :path (fs/unixify removed)}})
+      removed)))
+
+(defn document-ls-cmd
+  "List the documents owned by `(:ticket opts)`, in filename order. A ticket
+   owning none lists an empty set, not an error: absent and empty are
+   the same answer."
+  [ctx {:keys [ticket json?]}]
+  (let [{:keys [project-root tickets-dir docs-root]} (resolve-ctx ctx)
+        owner (resolve-owner! project-root tickets-dir ticket)
+        ;; Same rule as `show`: the directory scopes the read, the
+        ;; `ticket` field decides ownership.
+        docs  (query/documents-for
+               (store/load-docs-for
+                docs-root owner)
+               owner)]
+    (if json?
+      (output/envelope-str {:ticket owner :documents (mapv doc->json docs)})
+      (if (empty? docs)
+        (str owner " has no documents.")
+        (str/join "\n"
+                  (for [d docs
+                        :let [{:keys [id title type]} (:frontmatter d)]]
+                    (str id "  " type "  " title)))))))

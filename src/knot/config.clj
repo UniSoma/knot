@@ -14,7 +14,18 @@
    :types             ["bug" "feature" "task" "epic" "chore"]
    :modes             ["afk" "hitl"]
    :default-mode      "hitl"
-   :afk-mode          "afk"})
+   :afk-mode          "afk"
+   :doc-types         ["spec" "plan" "other"]
+   :default-doc-type  "other"
+   ;; nil means `<tickets-dir>/docs`, so renaming :tickets-dir carries the
+   ;; document corpus with it. A string resolves against the project root,
+   ;; matching :skill-dir, and lets a project keep this writing wherever it
+   ;; already keeps long-form writing.
+   :docs-dir          nil
+   ;; {<status> [<doc-type> ...]}. A transition INTO a listed status is
+   ;; refused until the ticket owns a document of every named type. Empty
+   ;; by default: a gate nobody asked for is a gate that fires by surprise.
+   :required-docs     {}})
 
 (defn defaults
   "Return the v0 schema defaults. `load-config` merges `.knot.edn`
@@ -58,7 +69,8 @@
 (def ^:private known-keys
   #{:tickets-dir :prefix :project-name :default-assignee :default-type
     :default-priority :statuses :terminal-statuses :active-status
-    :types :modes :default-mode :afk-mode :skill-dir})
+    :types :modes :default-mode :afk-mode :skill-dir
+    :doc-types :default-doc-type :docs-dir :required-docs})
 
 (defn- warn! [msg]
   (binding [*out* *err*] (println msg)))
@@ -94,7 +106,8 @@
   [merged]
   (let [{:keys [tickets-dir prefix project-name default-assignee default-type
                 default-priority statuses terminal-statuses active-status
-                types modes default-mode afk-mode skill-dir]} merged]
+                types modes default-mode afk-mode skill-dir
+                doc-types default-doc-type docs-dir required-docs]} merged]
     (when-not (non-blank-string? tickets-dir)
       (throw (ex-info ".knot.edn :tickets-dir must be a non-blank string" {})))
     (when (and (some? prefix) (not (and (non-blank-string? prefix)
@@ -133,7 +146,37 @@
     (when-not (and (integer? default-priority) (<= 0 default-priority 4))
       (throw (ex-info ".knot.edn :default-priority must be an integer 0..4" {})))
     (when (and (some? skill-dir) (not (non-blank-string? skill-dir)))
-      (throw (ex-info ".knot.edn :skill-dir must be a non-blank string" {}))))
+      (throw (ex-info ".knot.edn :skill-dir must be a non-blank string" {})))
+    ;; An empty :doc-types is refused, not tolerated: the enum
+    ;; validator skips validation entirely on an empty allowed set, so an
+    ;; empty list would silently disable the allow-list instead of narrowing
+    ;; it. That is a degenerate config value, not a legitimate shrink, so it
+    ;; belongs here at load, not in `check`.
+    (when-not (list-of-non-blank-strings? doc-types)
+      (throw (ex-info ".knot.edn :doc-types must be a non-empty list of strings" {})))
+    (when-not ((set doc-types) default-doc-type)
+      (throw (ex-info ".knot.edn :default-doc-type must be one of :doc-types" {})))
+    (when (and (some? docs-dir) (not (non-blank-string? docs-dir)))
+      (throw (ex-info ".knot.edn :docs-dir must be a non-blank string, or nil for <tickets-dir>/docs" {})))
+    ;; Validated against BOTH enums it spans, because a typo in either half
+    ;; is silent otherwise: an unknown status gates nothing and an unknown
+    ;; type gates forever.
+    (when-not (map? required-docs)
+      (throw (ex-info ".knot.edn :required-docs must be a map of status to doc types" {})))
+    (doseq [[status types] required-docs]
+      (when-not ((set statuses) status)
+        (throw (ex-info (str ".knot.edn :required-docs key " (pr-str status)
+                             " must be one of :statuses " (pr-str (vec statuses)))
+                        {:status status :statuses statuses})))
+      (when-not (list-of-non-blank-strings? types)
+        (throw (ex-info (str ".knot.edn :required-docs " (pr-str status)
+                             " must be a non-empty list of strings") {})))
+      (doseq [t types]
+        (when-not ((set doc-types) t)
+          (throw (ex-info (str ".knot.edn :required-docs " (pr-str status)
+                               " names doc type " (pr-str t)
+                               ", which is not in :doc-types " (pr-str (vec doc-types)))
+                          {:status status :type t :doc-types doc-types}))))))
   merged)
 
 (defn load-config

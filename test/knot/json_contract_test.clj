@@ -1031,7 +1031,9 @@
            (:data envelope) "show --json (tagged)" {:body? true})
           (is (= ["p0" "auth"] (get-in envelope [:data :tags]))
               "tags round-trip in declaration order")
-          (is (= ["JIRA-1"] (get-in envelope [:data :external_refs])))))
+          (is (= ["JIRA-1"] (get-in envelope [:data :external_refs])))
+          (is (= [] (get-in envelope [:data :documents]))
+              "documents is always present — [] when the ticket owns none")))
 
       (testing "show --json — ticket with blocker emits :blocking inverse"
         ;; The blocker-side ticket has a `:blocking` inverse (the
@@ -1155,7 +1157,8 @@
 
       (testing "info --json — :allowed_values sub-keys"
         (let [{:keys [statuses active_status terminal_statuses
-                      types modes afk_mode priority_range]}
+                      types modes afk_mode priority_range doc_types
+                      required_docs]}
               (:allowed_values data)]
           (is (vector? statuses))
           (is (string? active_status))
@@ -1164,10 +1167,19 @@
           (is (vector? modes))
           (is (string? afk_mode))
           (is (integer? (:min priority_range)))
-          (is (integer? (:max priority_range)))))
+          (is (integer? (:max priority_range)))
+          (is (= ["spec" "plan" "other"] doc_types)
+              "the document allow-list reaches every destination the other enums do")
+          (is (map? required_docs)
+              "required_docs is always present, {} when no gate is configured")))
+
+      (testing "info --json — :defaults carries the document default"
+        (is (= "other" (get-in data [:defaults :default_doc_type]))))
 
       (testing "info --json — :counts sub-keys"
-        (let [{:keys [live_count archive_count total_count]} (:counts data)]
+        (let [{:keys [live_count archive_count total_count doc_count]} (:counts data)]
+          (is (integer? doc_count)
+              "doc_count is always present, 0 on a project with no documents")
           (is (integer? live_count))
           (is (integer? archive_count))
           (is (integer? total_count))
@@ -1181,13 +1193,15 @@
         ;; relative. Asserted explicitly so the next reader does not
         ;; "fix" it into an absolute path and break the config echo.
         (let [{:keys [cwd project_root config_path tickets_dir
-                      tickets_path archive_path skill_dir skill_path]} (:paths data)]
+                      tickets_path archive_path docs_path
+                      skill_dir skill_path]} (:paths data)]
           (is (fs/absolute? project_root)
               (str "info paths.project_root must be absolute, got "
                    (pr-str project_root)))
           (doseq [[k v] [[:cwd cwd] [:config_path config_path]
                          [:tickets_path tickets_path]
                          [:archive_path archive_path]
+                         [:docs_path docs_path]
                          [:skill_path skill_path]]]
             (is (fs/absolute? v)
                 (str "info paths." (name k) " must be absolute, got "

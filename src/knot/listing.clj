@@ -4,7 +4,8 @@
    source → closure → component → display filters → sort → limit → columns —
    and `columns` declares every computed column once, so output and help
    iterate the declarations instead of branching per column."
-  (:require [knot.acceptance :as acceptance]
+  (:require [clojure.string :as str]
+            [knot.acceptance :as acceptance]
             [knot.query :as query]))
 
 (defn- id [t] (get-in t [:frontmatter :id]))
@@ -153,13 +154,34 @@
             (cond-> t (pos? total) (assoc :children-progress cp))))
         rows))
 
+(defn attach-doc-types
+  "Attach `:doc-types` to each row, as the sorted distinct types of the
+   documents that ticket owns. `doc-meta` is `store/load-all-doc-meta`'s
+   output, passed in rather than read here: this namespace is the view and
+   holds no filesystem boundary. Rows owning none are left untouched, so
+   the key's absence is the no-documents predicate.
+
+   Ownership comes from each document's own `ticket` field, never the
+   directory it sits in, so a misfiled document is not claimed by the
+   ticket whose folder happens to hold it."
+  [rows doc-meta]
+  (let [by-owner (group-by #(get-in % [:frontmatter :ticket]) doc-meta)]
+    (mapv (fn [t]
+            (let [types (->> (get by-owner (id t))
+                             (keep #(get-in % [:frontmatter :type]))
+                             distinct sort vec)]
+              (cond-> t (seq types) (assoc :doc-types types))))
+          rows)))
+
 (def columns
   "One declaration per computed column, in table-layout order. Fields:
    `:key` `:header` `:align` as the table renders them; `:position`
    `:leading` for the column that precedes ID (all others sit between AGE
    and TITLE); `:sources` the views that attach the column; `:attach`
    `(fn [rows corpus terminal-statuses])` adding the row key, absent for a
-   column read straight off frontmatter; `:shown?` `(fn [rows])` deciding
+   column read straight off frontmatter; `:caller-attached? true` for a
+   column whose data does not live in the corpus, so this namespace cannot
+   derive it and the caller adds the row key before rendering; `:shown?` `(fn [rows])` deciding
    whether the column appears at all; `:cell` `(fn [row])` the plain cell
    string; `:json` `(fn [row])` the fields the row's JSON gains, or nil;
    `:note` the column's definition for the NOTES of every command that
@@ -190,6 +212,17 @@
     :json   (fn [row] (when-let [[term total] (:children-progress row)]
                         {:children_total total :children_terminal term}))
     :note   "terminal/total direct children, `-` for a ticket that is not an umbrella. The column appears only when the view holds an umbrella. --json adds `children_total` and `children_terminal`, on umbrella rows only."}
+   {:key :doc-types :header "DOCS" :align :left
+    :sources all-sources
+    ;; Documents live on disk and this namespace is the view, which holds no
+    ;; filesystem boundary, so the caller attaches `:doc-types` before
+    ;; rendering. Declared rather than explained: `attach-columns` enforces
+    ;; that every column names where its data comes from.
+    :caller-attached? true
+    :shown? (fn [rows] (some :doc-types rows))
+    :cell   (fn [row] (if-let [ts (seq (:doc-types row))] (str/join "," ts) "-"))
+    :json   (fn [row] (when-let [ts (seq (:doc-types row))] {:doc_types (vec ts)}))
+    :note   "distinct types of the documents the ticket owns, comma-separated, `-` when it owns none. The column appears only when some row in the view owns a document. Answers whether a ticket already has a spec without opening it. --json adds `doc_types`, on owning rows only."}
    {:key :leverage :header "LEV" :align :right
     :sources live-sources
     :attach (attach-per-row :leverage query/leverage)
@@ -220,6 +253,8 @@
     :note   "connected component: which cluster of the live graph (parent, deps and links, undirected) the row sits on. The number is a throwaway within-snapshot ordinal — largest cluster 1, `-` for a singleton — and membership ignores your filters. --json field `cc` on every row, null for a singleton. Use --component to work one cluster."}])
 
 (defn- attach-columns
+  "Run each column's `:attach` over `rows`. Columns without one either read
+   straight off frontmatter or declare `:caller-attached?`."
   [rows corpus terminal-statuses source]
   (reduce (fn [rows {:keys [attach sources]}]
             (if (and attach (contains? sources source))

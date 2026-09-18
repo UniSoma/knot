@@ -2,6 +2,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [knot.doc :as doc]
             [knot.store :as store]
             [knot.ticket :as ticket]))
 
@@ -10,6 +11,12 @@
          ~bind tmp#]
      (try ~@body
           (finally (fs/delete-tree tmp#)))))
+
+(defn- droot
+  "The default document corpus root for a sandbox project. `:docs-dir` is
+   nil in these tests, so this is what `store/docs-root` resolves to."
+  [tmp]
+  (store/docs-root tmp ".tickets" nil))
 
 (def ^:private terminal-statuses #{"closed"})
 (def ^:private save-opts {:now "2026-04-28T12:00:00Z"
@@ -580,6 +587,49 @@
         (is (str/ends-with? path "kno-fresh01--a.md"))
         (is (fs/exists? path))))))
 
+(deftest write-new-classifies-failures-test
+  ;; The classification boundary `save-new!`'s retry loop rests on: only a
+  ;; path that already exists is retryable. Every other failure of the
+  ;; exclusive open is a real fault and must reach the caller, or a broken
+  ;; filesystem would present as an id-collision-exhausted error ten
+  ;; attempts later.
+  (testing "an occupied path reports a collision and leaves the file alone"
+    (with-tmp tmp
+      (let [p (fs/path tmp "x.md")]
+        (spit (str p) "existing")
+        (is (= ::store/collision (store/write-new! p (.getBytes "new" "UTF-8"))))
+        (is (= "existing" (slurp (str p)))))))
+
+  (testing "a fresh path is created and the written path returned"
+    (with-tmp tmp
+      (let [p (fs/path tmp "sub" "y.md")]
+        (is (= (str p) (store/write-new! p (.getBytes "new" "UTF-8"))))
+        (is (= "new" (slurp (str p)))))))
+
+  (testing "any other IO failure of the open propagates rather than retrying"
+    ;; A parent the process cannot write to fails the open with
+    ;; AccessDeniedException — an IOException that is not a collision.
+    ;;
+    ;; The precondition is checked rather than assumed. uid 0 ignores the
+    ;; mode bits, so under root the write below SUCCEEDS and `thrown?` would
+    ;; pass vacuously — which is exactly the defect this case was written to
+    ;; replace, so it must not be reintroduced here. CI containers commonly
+    ;; run as root, so this is a live path, not a hypothetical one.
+    (with-tmp tmp
+      (let [locked (fs/path tmp "locked")]
+        (fs/create-dirs locked)
+        (fs/set-posix-file-permissions locked "r-xr-xr-x")
+        (try
+          (if (fs/writable? locked)
+            (println (str "SKIP write-new-classifies-failures-test: this process can "
+                          "write to a mode r-xr-xr-x directory (uid 0?), so the "
+                          "non-collision IO failure cannot be provoked here."))
+            (is (thrown? java.io.IOException
+                         (store/write-new! (fs/path locked "z.md")
+                                           (.getBytes "x" "UTF-8")))))
+          (finally
+            (fs/set-posix-file-permissions locked "rwxr-xr-x")))))))
+
 (deftest save-new-exhaustion-test
   (testing "save-new! throws :id-collision-exhausted after default max-retries=10"
     (with-tmp tmp
@@ -649,3 +699,379 @@
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (some? e))
         (is (= :ambiguous (:kind (ex-data e))))))))
+
+(def ^:private planted-stamp "2026-01-01T00:00:00Z")
+
+(defn- mkrec
+  "A document record in the shape the store receives it. No I/O."
+  [id ticket title type body]
+  {:frontmatter {:id id :ticket ticket :title title :type type}
+   :body        body})
+
+(defn- plant-doc!
+  "Write a document file straight to disk, bypassing the store's write path.
+   The tests below are the failing tests FOR that write path, so a fixture
+   built on `save-doc!` would assert the function under test against itself.
+   `doc/filename` is shared, not re-derived — a parallel naming rule
+   in the fixture would hide exactly the mismatch these tests exist to catch."
+  [tmp tickets-dir rec]
+  (let [{:keys [id ticket title]} (:frontmatter rec)
+        dir (fs/path tmp tickets-dir "docs" ticket)
+        fm  (merge {:created planted-stamp :updated planted-stamp}
+                   (:frontmatter rec))
+        p   (fs/path dir (doc/filename id title))]
+    (fs/create-dirs dir)
+    (spit (str p) (ticket/render (assoc rec :frontmatter fm)))
+    (str p)))
+
+(deftest save-doc-sibling-safety-test
+  (testing "writing one document leaves every sibling byte-identical"
+    (with-tmp tmp
+      (let [a        (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" "alpha"))
+            b        (plant-doc! tmp ".tickets" (mkrec "kno-d01b" "kno-01t" "B" "spec" "beta"))
+            a-before (slurp a)]
+        (store/save-doc! (droot tmp)
+                         (mkrec "kno-d01b" "kno-01t" "B" "plan" "beta v2") {})
+        (is (= a-before (slurp a)) "sibling must be untouched")
+        (is (fs/exists? b))
+        (is (= "beta v2" (:body (ticket/parse (slurp b)))))))))
+
+(deftest save-doc-retitle-does-not-rename-test
+  (testing "a retitle keeps the filename and creates no second file"
+    (with-tmp tmp
+      (let [p   (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "Old" "spec" "x"))
+            _   (store/save-doc! (droot tmp)
+                                 (mkrec "kno-d01a" "kno-01t" "New" "spec" "x") {})
+            dir (store/owner-dir (droot tmp) "kno-01t")]
+        (is (fs/exists? p))
+        (is (= 1 (count (fs/glob dir "*.md"))))
+        (is (= "New" (get-in (ticket/parse (slurp p)) [:frontmatter :title]))
+            "the new title is stored even though the filename is unchanged")))))
+
+(deftest save-doc-preserves-created-test
+  (testing "save-doc! preserves :created and moves only :updated"
+    (with-tmp tmp
+      (let [p (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "T" "spec" "x"))]
+        (store/save-doc! (droot tmp)
+                         (mkrec "kno-d01a" "kno-01t" "T" "spec" "y")
+                         {:now "2026-06-06T06:06:06Z"})
+        (let [fm (:frontmatter (ticket/parse (slurp p)))]
+          (is (= planted-stamp (:created fm)))
+          (is (= "2026-06-06T06:06:06Z" (:updated fm))))))))
+
+(deftest save-new-doc-is-exclusive-test
+  (testing "a colliding id retries rather than overwriting an existing document"
+    (with-tmp tmp
+      (let [ids (atom ["kno-d01dup" "kno-d01dup" "kno-d01fresh"])
+            gen #(let [v (first @ids)] (swap! ids rest) v)
+            p1  (store/save-new-doc! (droot tmp) (constantly "kno-d01dup")
+                                     (fn [id] {:doc (mkrec id "kno-01t" "A" "spec" "a")}) {})
+            p2  (store/save-new-doc! (droot tmp) gen
+                                     (fn [id] {:doc (mkrec id "kno-01t" "B" "spec" "b")}) {})]
+        (is (not= p1 p2) "the second create must not land on the first's path")
+        (is (str/includes? (str p2) "kno-d01fresh"))
+        (is (= "a" (:body (ticket/parse (slurp p1)))) "the first document is untouched")))))
+
+(deftest save-new-doc-detects-a-cross-owner-collision-test
+  (testing "uniqueness is corpus-wide: CREATE_NEW alone cannot see this"
+    (with-tmp tmp
+      (let [ids (atom ["kno-d01dup" "kno-d01fresh"])
+            gen #(let [v (first @ids)] (swap! ids rest) v)
+            p1  (store/save-new-doc! (droot tmp) (constantly "kno-d01dup")
+                                     (fn [id] {:doc (mkrec id "kno-01A" "A" "spec" "a")}) {})
+            ;; different OWNER, so the target path differs and CREATE_NEW would succeed
+            p2  (store/save-new-doc! (droot tmp) gen
+                                     (fn [id] {:doc (mkrec id "kno-01B" "B" "spec" "b")}) {})]
+        (is (str/includes? (str p2) "kno-d01fresh")
+            "the duplicate id must be rejected across owner directories, not just within one")
+        (is (= "a" (:body (ticket/parse (slurp p1)))))))))
+
+(deftest save-new-doc-exhaustion-test
+  (testing "save-new-doc! throws :id-collision-exhausted when every id collides"
+    (with-tmp tmp
+      (store/save-new-doc! (droot tmp) (constantly "kno-d01dup")
+                           (fn [id] {:doc (mkrec id "kno-01t" "A" "spec" "a")}) {})
+      (let [e (try (store/save-new-doc! (droot tmp) (constantly "kno-d01dup")
+                                        (fn [id] {:doc (mkrec id "kno-01t" "B" "spec" "b")})
+                                        {:max-retries 3})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :id-collision-exhausted (:kind (ex-data e))))
+        (is (= 3 (:attempts (ex-data e))))))))
+
+(deftest save-new-doc-stamps-both-timestamps-test
+  (testing "a created document carries :created and :updated at the same instant"
+    (with-tmp tmp
+      (let [p  (store/save-new-doc! (droot tmp) (constantly "kno-d01a")
+                                    (fn [id] {:doc (mkrec id "kno-01t" "A" "spec" "a")})
+                                    {:now "2026-05-05T05:05:05Z"})
+            fm (:frontmatter (ticket/parse (slurp p)))]
+        (is (= "2026-05-05T05:05:05Z" (:created fm)))
+        (is (= "2026-05-05T05:05:05Z" (:updated fm)))))))
+
+(deftest save-doc-refuses-a-missing-target-test
+  (testing "save-doc! never creates"
+    (with-tmp tmp
+      (let [e (try (store/save-doc! (droot tmp)
+                                    (mkrec "kno-d01nope" "kno-01t" "T" "spec" "b") {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (some? e) "an update against a missing document must throw")
+        (is (= :not-found (:kind (ex-data e))))
+        (is (empty? (store/load-all-docs (droot tmp)))
+            "the refused update must not have left a file behind")))))
+
+(deftest load-docs-for-absent-and-empty-owner-dir-test
+  (testing "absent and empty owner directories both mean no documents"
+    (with-tmp tmp
+      (is (= [] (store/load-docs-for (droot tmp) "kno-01none")))
+      (fs/create-dirs (store/owner-dir (droot tmp) "kno-01empty"))
+      (is (= [] (store/load-docs-for (droot tmp) "kno-01empty"))))))
+
+(deftest load-docs-for-is-owner-scoped-test
+  (testing "load-docs-for returns one owner's documents, load-all-docs the corpus"
+    (with-tmp tmp
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01b" "kno-01A" "B" "spec" "b"))
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01A" "A" "spec" "a"))
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01c" "kno-01B" "C" "spec" "c"))
+      (is (= ["kno-d01a" "kno-d01b"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (store/load-docs-for (droot tmp) "kno-01A")))
+          "ordered by filename, not by write order")
+      (is (= ["kno-d01c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (store/load-docs-for (droot tmp) "kno-01B"))))
+      (is (= 3 (count (store/load-all-docs (droot tmp)))))
+      (is (= [] (store/load-all-docs (store/docs-root tmp ".tickets-empty" nil)))))))
+
+(deftest load-all-docs-carries-path-and-owner-test
+  (testing "load-all-docs annotates each document with its path and owner dir"
+    (with-tmp tmp
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01A" "A" "spec" "a"))
+      (let [d (first (store/load-all-docs (droot tmp)))]
+        (is (str/ends-with? (:path d) "kno-d01a--a.md"))
+        (is (= "kno-01A" (:owner-dir d)))))))
+
+(deftest load-all-ignores-documents-test
+  (testing "the ticket corpus never sees a document"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" "x"))
+      (is (empty? (store/load-all tmp ".tickets"))))))
+
+(deftest resolve-doc-layers-test
+  (with-tmp tmp
+    (plant-doc! tmp ".tickets" (mkrec "kno-d01aaa" "kno-01A" "Design" "spec" "a"))
+    (plant-doc! tmp ".tickets" (mkrec "kno-d01bbb" "kno-01A" "Rollout" "plan" "b"))
+    (plant-doc! tmp ".tickets" (mkrec "kno-d02ccc" "kno-01B" "Design" "spec" "c"))
+    (testing "an exact id resolves"
+      (is (= "kno-d01aaa"
+             (get-in (store/resolve-doc (droot tmp) "kno-d01aaa")
+                     [:frontmatter :id]))))
+    (testing "a unique prefix resolves"
+      (is (= "kno-d02ccc"
+             (get-in (store/resolve-doc (droot tmp) "kno-d02")
+                     [:frontmatter :id]))))
+    (testing "an ambiguous prefix is refused with its candidates named"
+      (let [e (try (store/resolve-doc (droot tmp) "kno-d01") nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :ambiguous (:kind (ex-data e))))
+        (is (= ["kno-d01aaa" "kno-d01bbb"] (:candidates (ex-data e))))))
+    (testing "a title resolves only within its owning ticket"
+      (is (= "kno-d02ccc"
+             (get-in (store/resolve-doc (droot tmp) "Design" "kno-01B")
+                     [:frontmatter :id])))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (store/resolve-doc (droot tmp) "Design"))
+          "without an owning ticket a title is not a selector"))
+    (testing "no match is refused"
+      (let [e (try (store/resolve-doc (droot tmp) "kno-d99") nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :not-found (:kind (ex-data e))))))))
+
+(deftest resolve-doc-refuses-a-duplicate-title-test
+  (testing "two documents sharing a title under one ticket are ambiguous, not first-match"
+    (with-tmp tmp
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01aaa" "kno-01A" "Design" "spec" "a"))
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01bbb" "kno-01A" "Design" "plan" "b"))
+      (let [e (try (store/resolve-doc (droot tmp) "Design" "kno-01A") nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :ambiguous (:kind (ex-data e))))
+        (is (= ["kno-d01aaa" "kno-d01bbb"] (:candidates (ex-data e))))))))
+
+(deftest delete-doc-test
+  (testing "delete-doc! unlinks one document and leaves its siblings alone"
+    (with-tmp tmp
+      (let [a (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" "a"))
+            b (plant-doc! tmp ".tickets" (mkrec "kno-d01b" "kno-01t" "B" "spec" "b"))]
+        (is (= a (store/delete-doc! a)))
+        (is (not (fs/exists? a)))
+        (is (fs/exists? b))))))
+
+(deftest load-docs-for-annotates-path-test
+  (testing "each document carries the path it was loaded from"
+    (with-tmp tmp
+      (let [p (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" "a"))]
+        (is (= [p] (mapv :path (store/load-docs-for (droot tmp) "kno-01t"))))))))
+
+(deftest save-doc-writes-the-file-it-was-given-test
+  ;; The `ticket` field is authoritative and the directory is a locator, so a
+  ;; replace must write the file that was found, not one recomputed
+  ;; from the owning ticket. Recomputing makes a replace fail :not-found on a
+  ;; misplaced document that plainly exists.
+  (testing "a document filed under the wrong owner is replaced in place"
+    (with-tmp tmp
+      ;; Frontmatter names kno-01B; the file sits under kno-01A.
+      (let [rec  (mkrec "kno-d01a" "kno-01B" "T" "spec" "one")
+            dir  (fs/path tmp ".tickets" "docs" "kno-01A")
+            _    (fs/create-dirs dir)
+            p    (str (fs/path dir (doc/filename "kno-d01a" "T")))
+            _    (spit p (ticket/render (assoc-in rec [:frontmatter :created] planted-stamp)))
+            found (store/resolve-doc (droot tmp) "kno-d01a")]
+        (is (= p (:path found)) "the resolver finds it where it actually is")
+        (is (= p (store/save-doc! (droot tmp)
+                                  (assoc found :body "two") {})))
+        (is (= "two" (:body (ticket/parse (slurp p)))))
+        (is (= 1 (count (store/load-all-docs (droot tmp))))
+            "the replace must not have created a second file under the named owner"))))
+
+  (testing "without a :path the owning ticket still resolves one"
+    (with-tmp tmp
+      (let [p (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "T" "spec" "one"))]
+        (is (= p (store/save-doc! (droot tmp)
+                                  (mkrec "kno-d01a" "kno-01t" "T" "spec" "two") {})))
+        (is (= "two" (:body (ticket/parse (slurp p)))))))))
+
+(deftest save-doc-validates-required-frontmatter-test
+  ;; `document add` checks the type but not the title, so the store is where
+  ;; the completeness invariant has to hold — it is the boundary every write
+  ;; passes through.
+  (testing "create refuses a document missing a required field"
+    (with-tmp tmp
+      (let [e (try (store/save-new-doc!
+                    (droot tmp) (constantly "kno-d01a")
+                    (fn [id] {:doc {:frontmatter {:id id :ticket "kno-01t" :type "spec"}
+                                    :body "b"}})
+                    {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :invalid-document (:kind (ex-data e))))
+        (is (= [:title] (:missing (ex-data e))))
+        (is (empty? (store/load-all-docs (droot tmp)))
+            "nothing is written by a refused create"))))
+
+  (testing "a blank title is refused just as a missing one is"
+    (with-tmp tmp
+      (let [e (try (store/save-new-doc!
+                    (droot tmp) (constantly "kno-d01a")
+                    (fn [id] {:doc {:frontmatter {:id id :ticket "kno-01t"
+                                                  :title "  " :type "spec"}
+                                    :body "b"}})
+                    {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :invalid-document (:kind (ex-data e)))))))
+
+  (testing "replace refuses one too, and leaves the stored document alone"
+    (with-tmp tmp
+      (let [p (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "T" "spec" "one"))
+            e (try (store/save-doc! (droot tmp)
+                                    {:frontmatter {:id "kno-d01a" :ticket "kno-01t"
+                                                   :title "T"}
+                                     :body "two"}
+                                    {})
+                   nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :invalid-document (:kind (ex-data e))))
+        (is (= [:type] (:missing (ex-data e))))
+        (is (= "one" (:body (ticket/parse (slurp p)))))))))
+
+(deftest load-doc-meta-reads-frontmatter-only-test
+  ;; Listing views need each document's type, and nothing else. Parsing the
+  ;; whole corpus to get it would spend on every `ls` exactly what attaching
+  ;; documents was meant to save.
+  (testing "the frontmatter is returned and the body is not"
+    (with-tmp tmp
+      (let [big (apply str (repeat 200000 "x"))]
+        (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" big))
+        (let [[m] (store/load-all-docs-meta (droot tmp))]
+          (is (= "kno-d01a" (get-in m [:frontmatter :id])))
+          (is (= "spec" (get-in m [:frontmatter :type])))
+          (is (= "kno-01t" (get-in m [:frontmatter :ticket])))
+          (is (not (contains? m :body))
+              "a body key would defeat the point of the reader")
+          (is (str/ends-with? (:path m) "kno-d01a--a.md"))))))
+
+  (testing "it agrees with the full reader on every frontmatter field"
+    (with-tmp tmp
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01t" "A" "spec" "body"))
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01b" "kno-01u" "B" "plan" "body"))
+      (is (= (mapv :frontmatter (store/load-all-docs (droot tmp)))
+             (mapv :frontmatter (store/load-all-docs-meta (droot tmp)))))))
+
+  (testing "an absent corpus is empty, not an error"
+    (with-tmp tmp
+      (is (= [] (store/load-all-docs-meta (droot tmp))))))
+
+  (testing "a file with no frontmatter yields no frontmatter rather than throwing"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "docs" "kno-01t"))
+      (spit (str (fs/path tmp ".tickets" "docs" "kno-01t" "kno-dbare--x.md"))
+            "no frontmatter here\n")
+      (is (= [{}] (mapv :frontmatter (store/load-all-docs-meta (droot tmp))))))))
+
+(deftest doc-readers-agree-on-malformed-input-test
+  ;; The claim "it agrees with the full reader" is only worth the inputs it
+  ;; is tested against. These are the ones that diverged: the metadata
+  ;; reader was the MORE permissive of the two, so a listing reported types
+  ;; that no other command agreed existed.
+  (testing "both readers return the same frontmatter for every shape on disk"
+    (doseq [[label content]
+            [["well formed"
+              "---\nid: kno-d01a\nticket: kno-01t\ntype: spec\n---\n\nbody\n"]
+             ["CRLF line endings"
+              "---\r\nid: kno-d01a\r\nticket: kno-01t\r\ntype: spec\r\n---\r\n\r\nbody\r\n"]
+             ["closing fence with no trailing newline"
+              "---\nid: kno-d01a\ntype: spec\n---"]
+             ["unterminated frontmatter"
+              "---\nid: kno-d01a\ntype: spec\n"]
+             ["no frontmatter at all"
+              "just prose\n"]
+             ["empty file" ""]
+             ["fence-looking line inside the body"
+              "---\nid: kno-d01a\ntype: spec\n---\n\nbody\n---\nmore\n"]]]
+      (with-tmp tmp
+        (let [dir (fs/path tmp ".tickets" "docs" "kno-01t")]
+          (fs/create-dirs dir)
+          (spit (str (fs/path dir "kno-d01a--x.md")) content)
+          (is (= (mapv :frontmatter (store/load-all-docs (droot tmp)))
+                 (mapv :frontmatter (store/load-all-docs-meta (droot tmp))))
+              (str "readers disagree on: " label)))))))
+
+(deftest load-docs-meta-for-is-owner-scoped-test
+  ;; The gates' reader: one ticket's documents, types only. The body is the
+  ;; large part of a document by design, so reading it on the write path to
+  ;; look at one frontmatter field is the cost documents exist to avoid.
+  (testing "it returns one owner's documents, frontmatter and path only"
+    (with-tmp tmp
+      (let [big (apply str (repeat 100000 "x"))]
+        (plant-doc! tmp ".tickets" (mkrec "kno-d01b" "kno-01A" "B" "plan" big))
+        (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01A" "A" "spec" big))
+        (plant-doc! tmp ".tickets" (mkrec "kno-d01c" "kno-01B" "C" "spec" big))
+        (let [got (store/load-docs-meta-for (droot tmp) "kno-01A")]
+          (is (= ["kno-d01a" "kno-d01b"] (mapv #(get-in % [:frontmatter :id]) got))
+              "owner-scoped, ordered by filename")
+          (is (= ["spec" "plan"] (mapv #(get-in % [:frontmatter :type]) got)))
+          (is (every? #(not (contains? % :body)) got)
+              "no body key: that is the whole point of this reader")
+          (is (every? :path got))))))
+
+  (testing "it agrees with the body-carrying reader on frontmatter"
+    (with-tmp tmp
+      (plant-doc! tmp ".tickets" (mkrec "kno-d01a" "kno-01A" "A" "spec" "body"))
+      (is (= (mapv :frontmatter (store/load-docs-for (droot tmp) "kno-01A"))
+             (mapv :frontmatter (store/load-docs-meta-for (droot tmp) "kno-01A"))))))
+
+  (testing "an absent owner directory is empty, not an error"
+    (with-tmp tmp
+      (is (= [] (store/load-docs-meta-for (droot tmp) "kno-01none"))))))

@@ -11,12 +11,26 @@ to a ticket, reach for `add-note`.
 
 ## A render is not a body
 
-Five sections in a `knot show` render — `## Acceptance Criteria`, `## Blockers`, `## Blocking`, `## Children`,
-`## Linked` — are synthesized from the `acceptance`, `deps`, `parent`, and `links` fields and marked in the render by
-an HTML comment naming the source. What you would have written under one goes through the owning field instead
-(`--add-ac`, `knot dep`, `--parent`, `knot link`). `--body` refuses those five names; near-synonyms are not refused and
-are the same mistake — a hand-written `## Blocked by`, `## Depends on`, or `## Parent document` is prose that stops
-matching the graph the moment the graph moves.
+Six sections in a `knot show` render — `## Acceptance Criteria`, `## Blockers`, `## Blocking`, `## Children`,
+`## Linked`, `## Documents` — are synthesized from the `acceptance`, `deps`, `parent`, and `links` fields and from the
+document corpus, and are marked in the render by an HTML comment naming the source. What you would have written under
+one goes through the owning writer instead (`--add-ac`, `knot dep`, `--parent`, `knot link`, `knot document add`).
+`--body` refuses those six names; near-synonyms are not refused and are the same mistake — a hand-written
+`## Blocked by`, `## Depends on`, or `## Attachments` is prose that stops matching the graph the moment the graph
+moves.
+
+## Notes, documents and the body
+
+Three places hold prose. A **note** is an observation about the work, appended in time order — `knot add-note`. The
+**body** is the ticket's own account of itself, replaced in place — `knot update`. A **document** is a whole artifact
+the ticket carries rather than is — a spec, a plan, a transcript — with its own title, type and file, and a ticket may
+carry any number. Reach for a document when the content would swamp the ticket or has a life of its own; for the body
+when the content *is* the ticket.
+
+`ls`, `ready` and `prime` show a DOCS column naming the types each ticket owns, so check there before
+writing a spec that may already exist. A project can require one: `.knot.edn`'s `:required-docs` names
+document types a ticket must own before it may enter a status, and the transition is refused until they
+are attached.
 
 ## Replace vs delta
 

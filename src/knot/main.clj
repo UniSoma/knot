@@ -347,6 +347,10 @@
                (str "use 'knot update <id> --ac \"<title>\" --done' for each one, "
                     "or --force --summary \"<reason>\" to override.")]
               "already_assigned" ["; nothing was written." nil nil]
+              "missing_required_docs"
+              [nil (:missing_doc_types extra)
+               (str "attach each one with `knot document add <id> --type <type>`, "
+                    "or pass --force to proceed without them.")]
               "open_children"
               [nil (:open_children extra)
                (case (:gate extra)
@@ -356,12 +360,14 @@
                              "to start the umbrella anyway."))]
               ;; rows arrive JSON-stringified; `name` passes a string through
               "has_incoming_refs"
-              [nil (map (fn [{:keys [id field]}] (str id " " (name field)))
-                        (:referrers extra))
+              [nil (concat (map (fn [{:keys [id field]}] (str id " " (name field)))
+                                (:referrers extra))
+                           (map (fn [doc-id] (str doc-id " document")) (:documents extra)))
                (str "drop each reference first "
                     "(`knot undep`, `knot unlink`, "
-                    "or `knot update <id> --parent \"\"`) "
-                    "and re-run.")])]
+                    "or `knot update <id> --parent \"\"`), "
+                    "remove each document (`knot document rm`), "
+                    "and re-run — or pass --cascade.")])]
         (println (str "knot " cmd-name ": " msg suffix))
         (doseq [item items]
           (println (str "  - " item)))
@@ -644,6 +650,12 @@
                cmd-name json? "open_children" (.getMessage e)
                {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
 
+              (:missing-required-docs data)
+              (emit-gate-failure!
+               cmd-name json? "missing_required_docs" (.getMessage e)
+               {:missing_doc_types (vec (:missing-doc-types data))
+                :target            (:target data)})
+
               (:already-assigned data)
               (emit-gate-failure!
                cmd-name json? "already_assigned" (.getMessage e)
@@ -843,7 +855,8 @@
             (= :has-incoming-refs (:kind data))
             (emit-gate-failure!
              "delete" json? "has_incoming_refs" (.getMessage e)
-             {:referrers (mapv (fn [r] (update r :field name)) (:referrers data))})
+             {:referrers (mapv (fn [r] (update r :field name)) (:referrers data))
+              :documents (vec (:documents data))})
 
             (and json? (= :ambiguous (:kind data)))
             (emit-ambiguous-envelope! e data)
@@ -1069,6 +1082,12 @@
             (emit-gate-failure!
              "update" json? "open_children" (.getMessage e)
              {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
+
+            (:missing-required-docs data)
+            (emit-gate-failure!
+             "update" json? "missing_required_docs" (.getMessage e)
+             {:missing_doc_types (vec (:missing-doc-types data))
+              :target            (:target data)})
 
             (:already-assigned data)
             (emit-gate-failure!
@@ -1393,6 +1412,136 @@
     nil       (do (print-command-help :skill) (System/exit 1))
     (die (str "knot skill: unknown subcommand: " (first argv)))))
 
+(defn- emit-document-failure!
+  "Route a `knot document` failure to its `--json` error envelope (every
+   branch exits 1). The document corpus gets its own codes: `not_found` on
+   a document selector would send the reader looking for a ticket."
+  [^Exception e data]
+  (case (:kind data)
+    :doc-not-found    (emit-error-envelope! {:code    "doc_not_found"
+                                             :message (.getMessage e)})
+    :ambiguous-doc    (emit-error-envelope! {:code       "ambiguous_doc"
+                                             :message    (.getMessage e)
+                                             :candidates (:candidates data)})
+    :invalid-doc-type (emit-error-envelope! {:code    "invalid_doc_type"
+                                             :message (.getMessage e)
+                                             :value   (:value data)
+                                             :allowed (:allowed data)})
+    (emit-json-failure! e data)))
+
+(defn- run-document!
+  "Run one `knot document` subcommand, printing its result. On failure,
+   emits the document error envelope under `--json` and a
+   `knot document <sub>: <message>` stderr line otherwise."
+  [sub json? f]
+  (try
+    (println-out (str (f)))
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if json?
+          (emit-document-failure! e data)
+          (die (str "knot document " sub ": " (.getMessage e))))))))
+
+(defn- require-opt!
+  "Throw the `:invalid-argument` ex-info `run-document!` knows how to
+   route. A `die` here would bypass the `--json` envelope. The message
+   carries no command prefix: `run-document!` adds it, and both would
+   print."
+  [flag value]
+  (when (str/blank? value)
+    (throw (ex-info (str flag " is required")
+                    {:kind :invalid-argument :field flag}))))
+
+(defn- document-body-opts
+  "The layered body input every document write shares — the same three
+   layers `add-note` uses."
+  [text]
+  {:text            text
+   :stdin-tty?      (some? (System/console))
+   :stdin-reader-fn (fn [] (slurp *in*))
+   :editor-fn       (editor-fn-for-note)})
+
+(defn- variadic-text
+  "Join the trailing positional words into one body string, or nil when
+   there are none — nil is what makes the input fall through to stdin or
+   the editor."
+  [args]
+  (when (>= (count args) 2) (str/join " " (rest args))))
+
+(defn- document-add-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/add))
+        json? (boolean (:json opts))
+        tid   (first args)]
+    (when (or (nil? tid) (str/blank? tid))
+      (die "knot document add: a ticket id is required"))
+    (run-document!
+     "add" json?
+     #(do (require-opt! "--title" (:title opts))
+          (cli/document-add-cmd
+           (discover-ctx)
+           (merge (document-body-opts (variadic-text args))
+                  {:ticket tid :title (:title opts) :type (:type opts)
+                   :json?  json?}))))))
+
+(defn- document-show-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/show))
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document show: a selector is required"))
+    (run-document!
+     "show" json?
+     #(cli/document-show-cmd (discover-ctx)
+                             {:id selector :ticket (:ticket opts) :json? json?}))))
+
+(defn- document-put-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/put))
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document put: a selector is required"))
+    (run-document!
+     "put" json?
+     #(cli/document-put-cmd
+       (discover-ctx)
+       (merge (document-body-opts (variadic-text args))
+              {:id     selector :ticket (:ticket opts)
+               :title  (:title opts) :type (:type opts)
+               :json?  json?})))))
+
+(defn- document-rm-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/rm))
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document rm: a selector is required"))
+    (run-document!
+     "rm" json?
+     #(cli/document-rm-cmd (discover-ctx)
+                           {:id selector :ticket (:ticket opts) :json? json?}))))
+
+(defn- document-ls-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/ls))
+        json? (boolean (:json opts))
+        tid   (first args)]
+    (when (or (nil? tid) (str/blank? tid))
+      (die "knot document ls: a ticket id is required"))
+    (run-document!
+     "ls" json? #(cli/document-ls-cmd (discover-ctx) {:ticket tid :json? json?}))))
+
+(defn- document-handler
+  "Route `knot document ...`. Five subcommands; bare `knot document`
+   prints the group help and exits 1, like `knot skill`."
+  [argv]
+  (case (first argv)
+    "add"  (document-add-handler  (rest argv))
+    "show" (document-show-handler (rest argv))
+    "put"  (document-put-handler  (rest argv))
+    "rm"   (document-rm-handler   (rest argv))
+    "ls"   (document-ls-handler   (rest argv))
+    nil    (do (print-command-help :document) (System/exit 1))
+    (die (str "knot document: unknown subcommand: " (first argv)))))
+
 (defn- help-requested?
   "True when `argv` (after body-flag extraction) contains `--help` or
    `-h`. Body extraction keeps a literal `--help` inside a body string
@@ -1469,6 +1618,7 @@
         "update"   (update-handler rest-argv)
         "migrate-ac" (migrate-ac-handler rest-argv)
         "skill"   (skill-handler rest-argv)
+        "document" (document-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

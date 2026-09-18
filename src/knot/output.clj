@@ -66,26 +66,50 @@
       ""
       (str "\n" (str/join "\n" parts)))))
 
+(defn- document-line
+  "Format one document as `- <title> (<type>) — <id>`. Title first: it is
+   what a reader scans for, and the id is what they copy into the next
+   command."
+  [d]
+  (let [{:keys [id title type]} (:frontmatter d)]
+    (str "- " title " (" type ") — " id)))
+
+(defn- render-documents-section
+  "The `## Documents` block for `show-text`, or `\"\"` when the ticket owns
+   none. Derived from the document corpus, never from the body: a ticket
+   that carries a hand-written `## Documents` heading still gets this
+   section, and its authored prose stays where it was written, as body."
+  [docs]
+  (if (empty? docs)
+    ""
+    (str "\n## Documents\n"
+         (ticket/reserved-section-provenance "Documents") "\n\n"
+         (str/join "\n" (map document-line docs))
+         "\n")))
+
 (defn show-text
   "Render a ticket map for the `show` command. Returns a string containing
    the YAML frontmatter, the markdown body, the synthesized
    `## Acceptance Criteria` checklist (built from frontmatter
    `:acceptance`), and (when supplied) the four computed inverse
    sections — `## Blockers`, `## Blocking`, `## Children`, `## Linked`
-   — appended after the body. Each inverse entry is
+   — plus `## Documents`, appended after the body. Each inverse entry is
    `{:id ... :ticket <full-ticket>}` for a resolved ref or
    `{:id ... :missing? true}` for a broken one. Empty sections are
    omitted. A blank line separates the stored body from the derived
    block even when the body has no trailing newline, and each derived
    section carries a provenance comment under its heading."
   ([ticket]
-   (show-text ticket nil))
+   (show-text ticket nil nil))
   ([ticket inverses]
+   (show-text ticket inverses nil))
+  ([ticket inverses docs]
    (let [stored  (ticket/render ticket)
          derived (str (acceptance/render-section
                        (get-in ticket [:frontmatter :acceptance]))
                       (render-inverse-sections inverses
-                                               (:children-progress ticket)))]
+                                               (:children-progress ticket))
+                      (render-documents-section docs))]
      (str stored
           (when (and (seq derived) (not (str/ends-with? stored "\n")))
             "\n")
@@ -255,6 +279,13 @@
      :children (mapv jsonify-inverse-entry (:children inverses))
      :linked   (mapv jsonify-inverse-entry (:linked   inverses))}))
 
+(defn- jsonify-document
+  "Metadata only. A body here would make `show --json` — the most common
+   read — grow without bound with the size of the attached documents."
+  [d]
+  (let [{:keys [id title type]} (:frontmatter d)]
+    {:id id :title title :type type}))
+
 (defn- show-payload
   "Ticket payload for `show --json`: the shared `jsonify-ticket`
    projection plus `sections`, the body split by `## ` heading slug (see
@@ -275,13 +306,21 @@
    With `inverses`, adds `blockers`, `blocking`, `children`, `linked`
    arrays alongside the frontmatter under `:data` — entries are
    `{id, title, status}` for resolved refs or `{id, missing:true}` for
-   broken ones."
+   broken ones. `documents` is always present — `[]` when the ticket owns
+   none — and carries `{id, title, type}` metadata, never bodies."
   ([ticket]
-   (envelope-str (show-payload ticket)))
+   (show-json ticket nil nil))
   ([ticket inverses]
+   (show-json ticket inverses nil))
+  ([ticket inverses docs]
    (envelope-str
     (merge (show-payload ticket)
-           (inverses->json-fields inverses)))))
+           (inverses->json-fields inverses)
+           ;; Always present, `[]` when the ticket owns none — the same
+           ;; vector-default treatment `json-vector-default-keys` gives
+           ;; the frontmatter arrays, so `jq '.data.documents[]'` works
+           ;; without a null guard.
+           {:documents (mapv jsonify-document docs)}))))
 
 (defn ls-json
   "Render a sequence of ticket maps wrapped in the v0.3 success envelope.
@@ -659,11 +698,14 @@
 (defn check-summary-footer
   "One-line footer summarizing a `knot check` run: counts of
    errors/warnings + scanned counts. Always emitted (table or no table)."
-  [issues {:keys [live archive]}]
+  [issues {:keys [live archive docs]}]
   (let [errs   (count (filter #(= :error   (:severity %)) issues))
         warns  (count (filter #(= :warning (:severity %)) issues))
         total  (+ errs warns)
-        suffix (str " — scanned: live=" live " archive=" archive)]
+        ;; `docs` is omitted when the project has none, so a project not
+        ;; using documents reads the same footer it always did.
+        suffix (str " — scanned: live=" live " archive=" archive
+                    (when (and docs (pos? docs)) (str " docs=" docs)))]
     (if (zero? total)
       (str "knot check: ok" suffix)
       (str total " issues (" errs " errors, " warns " warnings)" suffix))))
@@ -774,11 +816,35 @@ before issuing other Knot commands.")
         (str d "/" t))
       "-")))
 
+(defn- section-has-docs?
+  "True when at least one ticket in the section owns a document — the
+   trigger for showing the DOCS slot in the line shape, mirroring how the
+   AC slot appears."
+  [tickets]
+  (boolean (some #(seq (:doc-types %)) tickets)))
+
+(defn- docs-cell
+  "The document-types cell: comma-separated types, `-` when the ticket
+   owns none."
+  [ticket]
+  (if-let [ts (seq (:doc-types ticket))] (str/join "," ts) "-"))
+
 (defn- section-has-ac?
   "True when at least one ticket in the section carries acceptance —
    the trigger for showing the AC slot in the line shape."
   [tickets]
   (boolean (some (fn [t] (seq (get-in t [:frontmatter :acceptance]))) tickets)))
+
+(defn- prime-columns
+  "The optional columns a prime section renders, as a set. A column appears
+   when some ticket in the section has something to put in it. A set rather
+   than one boolean per column: the line renderers had reached two
+   positional flags, where a caller can silently swap them and the third
+   would have made it worse."
+  [tickets]
+  (cond-> #{}
+    (section-has-ac? tickets)   (conj :ac)
+    (section-has-docs? tickets) (conj :docs)))
 
 (defn- prime-in-progress-line
   "Format an in-progress ticket as `id  type  mode  pri  age  title` (6
@@ -793,7 +859,7 @@ before issuing other Knot commands.")
    signal in human-readable form. The renderer is whitespace-only — no
    ANSI codes — because prime output is consumed by AI agents and
    downstream tools."
-  [ticket ac-column?]
+  [ticket cols]
   (let [fm    (:frontmatter ticket)
         id    (or (:id fm) "")
         type- (or (:type fm) "-")
@@ -801,23 +867,26 @@ before issuing other Knot commands.")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
         age   (format-age-days (:age-days ticket))
         title (ticket-title ticket)
-        ac    (when ac-column? (str (ac-cell ticket) "  "))]
-    (str id "  " type- "  " mode "  " pri "  " age "  " (or ac "") title)))
+        ac    (when (:ac cols)   (str (ac-cell ticket) "  "))
+        docs  (when (:docs cols) (str (docs-cell ticket) "  "))]
+    (str id "  " type- "  " mode "  " pri "  " age "  "
+         (or ac "") (or docs "") title)))
 
 (defn- prime-ready-line
   "Format a ready ticket as `id  type  mode  pri  title` (5 cols), or
    `id  type  mode  pri  ac  title` (6 cols) when `ac-column?` is true.
    Missing fields render as `-` so columns stay aligned. Whitespace-only
    — no ANSI codes — because prime output is consumed by AI agents."
-  [ticket ac-column?]
+  [ticket cols]
   (let [fm    (:frontmatter ticket)
         id    (or (:id fm) "")
         type- (or (:type fm) "-")
         mode  (or (:mode fm) "-")
         pri   (let [p (:priority fm)] (if (some? p) (str p) "-"))
         title (ticket-title ticket)
-        ac    (when ac-column? (str (ac-cell ticket) "  "))]
-    (str id "  " type- "  " mode "  " pri "  " (or ac "") title)))
+        ac    (when (:ac cols)   (str (ac-cell ticket) "  "))
+        docs  (when (:docs cols) (str (docs-cell ticket) "  "))]
+    (str id "  " type- "  " mode "  " pri "  " (or ac "") (or docs "") title)))
 
 (defn- prime-section
   "Render a `## <header>` section: heading, optional one-line behavioral
@@ -915,22 +984,22 @@ before issuing other Knot commands.")
         ready-footer (when ready-truncated?
                        (str "... +" (or ready-remaining 0)
                             " more (run `knot ready`)"))
-        ip-ac?       (section-has-ac? in-progress)
-        rtc-ac?      (section-has-ac? ready-to-close)
-        rd-ac?       (section-has-ac? ready)
+        ip-cols      (prime-columns in-progress)
+        rtc-cols     (prime-columns ready-to-close)
+        rd-cols      (prime-columns ready)
         in-progress-block (when (seq in-progress)
                             (str (prime-section "In Progress"
                                                 ip-nudge
                                                 in-progress
                                                 nil
-                                                #(prime-in-progress-line % ip-ac?))
+                                                #(prime-in-progress-line % ip-cols))
                                  "\n"))
         ready-to-close-block (when (seq ready-to-close)
                                (str (prime-section "Ready to close"
                                                    rtc-nudge
                                                    ready-to-close
                                                    nil
-                                                   #(prime-in-progress-line % rtc-ac?))
+                                                   #(prime-in-progress-line % rtc-cols))
                                     "\n"))
         recently-closed-block (prime-recently-closed-section recently-closed)]
     (str preamble "\n\n"
@@ -941,12 +1010,13 @@ before issuing other Knot commands.")
                         ready-nudge
                         ready
                         ready-footer
-                        #(prime-ready-line % rd-ac?)) "\n"
+                        #(prime-ready-line % rd-cols)) "\n"
          recently-closed-block)))
 
 (defn- jsonify-prime-ticket
   "Project a ticket into the compact shape used in prime JSON arrays:
-   `{id, status, type, priority, mode, assignee, title}`. Body is omitted
+   `{id, status, type, priority, mode, assignee, title}`, plus `doc_types`
+   on a ticket that owns documents. Body is omitted
    to keep payloads tight; consumers needing the body call `knot show
    <id> --json`. When `:prime-stale?` is truthy on the ticket map, adds
    `\"stale\":true` so JSON consumers can flag forgotten work without
@@ -962,7 +1032,8 @@ before issuing other Knot commands.")
       (:assignee fm) (assoc :assignee (:assignee fm))
       (:updated fm)  (assoc :updated (:updated fm))
       (:created fm)  (assoc :created (:created fm))
-      (:prime-stale? ticket) (assoc :stale true))))
+      (:prime-stale? ticket) (assoc :stale true)
+      (seq (:doc-types ticket)) (assoc :doc_types (vec (:doc-types ticket))))))
 
 (defn- jsonify-prime-project
   "Project the project metadata into a JSON-friendly map with snake_case
@@ -1042,12 +1113,13 @@ before issuing other Knot commands.")
   [{:keys [project paths defaults allowed_values counts]}]
   (let [{:keys [knot_version name prefix config_present]} project
         {:keys [cwd project_root config_path tickets_dir
-                tickets_path archive_path skill_dir skill_path]} paths
+                tickets_path archive_path docs_path skill_dir skill_path]} paths
         {:keys [default_assignee effective_create_assignee
-                default_type default_priority default_mode]} defaults
+                default_type default_priority default_mode
+                default_doc_type]} defaults
         {:keys [statuses active_status terminal_statuses types modes
-                afk_mode priority_range]} allowed_values
-        {:keys [live_count archive_count total_count]} counts
+                afk_mode priority_range doc_types required_docs]} allowed_values
+        {:keys [live_count archive_count total_count doc_count]} counts
         project-block  (str/join "\n"
                                  [(str "Knot version: "   (info-scalar knot_version))
                                   (str "Name: "           (info-scalar name))
@@ -1060,6 +1132,7 @@ before issuing other Knot commands.")
                                   (str "Tickets dir: "   (info-scalar tickets_dir))
                                   (str "Tickets path: "  (info-scalar tickets_path))
                                   (str "Archive path: "  (info-scalar archive_path))
+                                  (str "Docs path: "     (info-scalar docs_path))
                                   (str "Skill dir: "     (info-scalar skill_dir))
                                   (str "Skill path: "    (info-scalar skill_path))])
         defaults-block (str/join "\n"
@@ -1067,19 +1140,28 @@ before issuing other Knot commands.")
                                   (str "Effective create assignee: " (info-scalar effective_create_assignee))
                                   (str "Default type: "              (info-scalar default_type))
                                   (str "Default priority: "          (info-scalar default_priority))
-                                  (str "Default mode: "              (info-scalar default_mode))])
+                                  (str "Default mode: "              (info-scalar default_mode))
+                                  (str "Default doc type: "          (info-scalar default_doc_type))])
         allowed-block  (str/join "\n"
                                  [(str "Statuses: "          (info-list statuses))
                                   (str "Active status: "     (info-scalar active_status))
                                   (str "Terminal statuses: " (info-list terminal_statuses))
                                   (str "Types: "             (info-list types))
                                   (str "Modes: "             (info-list modes))
+                                  (str "Doc types: "         (info-list doc_types))
+                                  (str "Required docs: "     (if (seq required_docs)
+                                                               (str/join "; "
+                                                                         (for [[status types] (sort-by key required_docs)]
+                                                                           (str (clojure.core/name status) ": "
+                                                                                (str/join ", " types))))
+                                                               "(none)"))
                                   (str "Afk mode: "          (info-scalar afk_mode))
                                   (str "Priority range: "    (:min priority_range) "-" (:max priority_range))])
         counts-block   (str/join "\n"
                                  [(str "Live count: "    (info-scalar live_count))
                                   (str "Archive count: " (info-scalar archive_count))
-                                  (str "Total count: "   (info-scalar total_count))])]
+                                  (str "Total count: "   (info-scalar total_count))
+                                  (str "Doc count: "     (info-scalar doc_count))])]
     (str (info-section "Project"        project-block) "\n"
          (info-section "Paths"          paths-block) "\n"
          (info-section "Defaults"       defaults-block) "\n"

@@ -12,12 +12,20 @@
      (try ~@body
           (finally (fs/delete-tree tmp#)))))
 
+(defn- droot
+  "The default document corpus root for a sandbox project. `:docs-dir` is
+   nil in these tests, so this is what `store/docs-root` resolves to."
+  [tmp]
+  (store/docs-root tmp ".tickets" nil))
+
 (def ^:private default-config
   {:statuses          ["open" "in_progress" "closed"]
    :terminal-statuses #{"closed"}
    :active-status     "open"
    :types             ["task" "bug" "feature" "chore" "spike"]
-   :modes             ["afk" "hitl"]})
+   :modes             ["afk" "hitl"]
+   :doc-types         ["spec" "plan" "other"]
+   :default-doc-type  "other"})
 
 (defn- ticket
   "Test helper: build a {:frontmatter ...} map. Extras override defaults.
@@ -120,7 +128,7 @@
     (let [result (check/run {:tickets [] :config default-config
                              :scanned {:live 0 :archive 0}})]
       (is (= [] (:issues result)))
-      (is (= {:live 0 :archive 0} (:scanned result))))))
+      (is (= {:live 0 :archive 0 :docs 0} (:scanned result))))))
 
 (deftest run-detects-dep-cycle
   (testing "single back-edge cycle yields one dep_cycle error issue"
@@ -138,7 +146,7 @@
         (is (= #{"a" "b"} (set (butlast (:ids issue))))
             "cycle covers both ids")
         (is (string? (:message issue)) "message is human-readable"))
-      (is (= {:live 2 :archive 0} (:scanned result)))))
+      (is (= {:live 2 :archive 0 :docs 0} (:scanned result)))))
 
   (testing "self-loop yields a single-id cycle"
     (let [tickets [(ticket "a" "open" ["a"])]
@@ -491,10 +499,10 @@
         (spit-ticket! (fs/path tdir "archive" "kno-01b--bravo.md")
                       "id: kno-01b\ntitle: B\nstatus: closed\n" "")
         (let [{:keys [tickets parse-errors scanned]}
-              (check/scan tmp ".tickets")]
+              (check/scan tmp ".tickets" (droot tmp))]
           (is (= 2 (count tickets)))
           (is (= [] parse-errors))
-          (is (= {:live 1 :archive 1} scanned))
+          (is (= {:live 1 :archive 1 :docs 0} scanned))
           (let [by-id (into {} (map (juxt #(get-in % [:frontmatter :id]) identity)) tickets)]
             (is (false? (:archived? (get by-id "kno-01a"))))
             (is (true?  (:archived? (get by-id "kno-01b"))))
@@ -510,20 +518,20 @@
         (spit (str (fs/path tdir "kno-01b--broken.md"))
               "---\nid: kno-01b\n  : badly: indented\n---\n\nbody\n")
         (let [{:keys [tickets parse-errors scanned]}
-              (check/scan tmp ".tickets")]
+              (check/scan tmp ".tickets" (droot tmp))]
           (is (= 1 (count tickets)) "the good ticket is still loaded")
           (is (= 1 (count parse-errors)))
           (is (string? (:path (first parse-errors))))
-          (is (= {:live 2 :archive 0} scanned)
+          (is (= {:live 2 :archive 0 :docs 0} scanned)
               ":scanned counts files attempted by glob, including parse failures")))))
 
   (testing "missing tickets-dir is fine: empty result, both counts zero"
     (with-tmp tmp
       (let [{:keys [tickets parse-errors scanned]}
-            (check/scan tmp ".tickets")]
+            (check/scan tmp ".tickets" (droot tmp))]
         (is (= [] tickets))
         (is (= [] parse-errors))
-        (is (= {:live 0 :archive 0} scanned))))))
+        (is (= {:live 0 :archive 0 :docs 0} scanned))))))
 
 (deftest legacy-acceptance-section-warning-test
   (testing "ticket whose body has a `## Acceptance Criteria` section emits a :legacy_acceptance_section warning"
@@ -722,7 +730,7 @@
                         "- [ ] one\n"
                         "- [x] two\n")]
         (spit-frontmatter-ticket! tpath "kno-01a" "Alpha" "open" body)
-        (let [{:keys [tickets]} (check/scan tmp tdir)
+        (let [{:keys [tickets]} (check/scan tmp tdir (store/docs-root tmp tdir nil))
               issues-before     (->> (check/run {:tickets tickets
                                                  :config  default-config
                                                  :scanned {:live 1 :archive 0}})
@@ -744,7 +752,7 @@
                    :default-priority  3
                    :now               "2026-05-06T00:00:00Z"}]
           (cli/migrate-ac-cmd ctx {}))
-        (let [{:keys [tickets]} (check/scan tmp tdir)
+        (let [{:keys [tickets]} (check/scan tmp tdir (store/docs-root tmp tdir nil))
               issues-after      (->> (check/run {:tickets tickets
                                                  :config  default-config
                                                  :scanned {:live 1 :archive 0}})
@@ -818,3 +826,221 @@
 
     (testing "positional ids do not skip the global check"
       (is (= 1 (count (stale (stamped-skill-md "0.9.0") :ids-filter #{"kno-01x"})))))))
+
+(defn- doc-rec
+  "Test helper: a document as `scan` hands it to `run` — parsed frontmatter
+   plus the two annotations only the loader can supply. `owner-dir` is the
+   directory the file was found in; `:ticket` is what the file itself claims.
+   They are separate arguments because every placement check turns on the
+   two disagreeing."
+  [owner-dir id & {:as extras}]
+  {:frontmatter (merge {:id id :ticket owner-dir :title "T" :type "spec"} extras)
+   :body        (str "# " id "\n")
+   :path        (str "/tmp/fake/docs/" owner-dir "/" id "--t.md")
+   :owner-dir   owner-dir})
+
+(defn- run-docs
+  "Run with default-config, the given documents, and whichever tickets are
+   needed for `:all-ids` to resolve."
+  [docs & {:keys [tickets config] :or {tickets [] config default-config}}]
+  (check/run {:tickets   tickets
+              :documents docs
+              :config    config
+              :scanned   {:live (count tickets) :archive 0 :docs (count docs)}}))
+
+(deftest doc-type-check-test
+  (testing "a stored type outside the allow-list is reported under its own code"
+    (let [issues (:issues (run-docs [(doc-rec "kno-01t" "kno-d01a" :type "wat")]
+                                    :tickets [(ticket "kno-01t" "open" [] :title "T")]))]
+      (is (= [:invalid_doc_type] (mapv :code issues)))
+      (is (= :error (:severity (first issues))))
+      (is (str/includes? (:message (first issues)) "\"wat\""))
+      (is (str/includes? (:message (first issues)) "spec"))))
+
+  (testing "every configured type is accepted"
+    (doseq [t (:doc-types default-config)]
+      (is (empty? (:issues (run-docs [(doc-rec "kno-01t" "kno-d01a" :type t)]
+                                     :tickets [(ticket "kno-01t" "open" [] :title "T")])))
+          (str t " must be accepted"))))
+
+  (testing "an empty allow-list rejects every type instead of skipping the check"
+    ;; `check-enum`'s `(seq allowed)` guard would skip validation entirely
+    ;; here. That hole is exactly what :doc-types' default exists to close,
+    ;; so the document arm must not inherit it.
+    (is (= [:invalid_doc_type]
+           (mapv :code (:issues (run-docs [(doc-rec "kno-01t" "kno-d01a")]
+                                          :tickets [(ticket "kno-01t" "open" [] :title "T")]
+                                          :config (assoc default-config :doc-types []))))))))
+
+(deftest doc-precedence-test
+  (testing "a misplaced document yields exactly one issue, the disagreement"
+    (let [issues (:issues (run-docs [(doc-rec "kno-01dead" "kno-d01a" :ticket "kno-01live")]
+                                    :tickets [(ticket "kno-01live" "open" [] :title "T")]))]
+      (is (= 1 (count issues)))
+      (is (= :doc_directory_mismatch (:code (first issues))))))
+
+  (testing "same dead id in both places is an orphan, not a disagreement"
+    (let [issues (:issues (run-docs [(doc-rec "kno-01dead" "kno-d01a")]))]
+      (is (= [:doc_unknown_ticket] (mapv :code issues)))))
+
+  (testing "two different dead ids is a disagreement, not suppressed by the orphan rule"
+    (let [issues (:issues (run-docs [(doc-rec "kno-01deadA" "kno-d01a" :ticket "kno-01deadB")]))]
+      (is (= [:doc_directory_mismatch] (mapv :code issues)))))
+
+  (testing "a document with no ticket field is a disagreement, worded without a literal nil"
+    (let [issues (:issues (run-docs [(doc-rec "kno-01t" "kno-d01a" :ticket nil)]
+                                    :tickets [(ticket "kno-01t" "open" [] :title "T")]))]
+      (is (= [:doc_directory_mismatch] (mapv :code issues)))
+      (is (str/includes? (:message (first issues)) "has no ticket field"))
+      (is (not (str/includes? (:message (first issues)) "nil")))))
+
+  (testing "a document under an archived ticket is neither misplaced nor orphaned"
+    ;; Documents do not follow their ticket into archive/; identity rides the
+    ;; ticket field, not the path.
+    (is (empty? (:issues (run-docs [(doc-rec "kno-01old" "kno-d01a")]
+                                   :tickets [(archived-ticket "kno-01old" "closed" [] :title "T")]))))))
+
+(deftest duplicate-doc-id-test
+  (testing "two files claiming one document id are reported once, naming both paths"
+    (let [a      (doc-rec "kno-01t" "kno-d01a")
+          b      (assoc (doc-rec "kno-01t" "kno-d01a") :path "/tmp/fake/docs/kno-01t/kno-d01a--copy.md")
+          issues (:issues (run-docs [a b] :tickets [(ticket "kno-01t" "open" [] :title "T")]))]
+      (is (= [:duplicate_doc_id] (mapv :code issues)))
+      (is (str/includes? (:message (first issues)) (:path a)))
+      (is (str/includes? (:message (first issues)) (:path b)))))
+
+  (testing "distinct ids are not duplicates"
+    (is (empty? (:issues (run-docs [(doc-rec "kno-01t" "kno-d01a")
+                                    (doc-rec "kno-01t" "kno-d01b")]
+                                   :tickets [(ticket "kno-01t" "open" [] :title "T")]))))))
+
+(deftest legacy-documents-heading-test
+  (testing "a pre-existing heading warns and does not fail the check"
+    (let [t      (assoc (ticket "kno-01t" "open" [] :title "T")
+                        :body "## Documents\n\nold prose\n")
+          issues (issues-of (run-with [t]) :legacy_documents_section)]
+      (is (= 1 (count issues)))
+      (is (= :warning (:severity (first issues))))
+      (is (re-find #"remove" (:message (first issues))))))
+
+  (testing "the heading is not ALSO reported as a generic reserved section"
+    ;; It is reserved, so `check-reserved-sections` would otherwise fire too
+    ;; — two warnings and two remedies for one heading.
+    (let [t (assoc (ticket "kno-01t" "open" [] :title "T")
+                   :body "## Documents\n\nold prose\n")]
+      (is (empty? (issues-of (run-with [t]) :reserved_section)))))
+
+  (testing "the warning self-clears once the heading is gone"
+    (let [t (assoc (ticket "kno-01t" "open" [] :title "T") :body "## Notes\n\nfine\n")]
+      (is (empty? (issues-of (run-with [t]) :legacy_documents_section))))))
+
+(deftest scanned-counts-documents-test
+  (testing "the scanned envelope reports the document count"
+    (is (= {:live 1 :archive 0 :docs 2}
+           (:scanned (run-docs [(doc-rec "kno-01t" "kno-d01a")
+                                (doc-rec "kno-01t" "kno-d01b")]
+                               :tickets [(ticket "kno-01t" "open" [] :title "T")])))))
+
+  (testing "a project with no documents still reports the key"
+    (is (= 0 (:docs (:scanned (run-with [])))))))
+
+(deftest misplaced-document-in-ticket-dir-test
+  ;; R24 / AC-16. A document file in the ticket directory is a MISPLACED
+  ;; DOCUMENT, not a malformed ticket. Diagnosed as a ticket it draws
+  ;; :invalid_type and :missing_required_field — two issues whose repair is
+  ;; "add a status and a valid type", which is exactly wrong: the file is
+  ;; well-formed and only in the wrong place.
+  (testing "a document planted in the live ticket directory is diagnosed as misplaced"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-d01bbb--misplaced.md"))
+            (str "---\nid: kno-d01bbb\nticket: kno-01aaa\ntitle: T\ntype: spec\n"
+                 "created: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n---\n\nbody\n"))
+      (spit (str (fs/path tmp ".tickets" "kno-01aaa--owner.md"))
+            (str "---\nid: kno-01aaa\ntitle: Owner\nstatus: open\ntype: task\n"
+                 "priority: 2\ncreated: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n---\n\n"))
+      (let [scanned (check/scan tmp ".tickets" (droot tmp))
+            issues  (:issues (check/run (assoc scanned :config default-config)))
+            codes   (mapv :code issues)]
+        (is (= 1 (count (:tickets scanned)))
+            "the document must not be loaded into the ticket corpus")
+        (is (= ["kno-d01bbb"] (mapv #(get-in % [:frontmatter :id]) (:documents scanned)))
+            "it must be loaded into the document corpus instead")
+        (is (= [:doc_directory_mismatch] codes)
+            "one issue, naming the misplacement — never :invalid_type or :missing_required_field")
+        (is (str/includes? (:message (first issues)) "kno-01aaa")
+            "the message names the ticket the file claims, so the repair is obvious")
+        (is (str/ends-with? (:path (first issues)) "kno-d01bbb--misplaced.md")))))
+
+  (testing "a document planted in archive/ is diagnosed the same way"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "archive"))
+      (spit (str (fs/path tmp ".tickets" "archive" "kno-d01bbb--misplaced.md"))
+            (str "---\nid: kno-d01bbb\nticket: kno-01aaa\ntitle: T\ntype: spec\n"
+                 "created: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n---\n\nbody\n"))
+      (let [scanned (check/scan tmp ".tickets" (droot tmp))
+            codes   (mapv :code (:issues (check/run (assoc scanned :config default-config))))]
+        (is (empty? (:tickets scanned)))
+        (is (= [:doc_directory_mismatch] codes)))))
+
+  (testing "a real ticket file is still loaded as a ticket"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (spit (str (fs/path tmp ".tickets" "kno-01aaa--owner.md"))
+            (str "---\nid: kno-01aaa\ntitle: Owner\nstatus: open\ntype: task\n"
+                 "priority: 2\ncreated: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n---\n\n"))
+      (let [scanned (check/scan tmp ".tickets" (droot tmp))]
+        (is (= 1 (count (:tickets scanned))))
+        (is (empty? (:documents scanned)))
+        (is (empty? (:issues (check/run (assoc scanned :config default-config)))))))))
+
+(deftest unreachable-documents-test
+  ;; A mistyped or newly-set :docs-dir points the corpus somewhere empty.
+  ;; Every document surface then honestly reports nothing, and `check` used
+  ;; to agree with them — so the tool said the project was healthy while the
+  ;; documents sat where nothing would ever look again.
+  (testing "documents at the default root are reported when :docs-dir points elsewhere"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets" "docs" "kno-01t"))
+      (spit (str (fs/path tmp ".tickets" "docs" "kno-01t" "kno-d01a--p.md"))
+            "---\nid: kno-d01a\nticket: kno-01t\ntitle: T\ntype: spec\n---\n\nbody\n")
+      (let [scanned (check/scan tmp ".tickets" (str (fs/path tmp "elsewhere")))
+            issues  (:issues (check/run (assoc scanned :config default-config)))
+            issue   (first (filter #(= :unreachable_documents (:code %)) issues))]
+        (is (some? issue) (str "expected the orphaned corpus to be reported, got "
+                               (pr-str (mapv :code issues))))
+        (is (= :warning (:severity issue))
+            "nothing is corrupt and the repair is manual, so it warns")
+        (is (str/includes? (:message issue) "1 document at ")
+            "the count tells you how much is stranded, and agrees with its verb")
+        (is (not (str/includes? (:message issue) "are outside"))
+            "one document is, it does not are")
+        (is (str/includes? (:message issue) ".tickets")
+            "and the message names where they actually are"))))
+
+  (testing "no report when the configured root is the one holding them"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp "elsewhere" "kno-01t"))
+      (spit (str (fs/path tmp "elsewhere" "kno-01t" "kno-d01a--p.md"))
+            "---\nid: kno-d01a\nticket: kno-01t\ntitle: T\ntype: spec\n---\n\nbody\n")
+      (let [scanned (check/scan tmp ".tickets" (str (fs/path tmp "elsewhere")))
+            codes   (mapv :code (:issues (check/run (assoc scanned :config default-config))))]
+        (is (not (some #{:unreachable_documents} codes))))))
+
+  (testing "no report on the default layout, however empty"
+    (with-tmp tmp
+      (fs/create-dirs (fs/path tmp ".tickets"))
+      (let [scanned (check/scan tmp ".tickets" (store/docs-root tmp ".tickets" nil))
+            codes   (mapv :code (:issues (check/run (assoc scanned :config default-config))))]
+        (is (not (some #{:unreachable_documents} codes))))))
+
+  (testing "no report when the configured root already holds documents"
+    ;; Both populated is a deliberate migration in progress, not a mistype.
+    (with-tmp tmp
+      (doseq [root [".tickets/docs" "elsewhere"]]
+        (fs/create-dirs (fs/path tmp root "kno-01t"))
+        (spit (str (fs/path tmp root "kno-01t" "kno-d01a--p.md"))
+              "---\nid: kno-d01a\nticket: kno-01t\ntitle: T\ntype: spec\n---\n\nbody\n"))
+      (let [scanned (check/scan tmp ".tickets" (str (fs/path tmp "elsewhere")))
+            codes   (mapv :code (:issues (check/run (assoc scanned :config default-config))))]
+        (is (not (some #{:unreachable_documents} codes)))))))

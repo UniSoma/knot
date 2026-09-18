@@ -3811,3 +3811,552 @@
       (let [{:keys [exit err]} (run-knot tmp "skill" "uninstall")]
         (is (= 1 exit))
         (is (str/includes? err "unknown subcommand"))))))
+
+(defn- doc-id-from-json
+  "The document id out of a `--json` document envelope."
+  [out]
+  (get-in (json/parse-string out true) [:data :id]))
+
+(deftest document-group-end-to-end-test
+  (testing "add, ls, show, put and rm round-trip through the real CLI"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            add (run-knot tmp "document" "add" tid
+                          "--title" "Rollout plan" "--type" "plan" "--json"
+                          "step one")
+            did (doc-id-from-json (:out add))]
+        (is (zero? (:exit add)) (str "add err=" (:err add)))
+        (is (re-matches #"[a-z0-9]+-d[0-9a-z]+" did)
+            "a document id carries the -d marker that distinguishes it from a ticket id")
+        (is (not (re-matches #"[a-z0-9]+-01[0-9a-z]+" did)))
+
+        (let [{:keys [exit out]} (run-knot tmp "document" "ls" tid "--json")
+              docs (get-in (json/parse-string out true) [:data :documents])]
+          (is (zero? exit))
+          (is (= ["Rollout plan"] (mapv :title docs)))
+          (is (= ["plan"] (mapv :type docs))))
+
+        (let [{:keys [exit out]} (run-knot tmp "document" "show" did "--json")]
+          (is (zero? exit))
+          (is (= "step one" (get-in (json/parse-string out true) [:data :body]))))
+
+        (let [{:keys [exit]} (run-knot tmp "document" "put" did
+                                       "--title" "Rollout plan v2" "--type" "spec"
+                                       "step two")
+              {:keys [out]}  (run-knot tmp "document" "show" did "--json")
+              d              (get-in (json/parse-string out true) [:data])]
+          (is (zero? exit))
+          (is (= "Rollout plan v2" (:title d)))
+          (is (= "spec" (:type d)))
+          (is (= "step two" (:body d))))
+
+        (let [{:keys [exit]} (run-knot tmp "document" "rm" did)
+              {:keys [out]}  (run-knot tmp "document" "ls" tid "--json")]
+          (is (zero? exit))
+          (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
+
+  (testing "a document body arrives on stdin when no text argument is given"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit out]}
+            (run-knot-with-stdin tmp "## A heading\n\nprose\n"
+                                 "document" "add" tid "--title" "T" "--json")
+            did (doc-id-from-json out)]
+        (is (zero? exit))
+        (let [{:keys [out]} (run-knot tmp "document" "show" did "--json")]
+          (is (= "## A heading\n\nprose\n"
+                 (get-in (json/parse-string out true) [:data :body]))
+              "a document body is opaque — a ticket body would refuse a reserved heading")))))
+
+  (testing "put on a selector that matches nothing emits doc_not_found and creates nothing"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit out]} (run-knot tmp "document" "put" "kno-dnope"
+                                         "--title" "T" "--type" "spec" "--json" "b")
+            parsed (json/parse-string out true)]
+        (is (= 1 exit))
+        (is (false? (:ok parsed)))
+        (is (= "doc_not_found" (get-in parsed [:error :code])))
+        (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+          (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
+
+  (testing "an ambiguous selector emits ambiguous_doc with its candidates"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            a   (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "spec"
+                                                  "--json" "a")))
+            b   (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "plan"
+                                                  "--json" "b")))
+            {:keys [exit out]} (run-knot tmp "document" "show" "Design"
+                                         "--ticket" tid "--json")
+            parsed (json/parse-string out true)]
+        (is (= 1 exit))
+        (is (= "ambiguous_doc" (get-in parsed [:error :code])))
+        (is (= (sort [a b]) (sort (get-in parsed [:error :candidates])))))))
+
+  (testing "a type outside :doc-types emits invalid_doc_type and writes nothing"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit out]} (run-knot tmp "document" "add" tid
+                                         "--title" "T" "--type" "wat" "--json" "b")
+            parsed (json/parse-string out true)]
+        (is (= 1 exit))
+        (is (= "invalid_doc_type" (get-in parsed [:error :code])))
+        (is (= "wat" (get-in parsed [:error :value])))
+        (is (= ["spec" "plan" "other"] (get-in parsed [:error :allowed])))
+        (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+          (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
+
+  (testing "documents never appear in the ticket corpus, and check stays clean"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "T" "--type" "spec" "body")
+        (let [{:keys [out]} (run-knot tmp "list" "--json")]
+          (is (= 1 (count (get-in (json/parse-string out true) [:data])))
+              "the document must not be loaded as a ticket"))
+        (let [{:keys [exit out]} (run-knot tmp "check" "--json")
+              parsed (json/parse-string out true)]
+          (is (zero? exit) (str "check should be clean, got " out))
+          (is (= [] (get-in parsed [:data :issues])))
+          (is (= 1 (get-in parsed [:data :scanned :docs])))))))
+
+  (testing "bare `knot document` prints the group help and exits 1"
+    (with-tmp tmp
+      (let [{:keys [exit out]} (run-knot tmp "document")]
+        (is (= 1 exit))
+        (is (str/includes? out "document")))))
+
+  (testing "no doc or docs alias is dispatched"
+    (with-tmp tmp
+      (let [{:keys [exit err]} (run-knot tmp "doc" "ls" "kno-01abc")]
+        (is (= 1 exit))
+        (is (str/includes? err "unknown command: doc"))))))
+
+(deftest show-renders-documents-end-to-end-test
+  (testing "show names the same documents in text and JSON"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "Design" "--type" "spec" "body one")
+        (run-knot tmp "document" "add" tid "--title" "Rollout" "--type" "plan" "body two")
+        (let [text (:out (run-knot tmp "show" tid))
+              j    (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
+              docs (get-in j [:data :documents])]
+          (is (str/includes? text "## Documents"))
+          (is (str/includes? text "Design (spec) — "))
+          (is (str/includes? text "Rollout (plan) — "))
+          (is (= ["Design" "Rollout"] (mapv :title docs)))
+          (is (= #{:id :title :type} (set (mapcat keys docs)))
+              "metadata only — a body would make the most common read unbounded")
+          (is (not (str/includes? (:out (run-knot tmp "show" tid "--json")) "body one"))
+              "document bodies never reach the show envelope")))))
+
+  (testing "a ticket owning no documents renders no heading and an empty array"
+    (with-tmp tmp
+      (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            text (:out (run-knot tmp "show" tid))
+            j    (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)]
+        (is (not (str/includes? text "## Documents")))
+        (is (= [] (get-in j [:data :documents]))))))
+
+  (testing "a document's location does not change when its ticket is archived"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "Design" "--type" "spec" "body")
+        (run-knot tmp "close" tid "--summary" "done")
+        (let [j (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)]
+          (is (= ["Design"] (mapv :title (get-in j [:data :documents])))
+              "identity rides the ticket field, not the path"))
+        (let [{:keys [exit out]} (run-knot tmp "check" "--json")]
+          (is (zero? exit) (str "check should stay clean, got " out))))))
+
+  (testing "a hand-written ## Documents heading warns, and the derived section still wins"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "Real" "--type" "spec" "body")
+        ;; The write surface refuses this heading, so plant it the only way a
+        ;; pre-upgrade project could have: directly in the file.
+        (let [path (->> (fs/glob (fs/path tmp ".tickets") "*.md") first str)]
+          (spit path (str (slurp path) "\n## Documents\n\nauthored prose\n")))
+        (let [{:keys [out]} (run-knot tmp "check" "--json")
+               parsed (json/parse-string out true)
+               codes  (set (map :code (get-in parsed [:data :issues])))]
+          (is (contains? codes "legacy_documents_section"))
+          (is (not (contains? codes "reserved_section"))
+              "one heading, one code, one remedy")
+          (is (every? #(= "warning" (:severity %))
+                      (filter #(= "legacy_documents_section" (:code %))
+                              (get-in parsed [:data :issues])))))
+        (let [text (:out (run-knot tmp "show" tid))
+              j    (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)]
+          (is (= ["Real"] (mapv :title (get-in j [:data :documents])))
+              "the derived section is the single authority")
+          (is (str/includes? text "authored prose")
+              "the authored text stays where it was written, as body")))))
+
+  (testing "the write surface refuses a newly written ## Documents heading"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit]} (run-knot tmp "update" tid "--body" "## Documents\n\nnope\n")]
+        (is (= 1 exit))))))
+
+(deftest delete-with-documents-end-to-end-test
+  (testing "a bare delete refuses and names the documents in both modes"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            did (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "spec"
+                                                  "--json" "body")))
+            {:keys [exit out]} (run-knot tmp "delete" tid "--json")
+            parsed (json/parse-string out true)]
+        (is (= 1 exit))
+        (is (= "has_incoming_refs" (get-in parsed [:error :code])))
+        (is (= [did] (get-in parsed [:error :documents])))
+        ;; The one behaviourally — not merely additively — incompatible
+        ;; change to a pinned contract: the code now fires on a LEAF ticket,
+        ;; with `referrers` empty. Argued in ADR 0022's final Consequence and
+        ;; documented in references/json.md; pinned here so a consumer that
+        ;; branches on `referrers` being non-empty has a test naming the case.
+        (is (= [] (get-in parsed [:error :referrers]))
+            "a leaf ticket owning only documents refuses with no referrers")
+        (let [{:keys [exit err]} (run-knot tmp "delete" tid)]
+          (is (= 1 exit))
+          (is (str/includes? err did))
+          (is (str/includes? err "knot document rm")))
+        (is (= 1 (count (get-in (json/parse-string
+                                 (:out (run-knot tmp "list" "--json")) true) [:data])))
+            "a refused delete removes nothing"))))
+
+  (testing "--cascade removes the ticket and its documents, and check stays clean"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            did (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "spec"
+                                                  "--json" "body")))
+            {:keys [exit out]} (run-knot tmp "delete" tid "--cascade" "--json")
+            parsed (json/parse-string out true)]
+        (is (zero? exit))
+        (is (= [did] (get-in parsed [:data :documents])))
+        (let [{:keys [exit out]} (run-knot tmp "check" "--json")]
+          (is (zero? exit) (str "check should be clean, got " out))
+          (is (zero? (get-in (json/parse-string out true) [:data :scanned :docs]))))))))
+
+(deftest document-error-messages-are-not-double-prefixed-test
+  ;; The document router prints `knot document <sub>: <message>`, so a
+  ;; message that carries its own prefix prints it twice. Nothing pinned the
+  ;; rendered text, so three of them shipped doubled and the suite stayed
+  ;; green. This asserts the rendered line, which is the only level at which
+  ;; the fault is visible.
+  (testing "each refusal prints exactly one command prefix"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (doseq [[label argv expected]
+                [["add without --title"
+                  ["document" "add" tid "body"]
+                  "knot document add: --title is required"]
+                 ["put without --title"
+                  ["document" "put" "kno-dx" "--type" "spec" "body"]
+                  "knot document put: --title is required"]
+                 ["put without --type"
+                  ["document" "put" "kno-dx" "--title" "T" "body"]
+                  "knot document put: --type is required"]
+                 ["show with no match"
+                  ["document" "show" "kno-dnope"]
+                  "knot document show: document not found: kno-dnope"]]]
+          (let [{:keys [exit err]} (apply run-knot tmp argv)
+                line (str/trim (last (remove str/blank? (str/split-lines err))))]
+            (is (= 1 exit) label)
+            (is (= expected line) label)
+            (is (= 1 (count (re-seq #"document (add|put|show|rm|ls):" line)))
+                (str label " — the prefix must appear once, not twice"))))))))
+
+(defn- plant-doc-file!
+  "Write a document file straight to disk under `dir`, bypassing the CLI.
+   `knot document add` cannot produce a faulty document, so the only way to
+   reach check's document arms end-to-end is to plant one."
+  [tmp dir filename {:keys [id ticket type]}]
+  (let [d (fs/path tmp dir)]
+    (fs/create-dirs d)
+    (spit (str (fs/path d filename))
+          (str "---\nid: " id "\nticket: " ticket "\ntitle: Planted\ntype: " type
+               "\ncreated: 2026-01-01T00:00:00Z\nupdated: 2026-01-01T00:00:00Z\n---\n\nbody\n"))))
+
+(deftest check-reports-document-faults-end-to-end-test
+  ;; The document arms are reachable only if `check-cmd` actually hands
+  ;; `scan`'s :documents to `check/run`. Every other test in the suite drives
+  ;; `check/run` directly, so all of them stay green when that wiring is
+  ;; missing and `knot check` silently validates nothing. This asserts through
+  ;; the real command.
+  (testing "a document type outside :doc-types is reported by the command"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (plant-doc-file! tmp (str ".tickets/docs/" tid) "kno-dbad--p.md"
+                         {:id "kno-dbad" :ticket tid :type "wat"})
+        (let [{:keys [exit out]} (run-knot tmp "check" "--json")
+              parsed (json/parse-string out true)
+              codes  (set (map :code (get-in parsed [:data :issues])))]
+          (is (= 1 exit) "an error-severity issue must set the exit code")
+          (is (contains? codes "invalid_doc_type")
+              (str "expected invalid_doc_type, got " out))
+          (is (= 1 (get-in parsed [:data :scanned :docs])))))))
+
+  (testing "an orphaned document is reported by the command"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (plant-doc-file! tmp ".tickets/docs/kno-01ghost" "kno-dorphan--p.md"
+                       {:id "kno-dorphan" :ticket "kno-01ghost" :type "spec"})
+      (let [{:keys [out]} (run-knot tmp "check" "--json")
+            codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
+        (is (contains? codes "doc_unknown_ticket") (str "got " out)))))
+
+  (testing "a misplaced document is reported by the command, and only once"
+    (with-tmp tmp
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (plant-doc-file! tmp (str ".tickets/docs/" a) "kno-dmis--p.md"
+                         {:id "kno-dmis" :ticket b :type "spec"})
+        (let [{:keys [out]} (run-knot tmp "check" "--json")
+              codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
+          (is (contains? codes "doc_directory_mismatch") (str "got " out))
+          (is (not (contains? codes "doc_unknown_ticket"))
+              "the agreement check runs before the orphan check")))))
+
+  (testing "two files claiming one document id are reported by the command"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (doseq [f ["kno-ddupe--a.md" "kno-ddupe--b.md"]]
+          (plant-doc-file! tmp (str ".tickets/docs/" tid) f
+                           {:id "kno-ddupe" :ticket tid :type "spec"}))
+        (let [{:keys [out]} (run-knot tmp "check" "--json")
+              codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
+          (is (contains? codes "duplicate_doc_id") (str "got " out))))))
+
+  (testing "a document in the ticket directory is diagnosed as misplaced by the command"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (plant-doc-file! tmp ".tickets" "kno-dstray--p.md"
+                         {:id "kno-dstray" :ticket tid :type "spec"})
+        (let [{:keys [out]} (run-knot tmp "check" "--json")
+              codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
+          (is (contains? codes "doc_directory_mismatch") (str "got " out))
+          (is (not (contains? codes "invalid_type"))
+              "not diagnosed as a malformed ticket")
+          (is (not (contains? codes "missing_required_field"))))))))
+
+(deftest docs-dir-config-end-to-end-test
+  ;; `:docs-dir` is only real if every document surface resolves it. The
+  ;; plumbing compiles whether or not each call site was updated, so this
+  ;; drives add, ls, show, check and info through the CLI with the corpus
+  ;; deliberately outside `.tickets/`.
+  (testing "a configured docs dir moves the whole corpus, and nothing looks in the default"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " ;; :docs-dir \"docs/tickets\""
+                               " :docs-dir \"writing/tickets\"")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            add (run-knot tmp "document" "add" tid "--title" "Design" "--type" "spec"
+                          "--json" "body")
+            did (doc-id-from-json (:out add))]
+        (is (zero? (:exit add)) (str "add err=" (:err add)))
+        (is (fs/directory? (fs/path tmp "writing" "tickets" tid))
+            "the document landed under the configured root")
+        (is (not (fs/exists? (fs/path tmp ".tickets" "docs")))
+            "and nothing was written to the default root")
+
+        (testing "ls and show resolve the configured root"
+          (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+            (is (= ["Design"] (mapv :title (get-in (json/parse-string out true)
+                                                   [:data :documents])))))
+          (let [{:keys [out]} (run-knot tmp "document" "show" did "--json")]
+            (is (= "body" (get-in (json/parse-string out true) [:data :body])))))
+
+        (testing "show renders the ticket's documents from the configured root"
+          (is (str/includes? (:out (run-knot tmp "show" tid)) "Design (spec)")))
+
+        (testing "check scans the configured root"
+          (let [{:keys [exit out]} (run-knot tmp "check" "--json")]
+            (is (zero? exit) (str "check should be clean, got " out))
+            (is (= 1 (get-in (json/parse-string out true) [:data :scanned :docs])))))
+
+        (testing "info counts the configured root"
+          (let [{:keys [out]} (run-knot tmp "info" "--json")]
+            (is (= 1 (get-in (json/parse-string out true) [:data :counts :doc_count])))))
+
+        (testing "put and rm reach it too"
+          (run-knot tmp "document" "put" did "--title" "Design v2" "--type" "plan" "new")
+          (let [{:keys [out]} (run-knot tmp "document" "show" did "--json")]
+            (is (= "new" (get-in (json/parse-string out true) [:data :body]))))
+          (run-knot tmp "document" "rm" did)
+          (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+            (is (= [] (get-in (json/parse-string out true) [:data :documents]))))))))
+
+  (testing "the default still tracks a renamed tickets dir"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno" "--tickets-dir" ".issues")
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "b")
+        (is (fs/directory? (fs/path tmp ".issues" "docs" tid))
+            "an unset :docs-dir follows :tickets-dir rather than hardcoding .tickets")))))
+
+(deftest required-docs-gate-end-to-end-test
+  ;; The gate is only real if it reaches the command. Drives `knot start`
+  ;; through the CLI with a configured requirement.
+  (testing "start refuses, names only what's missing, and writes nothing"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {}"
+                               " :required-docs {\"in_progress\" [\"spec\" \"plan\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "body")
+
+        (let [{:keys [exit out]} (run-knot tmp "start" tid "--json")
+              parsed (json/parse-string out true)]
+          (is (= 1 exit))
+          (is (= "missing_required_docs" (get-in parsed [:error :code])))
+          (is (= ["plan"] (get-in parsed [:error :missing_doc_types]))
+              "only the missing type, not every required one")
+          (is (= "in_progress" (get-in parsed [:error :target]))))
+
+        (let [{:keys [out]} (run-knot tmp "show" tid "--json")]
+          (is (= "open" (get-in (json/parse-string out true) [:data :status]))
+              "a refused start leaves the ticket where it was"))
+
+        (testing "the stderr form names the remedy"
+          (let [{:keys [err]} (run-knot tmp "start" tid)]
+            (is (str/includes? err "plan"))
+            (is (str/includes? err "knot document add"))))
+
+        (testing "--force overrides without a summary"
+          (let [{:keys [exit]} (run-knot tmp "start" tid "--force")]
+            (is (zero? exit))
+            (let [{:keys [out]} (run-knot tmp "show" tid "--json")]
+              (is (= "in_progress" (get-in (json/parse-string out true) [:data :status])))))))))
+
+  (testing "attaching the last required type opens the gate"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {}"
+                               " :required-docs {\"in_progress\" [\"spec\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (is (= 1 (:exit (run-knot tmp "start" tid))))
+        (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "body")
+        (is (zero? (:exit (run-knot tmp "start" tid))))))))
+
+(deftest documents-in-listing-views-end-to-end-test
+  ;; Reason 2: an agent scanning for work should see whether a ticket
+  ;; already has a spec without opening it. The column is conditional, so
+  ;; both halves are asserted: present when a document exists, absent
+  ;; otherwise.
+  (testing "ls and ready carry a DOCS column, and --json carries doc_types"
+    (with-tmp tmp
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (run-knot tmp "document" "add" a "--title" "Design" "--type" "spec" "x")
+        (run-knot tmp "document" "add" a "--title" "Rollout" "--type" "plan" "y")
+
+        (let [{:keys [out]} (run-knot tmp "list")]
+          (is (str/includes? out "DOCS") "the header appears")
+          (is (re-find #"plan,spec" out) "types are listed, sorted and deduped")
+          ;; Asserted as the absence of any type on that row, not as the
+          ;; presence of a dash: the row already carries dashes in the
+          ;; ASSIGNEE and metric columns, so a dash match proves nothing.
+          (let [b-row (first (filter #(str/includes? % b) (str/split-lines out)))]
+            (is (some? b-row))
+            (is (not (str/includes? b-row "spec"))
+                "a ticket owning none names no type")
+            (is (not (str/includes? b-row "plan")))))
+
+        (let [{:keys [out]} (run-knot tmp "list" "--json")
+              rows (json/parse-string out true)
+              by-id (into {} (map (juxt :id identity)) (:data rows))]
+          (is (= ["plan" "spec"] (:doc_types (get by-id a)))
+              "doc_types on the owning row")
+          (is (nil? (:doc_types (get by-id b)))
+              "and absent on a row owning none, not an empty array"))
+
+        (is (str/includes? (:out (run-knot tmp "ready")) "DOCS")
+            "ready renders it too"))))
+
+  (testing "the column is absent entirely when no ticket owns a document"
+    (with-tmp tmp
+      (run-knot tmp "create" "Alpha")
+      (let [{:keys [out]} (run-knot tmp "list")]
+        (is (not (str/includes? out "DOCS"))
+            "a project not using documents sees no new column"))))
+
+  (testing "prime shows the types in text and JSON"
+    (with-tmp tmp
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" a "--title" "Design" "--type" "spec" "x")
+        (run-knot tmp "document" "add" a "--title" "Rollout" "--type" "plan" "y")
+        ;; Asserted on the ticket's own line, not anywhere in the output:
+        ;; a bare `str/includes? "spec"` would pass on an incidental match.
+        (let [out  (:out (run-knot tmp "prime"))
+              line (first (filter #(str/includes? % a) (str/split-lines out)))]
+          (is (some? line) "the ticket appears in prime")
+          (is (str/includes? line "plan,spec")
+              (str "expected the types on the ticket's line, got " (pr-str line))))
+        (let [{:keys [out]} (run-knot tmp "prime" "--json")
+              ready (get-in (json/parse-string out true) [:data :ready])]
+          (is (= ["plan" "spec"] (:doc_types (first ready))))))))
+
+  (testing "a misfiled document is not claimed by the ticket whose folder holds it"
+    ;; Ownership is the `ticket` field, not the directory, in listings as
+    ;; everywhere else.
+    (with-tmp tmp
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (plant-doc-file! tmp (str ".tickets/docs/" a) "kno-dmis--p.md"
+                         {:id "kno-dmis" :ticket b :type "spec"})
+        (let [{:keys [out]} (run-knot tmp "list" "--json")
+              by-id (into {} (map (juxt :id identity))
+                          (:data (json/parse-string out true)))]
+          (is (nil? (:doc_types (get by-id a)))
+              "the folder's owner does not claim it")
+          (is (= ["spec"] (:doc_types (get by-id b)))
+              "the ticket its frontmatter names does"))))))
+
+(deftest check-reports-an-unreachable-corpus-end-to-end-test
+  ;; Twice now a key returned by `check/scan` was dropped when `check-cmd`
+  ;; rebuilt the map for `check/run`, and twice the unit tests passed
+  ;; because they call `check/run` directly. This asserts through the
+  ;; command, which is the only level at which that class of fault shows.
+  (testing "a :docs-dir pointing somewhere empty is reported by the command"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "body")
+        (is (zero? (count (get-in (json/parse-string
+                                   (:out (run-knot tmp "check" "--json")) true)
+                                  [:data :issues])))
+            "clean on the default layout")
+
+        ;; Repoint the corpus at a directory that holds nothing.
+        (let [cfg (str (fs/path tmp ".knot.edn"))]
+          (spit cfg (str/replace (slurp cfg)
+                                 " ;; :docs-dir \"docs/tickets\""
+                                 " :docs-dir \"writing/typo\"")))
+
+        (let [{:keys [exit out]} (run-knot tmp "check" "--json")
+              issues (get-in (json/parse-string out true) [:data :issues])
+              issue  (first (filter #(= "unreachable_documents" (:code %)) issues))]
+          (is (some? issue)
+              (str "the stranded corpus must be reported, got " out))
+          (is (= "warning" (:severity issue)))
+          (is (str/includes? (:path issue) "docs")
+              "and must name where the documents actually are")
+          (is (zero? exit) "a warning does not fail the check"))
+
+        (testing "every document surface agrees they are gone"
+          (is (str/includes? (:out (run-knot tmp "document" "ls" tid))
+                             "has no documents"))
+          (is (= [] (get-in (json/parse-string
+                             (:out (run-knot tmp "show" tid "--json")) true)
+                            [:data :documents]))))))))

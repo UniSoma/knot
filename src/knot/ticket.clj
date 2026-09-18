@@ -86,6 +86,22 @@
 (def ^:private fence-open "---\n")
 (def ^:private fence-close "\n---\n")
 
+(defn- parse-frontmatter
+  "Parse a YAML frontmatter block, already stripped of its fences, into a
+   map. Key order from the source is preserved."
+  [yaml-text]
+  (or (yaml/parse-string yaml-text) {}))
+
+(defn frontmatter-complete?
+  "True when `s` already holds the whole frontmatter region, so parsing `s`
+   yields the same `:frontmatter` as parsing the full file `s` is a prefix
+   of. Lets a reader stop early without restating the fence rules — a
+   second implementation of them drifts, and the drift is silent: the
+   permissive reader reports frontmatter the rest of the tool cannot see."
+  [s]
+  (or (not (str/starts-with? s fence-open))
+      (some? (str/index-of s fence-close (count fence-open)))))
+
 (defn parse
   "Parse the contents of a ticket file into `{:frontmatter <map> :body <string>}`.
    The file is expected to start with `---\\n`, contain YAML frontmatter, then a
@@ -103,7 +119,7 @@
               body      (subs after-open (+ close-idx (count fence-close)))
               body      (cond-> body
                           (str/starts-with? body "\n") (subs 1))
-              fm        (or (yaml/parse-string yaml-text) {})]
+              fm        (parse-frontmatter yaml-text)]
           {:frontmatter fm
            :body        body})))))
 
@@ -171,18 +187,26 @@
 
 (def reserved-section-owners
   "The `## ` headings `show` synthesizes rather than reads, in render
-   order, each with the frontmatter field it comes from and the flag that
-   writes it. `:inverse?` marks the two read backwards from other
-   tickets' fields — `Blocking` is other tickets' deps, `Children` other
-   tickets' parent. A body that carries one duplicates a field and
-   drifts from it, so the write surface refuses them and `check` flags
-   the ones already stored. Every message about a reserved section
-   formats from this table."
+   order, each with the flag that writes it. A row names where `show`
+   reads it from in one of two ways: `:field`, plus `:inverse?` on the two
+   read backwards from other tickets' fields — `Blocking` is other
+   tickets' deps, `Children` other tickets' parent; or `:source`, a
+   ready-made phrase, for the one row whose other side is not a ticket at
+   all. A body that carries one of these headings duplicates what it names
+   and drifts from it, so the write surface refuses them and `check` flags
+   the ones already stored. Every message about a reserved section formats
+   from this table."
   [{:heading "Acceptance Criteria" :field "acceptance" :writer "--add-ac / --ac"}
    {:heading "Blockers"  :field "deps"   :writer "knot dep"}
    {:heading "Blocking"  :field "deps"   :writer "knot dep on the blocked ticket" :inverse? true}
    {:heading "Children"  :field "parent" :writer "--parent on the child"         :inverse? true}
-   {:heading "Linked"    :field "links"  :writer "knot link"}])
+   {:heading "Linked"    :field "links"  :writer "knot link"}
+   ;; `:field`/`:inverse?` are absent rather than unread: both describe a
+   ;; TICKET's frontmatter field, and this section is derived from another
+   ;; corpus entirely. `:source` says so directly, where the generic
+   ;; phrasing would have produced "other tickets' ticket".
+   {:heading "Documents" :writer "knot document add"
+    :source "each document's ticket field"}])
 
 (def reserved-section-names
   "The `:heading` column of `reserved-section-owners`, in its order."
@@ -197,12 +221,14 @@
 (defn reserved-section-source
   "Where `show` reads the reserved `heading` from, as a noun phrase:
    `the deps field` for a stored field, `other tickets' deps` for an
-   inverse."
+   inverse. A row carrying `:source` supplies the phrase itself, for the
+   inverse whose other side is not a ticket."
   [heading]
-  (let [{:keys [field inverse?]} (reserved-section-owner heading)]
-    (if inverse?
-      (str "other tickets' " field)
-      (str "the " field " field"))))
+  (let [{:keys [field inverse? source]} (reserved-section-owner heading)]
+    (cond
+      source   source
+      inverse? (str "other tickets' " field)
+      :else    (str "the " field " field"))))
 
 (defn reserved-section-provenance
   "The HTML comment `show` prints under the reserved `heading`: the
@@ -210,9 +236,13 @@
    agent reads the render while staying invisible where a human views
    the markdown."
   [heading]
-  (let [{:keys [field inverse? writer]} (reserved-section-owner heading)]
-    (str "<!-- " (if inverse? "inverse of other tickets' " "from frontmatter ")
-         field "; edit with " writer " -->")))
+  (let [{:keys [field inverse? writer source]} (reserved-section-owner heading)]
+    (str "<!-- "
+         (if source
+           (str "derived from " source)
+           (str (if inverse? "inverse of other tickets' " "from frontmatter ")
+                field))
+         "; edit with " writer " -->")))
 
 (def ^:private children-progress-suffix-pat
   ;; The ` (d/t)` rollup `show` appends to `## Children`. Stripped before
