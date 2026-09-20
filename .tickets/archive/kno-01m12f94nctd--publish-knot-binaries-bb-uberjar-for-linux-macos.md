@@ -1,12 +1,13 @@
 ---
 id: kno-01m12f94nctd
 title: Publish knot release binaries for every babashka platform through a gated release workflow
-status: in_progress
+status: closed
 type: task
 priority: 2
 mode: hitl
 created: '2026-08-27T20:41:14.112974689Z'
-updated: '2026-09-15T19:47:22.180281747Z'
+updated: '2026-09-15T20:47:42.905424962Z'
+closed: '2026-09-15T20:47:42.905424962Z'
 tags:
 - distribution
 - release
@@ -23,7 +24,7 @@ acceptance:
 - title: A workflow_dispatch dry_run on main is green across every leg before the release that ships this change
   done: true
 - title: A pushed vX.Y.Z tag produces a GitHub Release with the 5 archives and SHA256SUMS and notes from the tag, created only after every smoke leg passes
-  done: false
+  done: true
 - title: README Install covers installer, manual download with quarantine note, and bbin; /release Step 9, Step 11 and the upgrade-path template are updated
   done: true
 - title: ADR 0021 is committed and ADR 0004 is marked superseded by it
@@ -31,6 +32,8 @@ acceptance:
 links:
 - kno-01kqcpb0t5s7
 - kno-01kqzh3jgwf0
+external_refs:
+- git:799b7b6
 ---
 
 ## Description
@@ -112,3 +115,7 @@ Not verified:
 - bb.exe with an appended jar has never run. If the Windows leg prints babashka's version or errors, that is a design finding for ADR 0021, not a workflow bug.
 
 Next: push main (ci.yml exercises the .bb-version step), run release.yml from Actions with dry_run=true, flip AC 3/4/5 once every leg is green, and let the next /release cut prove AC 6. Then close.
+
+**2026-09-15T20:47:42.905424962Z**
+
+Shipped in v0.14.0. The release gate built and smoke-tested the five platform binaries and published the Release: https://github.com/UniSoma/knot/releases/tag/v0.14.0.
