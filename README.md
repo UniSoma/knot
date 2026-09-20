@@ -7,8 +7,6 @@ Tickets are markdown files with YAML frontmatter under `.tickets/`.
 Closed tickets auto-move to `.tickets/archive/`.
 Built for one human on one machine, and for handing autonomous work to an AI agent.
 
-See [`docs/prd/knot-v0.md`](docs/prd/knot-v0.md) for the full design rationale and the v0 acceptance criteria.
-
 ## Why Knot?
 
 Knot is for solo developers who want tickets to live with the code, outside a hosted issue tracker or a hidden database.
