@@ -1457,6 +1457,16 @@
           (emit-document-failure! e data)
           (die (str "knot document " sub ": " (.getMessage e))))))))
 
+(defn- flag-value
+  "`(k opts)`, refused when it is `true`: babashka.cli binds a value flag given
+   no value to `true`."
+  [opts k]
+  (let [v (get opts k)]
+    (when (true? v)
+      (throw (ex-info (str "--" (name k) " needs a value")
+                      {:kind :invalid-argument :field k})))
+    v))
+
 (defn- require-opt!
   "Throw the `:invalid-argument` ex-info `run-document!` knows how to
    route. A `die` here would bypass the `--json` envelope. The message
@@ -1491,12 +1501,13 @@
       (die "knot document add: a ticket id is required"))
     (run-document!
      "add" json?
-     #(do (require-opt! "--title" (:title opts))
-          (cli/document-add-cmd
-           (discover-ctx)
-           (merge (document-body-opts (variadic-text args))
-                  {:ticket tid :title (:title opts) :type (:type opts)
-                   :json?  json?}))))))
+     #(let [title (flag-value opts :title)]
+        (require-opt! "--title" title)
+        (cli/document-add-cmd
+         (discover-ctx)
+         (merge (document-body-opts (variadic-text args))
+                {:ticket tid :title title :type (flag-value opts :type)
+                 :json?  json?}))))))
 
 (defn- document-show-handler [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/show))
@@ -1507,8 +1518,8 @@
     (run-document!
      "show" json?
      #(cli/document-show-cmd (discover-ctx)
-                             {:id selector :ticket (:ticket opts)
-                              :type (:type opts) :json? json?}))))
+                             {:id selector :ticket (flag-value opts :ticket)
+                              :type (flag-value opts :type) :json? json?}))))
 
 (defn- document-replace-handler [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/replace))
@@ -1521,8 +1532,8 @@
      #(cli/document-replace-cmd
        (discover-ctx)
        (merge (document-body-opts (variadic-text args))
-              {:id     selector :ticket (:ticket opts)
-               :title  (:title opts) :type (:type opts)
+              {:id     selector :ticket (flag-value opts :ticket)
+               :title  (flag-value opts :title) :type (flag-value opts :type)
                :json?  json?})))))
 
 (defn- document-delete-handler [argv]
@@ -1534,7 +1545,7 @@
     (run-document!
      "delete" json?
      #(cli/document-delete-cmd (discover-ctx)
-                               {:id selector :ticket (:ticket opts) :json? json?}))))
+                               {:id selector :ticket (flag-value opts :ticket) :json? json?}))))
 
 (defn- document-list-handler [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/list))

@@ -2258,12 +2258,6 @@
         owner (when ticket (resolve-owner! project-root tickets-dir ticket))
         d     (if type
                 (do
-                  ;; `--type` with no value parses to boolean true, which would
-                  ;; otherwise be interpolated into the refusal as "no true
-                  ;; document on <id>".
-                  (when-not (string? type)
-                    (throw (ex-info "--type needs a value"
-                                    {:kind :invalid-argument})))
                   ;; The positional is the owner under `--type`, so `--ticket`
                   ;; has nothing left to narrow. Refused rather than ignored: a
                   ;; silently dropped flag reads as a resolution the caller

@@ -3934,6 +3934,23 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command: doc"))))))
 
+(deftest a-value-flag-given-no-value-is-refused-test
+  (with-tmp tmp
+    (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+          did (doc-id-from-json (:out (run-knot tmp "document" "add" tid "--title" "D"
+                                                "--type" "spec" "--json" "b")))]
+      (doseq [[flag argv] [["--title" ["document" "add" tid "--title"]]
+                           ["--type" ["document" "add" tid "--title" "T" "--type"]]
+                           ["--title" ["document" "replace" did "--title" "--type" "spec"]]
+                           ["--type" ["document" "replace" did "--title" "T" "--type"]]
+                           ["--ticket" ["document" "delete" did "--ticket"]]]]
+        (let [{:keys [exit err]} (apply run-knot tmp argv)]
+          (is (= 1 exit) (str/join " " argv))
+          (is (str/includes? err (str flag " needs a value")) (str/join " " argv)))
+        (let [{:keys [out]} (apply run-knot tmp (conj argv "--json"))]
+          (is (= "invalid_argument" (get-in (json/parse-string out true) [:error :code]))
+              (str/join " " argv)))))))
+
 (deftest misfiled-document-is-not-a-ticket-test
   (testing "a document file in the tickets directory is never read or written as a ticket"
     (with-tmp tmp
