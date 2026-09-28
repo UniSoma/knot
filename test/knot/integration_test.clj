@@ -3934,6 +3934,29 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command: doc"))))))
 
+(deftest a-trailing-value-flag-is-refused-on-every-command-test
+  (with-tmp tmp
+    (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+      (doseq [[flag argv] [["--title" ["update" tid "--title"]]
+                           ["--assignee" ["update" tid "--assignee"]]
+                           ["--type" ["create" "X" "--type"]]
+                           ["--status" ["list" "--status"]]
+                           ["--assignee" ["start" tid "--assignee"]]
+                           ["--summary" ["close" tid "--summary"]]
+                           ["--title" ["update" tid "--title" "--json"]]
+                           ["--summary" ["close" tid "--summary" "--json"]]
+                           ["--title" ["update" tid "--title" "--priority" "1"]]]]
+        (let [{:keys [exit err]} (apply run-knot tmp argv)]
+          (is (= 1 exit) (str/join " " argv))
+          (is (str/includes? err (str flag " needs a value")) (str/join " " argv))))
+      (is (= "Alpha" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
+                             [:data :title]))
+          "update --title must not write true into the ticket")
+      (testing "a value that merely starts with a dash is still accepted"
+        (run-knot tmp "update" tid "--title=--json")
+        (is (= "--json" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
+                                [:data :title])))))))
+
 (deftest a-value-flag-given-no-value-is-refused-test
   (with-tmp tmp
     (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")

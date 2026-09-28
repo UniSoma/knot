@@ -189,6 +189,15 @@
    {}
    flags))
 
+(defn- flag-tokens
+  "Every flag token `entry` accepts, value or boolean, plus the global help flags."
+  [{:keys [flags]}]
+  (into #{"--help" "-h"}
+        (mapcat (fn [{flag-name :name :keys [alias]}]
+                  (cond-> [(str "--" (name flag-name))]
+                    alias (conj (str "-" (name alias))))))
+        flags))
+
 (defn- extract-value-flags
   "Walk argv and pull value-bearing string flag tokens out before
    babashka.cli sees them, so dash-leading values like `\"- text\"` or
@@ -198,11 +207,14 @@
    `extract-body-flags`: handles both `--flag value` and `--flag=value`.
    For `:coerce []` flags (`:repeat? true` in `flag-map`), accumulates
    into a vector; otherwise last-wins (matching babashka.cli semantics).
-   `flag-map` comes from `value-flag-map`. Returns
+   A value flag followed by nothing, or by another of this command's flags,
+   is refused rather than bound to `true` or to that flag's name. Returns
    `{:value-opts {kw value-or-vec} :argv [...]}` where `:argv` is argv
    with the consumed tokens removed. See kno-01kr0129m0y9."
-  [argv flag-map]
-  (let [add (fn [opts {:keys [key repeat?]} v]
+  [argv entry]
+  (let [flag-map (value-flag-map entry)
+        tokens   (flag-tokens entry)
+        add (fn [opts {:keys [key repeat?]} v]
               (if repeat?
                 (update opts key (fnil conj []) v)
                 (assoc opts key v)))]
@@ -218,9 +230,13 @@
             (recur tail out
                    (add opts (flag-map eq-flag) (subs head (inc eq-idx))))
 
-            (and (contains? flag-map head) (seq tail))
+            (and (contains? flag-map head) (seq tail) (not (tokens (first tail))))
             (recur (rest tail) out
                    (add opts (flag-map head) (first tail)))
+
+            (contains? flag-map head)
+            (throw (ex-info (str head " needs a value")
+                            {:kind :invalid-argument :field (:key (flag-map head))}))
 
             :else
             (recur tail (conj out head) opts)))))))
@@ -417,7 +433,7 @@
         rel-order                  (extract-rel-order argv)
         {:keys [value-opts argv]}  (extract-value-flags
                                     argv
-                                    (value-flag-map (get help/registry :create)))
+                                    (get help/registry :create))
         {:keys [opts args]}        (bcli/parse-args argv (spec :create))
         title (first args)
         json? (boolean (:json opts))]
@@ -595,7 +611,7 @@
 (defn- init-handler [argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry :init)))
+                                   (get help/registry :init))
         {:keys [opts]}            (bcli/parse-args argv (spec :init))
         opts                      (merge opts value-opts)
         ;; init runs in cwd by design — it's how you create a project root
@@ -617,7 +633,7 @@
   [cmd-name cmd-key arg-count transition-fn argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry cmd-key)))
+                                   (get help/registry cmd-key))
         {:keys [args opts]}       (bcli/parse-args argv (spec cmd-key))
         merged                    (merge opts value-opts)
         json?                     (boolean (:json opts))]
@@ -751,7 +767,7 @@
   [cmd-key argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry cmd-key)))
+                                   (get help/registry cmd-key))
         {:keys [opts]}            (bcli/parse-args argv (spec cmd-key))
         opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
@@ -1005,7 +1021,7 @@
   (let [{:keys [body-opts argv]}  (extract-body-flags argv update-body-flags)
         {:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry :update)))
+                                   (get help/registry :update))
         {:keys [opts args]}       (bcli/parse-args argv (spec :update))
         json? (boolean (:json opts))
         id    (first args)]
@@ -1180,7 +1196,7 @@
   [argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry :check)))
+                                   (get help/registry :check))
         parsed                    (try
                                     (bcli/parse-args argv (spec :check))
                                     (catch Exception e e))]
@@ -1330,7 +1346,7 @@
   (let [out (try
               (let [{:keys [value-opts argv]} (extract-value-flags
                                                argv
-                                               (value-flag-map (get help/registry :prime)))
+                                               (get help/registry :prime))
                     {:keys [opts]}            (bcli/parse-args argv (spec :prime))
                     opts                      (merge opts value-opts)
                     _            (validate-priority-filter! opts)
