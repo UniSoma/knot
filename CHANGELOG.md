@@ -14,6 +14,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added/Changed/Fixed/Removed
 
+## [0.15.0] - 2026-09-28
+
+### Added
+
+- **Tickets carry documents.** A document is a markdown file owned by one ticket, with a title and a type in its YAML frontmatter and a markdown body. `knot document add`, `show`, `replace`, `delete` and `list` manage them, and every subcommand takes `--json`. The ticket stores nothing about its documents: each document names its ticket in its own `ticket` field, and knot reads that field backwards, the way `## Children` is computed from other tickets' `parent`. Documents live under `<docs-dir>/<ticket-id>/`, and where the directory and the `ticket` field disagree, the field wins. `replace` swaps the title, type and body together, requires `--title` and `--type`, and refuses a selector that matches nothing or more than one document. `knot show` renders a `## Documents` section and `show --json` carries a `documents` array.
+- **Four `.knot.edn` keys configure documents.** `:doc-types` is the list a document's type must come from, and `:default-doc-type` applies when `--type` is omitted. `:docs-dir` defaults to `<tickets-dir>/docs` and must resolve inside the project, so a cloned `.knot.edn` cannot read or write outside it. `:required-docs` maps a status to the document types a ticket must own before it enters that status, for example `{"in_progress" ["spec"]}`. The transition is refused until they are attached, and `--force` overrides it.
+- **Listings show a `DOCS` column naming the document types each ticket owns.** `list`, `ready`, `blocked`, `closed` and `prime` render it only when some row in the view owns a document. `--json` carries `doc_types`.
+- **`knot check` validates documents.** Five errors report a type outside `:doc-types` (`invalid_doc_type`), an owning ticket that resolves to nothing (`doc_unknown_ticket`), a directory that disagrees with the `ticket` field (`doc_directory_mismatch`), a document id whose embedded ticket id disagrees with the `ticket` field (`doc_id_owner_mismatch`), and one document id claimed by two files (`duplicate_doc_id`). The `unreachable_documents` warning flags documents left at the default location while `:docs-dir` points elsewhere. The `legacy_documents_section` warning flags a `## Documents` heading written into a ticket body before knot reserved it. A document file found in the ticket directory is reported as misplaced, not as a malformed ticket.
+
+### Changed
+
+- **`knot delete` refuses while the ticket owns documents,** as it already refused on incoming references. The `has_incoming_refs` payload gains a `documents` array. Under `--cascade`, knot removes the documents after the ticket, so an interrupted run leaves orphans that `knot check` reports under `doc_unknown_ticket`. ADR 0022 records the ordering rule and supersedes that part of ADR 0008.
+- **A missing required positional under `--json` emits an error envelope.** `create` without a title, the ticket commands without an id, and the `document` subcommands without a ticket or selector now print `{ok: false, error: {code: "invalid_argument", message}}` on stdout and exit 1. They used to print a plain-text line on stderr and no envelope. Text mode keeps its stderr line. Unknown-flag and out-of-range numeric errors still go to stderr.
+
+### Fixed
+
+- **`knot.el` parses the JSON envelope when knot prints a warning.** Emacs read stdout and stderr from one buffer, so a warning printed on success, such as an unknown `.knot.edn` key, came before the JSON and every command failed with "could not parse JSON stream". Stderr now goes to a separate file and joins the error message only when parsing fails or knot prints nothing.
+
 ## [0.14.0] - 2026-09-15
 
 ### Added
