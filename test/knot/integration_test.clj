@@ -3945,13 +3945,19 @@
                            ["--summary" ["close" tid "--summary"]]
                            ["--title" ["update" tid "--title" "--json"]]
                            ["--summary" ["close" tid "--summary" "--json"]]
-                           ["--title" ["update" tid "--title" "--priority" "1"]]]]
+                           ["--title" ["update" tid "--title" "--priority" "1"]]
+                           ["--description" ["update" tid "--description"]]
+                           ["-d" ["update" tid "-d" "--json"]]
+                           ["--body" ["update" tid "--body"]]
+                           ["--design" ["create" "X" "--design"]]]]
         (let [{:keys [exit err]} (apply run-knot tmp argv)]
           (is (= 1 exit) (str/join " " argv))
           (is (str/includes? err (str flag " needs a value")) (str/join " " argv))))
       (is (= "Alpha" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
                              [:data :title]))
           "update --title must not write true into the ticket")
+      (is (not (str/includes? (:out (run-knot tmp "show" tid)) "--json"))
+          "update -d --json must not write --json into the body")
       (testing "a value that merely starts with a dash is still accepted"
         (run-knot tmp "update" tid "--title=--json")
         (is (= "--json" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)

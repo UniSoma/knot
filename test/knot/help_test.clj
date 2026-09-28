@@ -653,7 +653,12 @@
     (let [{:keys [exit out err]} (run-knot "create" "--design=--help")]
       (is (= 1 exit))
       (is (str/blank? out))
-      (is (str/includes? err "title is required")))))
+      (is (str/includes? err "title is required"))))
+
+  (testing "--help before a trailing valueless body flag still prints help"
+    (let [{:keys [exit out]} (run-knot "create" "--help" "--description")]
+      (is (zero? exit))
+      (is (str/includes? out "USAGE")))))
 
 (deftest help-help-collapse-test
   (testing "knot help help is treated as bare top-level help (exit 0, USAGE)"

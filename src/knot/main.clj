@@ -137,10 +137,11 @@
    survive intact. `flag-map` scopes which flags get extracted — pass
    `create-body-flags` from `create-handler`, `update-body-flags` from
    `update-handler`, `body-flag->key` from `help-requested?` (the
-   union, since help detection is command-agnostic). Returns
+   union, since help detection is command-agnostic). A body flag followed
+   by nothing, or by one of `tokens`, is refused. Returns
    `{:body-opts {kw value} :argv [...]}` where `:argv` is argv with
    the consumed tokens removed."
-  [argv flag-map]
+  [argv flag-map tokens]
   (loop [in argv, out [], opts {}]
     (if (empty? in)
       {:body-opts opts :argv out}
@@ -153,9 +154,13 @@
           (recur tail out
                  (assoc opts (flag-map eq-flag) (subs head (inc eq-idx))))
 
-          (and (contains? flag-map head) (seq tail))
+          (and (contains? flag-map head) (seq tail) (not (tokens (first tail))))
           (recur (rest tail) out
                  (assoc opts (flag-map head) (first tail)))
+
+          (contains? flag-map head)
+          (throw (ex-info (str head " needs a value")
+                          {:kind :invalid-argument :field (flag-map head)}))
 
           :else
           (recur tail (conj out head) opts))))))
@@ -429,7 +434,9 @@
           (recur (rest a) acc))))))
 
 (defn- create-handler [argv]
-  (let [{:keys [body-opts argv]}   (extract-body-flags argv create-body-flags)
+  (let [{:keys [body-opts argv]}   (extract-body-flags
+                                    argv create-body-flags
+                                    (flag-tokens (get help/registry :create)))
         rel-order                  (extract-rel-order argv)
         {:keys [value-opts argv]}  (extract-value-flags
                                     argv
@@ -1018,7 +1025,9 @@
    conflicting body flags emit `invalid_argument`. Tag splitting mirrors
    `create-handler` so the on-disk `:tags` field stays a YAML list."
   [argv]
-  (let [{:keys [body-opts argv]}  (extract-body-flags argv update-body-flags)
+  (let [{:keys [body-opts argv]}  (extract-body-flags
+                                   argv update-body-flags
+                                   (flag-tokens (get help/registry :update)))
         {:keys [value-opts argv]} (extract-value-flags
                                    argv
                                    (get help/registry :update))
@@ -1590,7 +1599,9 @@
    `-h`. Body extraction keeps a literal `--help` inside a body string
    from triggering a false positive."
   [argv]
-  (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv body-flag->key)))))
+  ;; Drop a trailing valueless body flag so extraction can't refuse it before help is seen.
+  (let [argv (cond-> argv (body-flag->key (last argv)) butlast)]
+    (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv body-flag->key #{}))))))
 
 (defn -main [& argv]
   (try
