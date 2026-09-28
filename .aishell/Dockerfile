@@ -54,6 +54,15 @@ RUN mkdir -p /usr/local/share/emacs/site-lisp/elpa; \
       "(package-initialize)" \
       > /usr/local/share/emacs/site-lisp/site-start.el
 
+# GitHub CLI for PR review and merge. Auth comes from GH_TOKEN, passed through
+# by config.yaml; the token is a fine-grained PAT scoped to UniSoma/knot.
+ARG GH_VERSION=2.101.0
+RUN curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_amd64.tar.gz" -o /tmp/gh.tar.gz; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp; \
+    install -m 0755 "/tmp/gh_${GH_VERSION}_linux_amd64/bin/gh" /usr/local/bin/gh; \
+    rm -rf /tmp/gh.tar.gz "/tmp/gh_${GH_VERSION}_linux_amd64"; \
+    gh --version
+
 # >>> clojure (managed) >>>
 # JDK 25 from Eclipse Temurin (foundation only ships JRE 17 headless).
 COPY --from=eclipse-temurin:25-jdk-jammy /opt/java/openjdk /opt/java/openjdk
