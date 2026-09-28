@@ -3818,7 +3818,7 @@
   (get-in (json/parse-string out true) [:data :id]))
 
 (deftest document-group-end-to-end-test
-  (testing "add, ls, show, put and rm round-trip through the real CLI"
+  (testing "add, list, show, replace and delete round-trip through the real CLI"
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
             add (run-knot tmp "document" "add" tid
@@ -3826,8 +3826,8 @@
                           "step one")
             did (doc-id-from-json (:out add))]
         (is (zero? (:exit add)) (str "add err=" (:err add)))
-        (is (re-matches #"[a-z0-9]+-d[0-9a-z]+" did)
-            "a document id carries the -d marker that distinguishes it from a ticket id")
+        (is (re-matches #"[a-z0-9]+-[0-9a-z]+-d[0-9a-z]+" did)
+            "a document id embeds its owning ticket, then the -d marker and a random tail")
         (is (not (re-matches #"[a-z0-9]+-01[0-9a-z]+" did)))
 
         (let [{:keys [exit out]} (run-knot tmp "document" "list" tid "--json")
@@ -3946,7 +3946,11 @@
           (is (str/includes? text "## Documents"))
           (is (str/includes? text "Design (spec) — "))
           (is (str/includes? text "Rollout (plan) — "))
-          (is (= ["Design" "Rollout"] (mapv :title docs)))
+          (is (= #{"Design" "Rollout"} (set (map :title docs))))
+          (is (= (vec (sort (map :id docs))) (mapv :id docs))
+              ;; Ordered by id, which the filename leads with. The random
+              ;; suffix means that is no longer creation order.
+              "documents are listed in id order")
           (is (= #{:id :title :type} (set (mapcat keys docs)))
               "metadata only — a body would make the most common read unbounded")
           (is (not (str/includes? (:out (run-knot tmp "show" tid "--json")) "body one"))
@@ -4104,8 +4108,8 @@
   (testing "an orphaned document is reported by the command"
     (with-tmp tmp
       (run-knot tmp "create" "Alpha")
-      (plant-doc-file! tmp ".tickets/docs/kno-01ghost" "kno-dorphan--p.md"
-                       {:id "kno-dorphan" :ticket "kno-01ghost" :type "spec"})
+      (plant-doc-file! tmp ".tickets/docs/kno-01ghost" "kno-01ghost-dorph--p.md"
+                       {:id "kno-01ghost-dorph" :ticket "kno-01ghost" :type "spec"})
       (let [{:keys [out]} (run-knot tmp "check" "--json")
             codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
         (is (contains? codes "doc_unknown_ticket") (str "got " out)))))
@@ -4135,8 +4139,8 @@
   (testing "a document in the ticket directory is diagnosed as misplaced by the command"
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
-        (plant-doc-file! tmp ".tickets" "kno-dstray--p.md"
-                         {:id "kno-dstray" :ticket tid :type "spec"})
+        (plant-doc-file! tmp ".tickets" (str tid "-dstry--p.md")
+                         {:id (str tid "-dstry") :ticket tid :type "spec"})
         (let [{:keys [out]} (run-knot tmp "check" "--json")
               codes (set (map :code (get-in (json/parse-string out true) [:data :issues])))]
           (is (contains? codes "doc_directory_mismatch") (str "got " out))

@@ -673,9 +673,30 @@
   (throw (ex-info (str "document not found: " input)
                   {:kind :not-found :input input})))
 
+(defn- doc-id-prefix-match?
+  "True when `input` is a segment-wise prefix of document id `did`.
+
+   A document id is `<prefix>-<ticket-suffix>-d<tail>`, so a partial selector
+   may truncate the owner AND the tail — `kp-01m2s4ec-d7f` for
+   `kp-01m2s4ecygyc-d7f3k`. A plain string prefix cannot express that, because
+   truncating the owner makes the rest of the string diverge, so the comparison
+   is segment by segment.
+
+   An input with anything other than three segments never matches. Two segments
+   is a ticket id, and a ticket id is not a partial document id: it is a
+   wrong-corpus call, and resolving it to that ticket's only document would be
+   guessing on the caller's behalf."
+  [input did]
+  (let [in (str/split input #"-")
+        d  (str/split (or did "") #"-")]
+    (and (= 3 (count in))
+         (= 3 (count d))
+         (every? true? (map str/starts-with? d in)))))
+
 (defn resolve-doc
   "Resolve `input` to a unique document. Three layers, named explicitly
-   and not inherited: exact id, id prefix, then owning-ticket-plus-title.
+   and not inherited: exact id, segment-wise id prefix, then
+   owning-ticket-plus-title.
    `resolve-id`'s final layer splits on the first hyphen to recover a bare
    ULID and would mis-split a document id, so it is not reused.
 
@@ -694,7 +715,7 @@
          exact (by #(= input (id-of %)))]
      (if (= 1 (count exact))
        (first exact)
-       (let [pre (by #(str/starts-with? (or (id-of %) "") input))]
+       (let [pre (by #(doc-id-prefix-match? input (id-of %)))]
          (case (count pre)
            1 (first pre)
            0 (let [by-title (if ticket-id

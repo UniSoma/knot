@@ -7,27 +7,35 @@
             [knot.ticket :as ticket]))
 
 (def ^:private doc-marker
-  "The segment distinguishing a document id from a ticket id. It buys two
-   things: a human reading `kno-d01…` can tell which corpus the id addresses,
-   and a mistyped command fails loudly instead of resolving in the wrong one.
-   It sits after the prefix rather than leading the filename, because the
-   store's straggler sweep is correct only while the leading globbed segment
-   uniquely identifies one record's files."
+  "The segment distinguishing a document id from a ticket id. It follows the
+   owning ticket id, so `kp-01m2s4ecygyc-d7f3k` names both the corpus and the
+   owner: an agent reading the id knows which ticket owns the document without
+   a lookup, and cannot mistake it for the ticket id it embeds.
+
+   The marker matters because the owner alone is not a document key — a ticket
+   owns several — so it is the marker plus the random tail that makes the
+   filename's leading segment unique, which is what the store's straggler
+   sweep depends on."
   "d")
 
-(defn generate-id
-  "Generate a document id: `<prefix>-d<12 Crockford base32 chars>`. Delegates
-   to the ticket factory for the monotonic suffix, then marks it.
+(def ^:private suffix-chars
+  "Random chars after the marker. Four is ample for the few documents one
+   ticket owns, and `check` reports a collision rather than the generator
+   preventing one."
+  4)
 
-   The split is unconditionally safe: `config/validate!` enforces `:prefix`
-   against `[a-z0-9]+` and `ticket/derive-prefix` only ever emits that, so a
-   prefix can never contain a hyphen. A document id can never collide with a
-   ticket id either — both suffixes are fixed width, so a ticket is always
-   prefix plus 12 characters and a document always prefix plus 13."
-  [prefix]
-  (let [tid (ticket/generate-id prefix)
-        [p suffix] (str/split tid #"-" 2)]
-    (str p "-" doc-marker suffix)))
+(defn generate-id
+  "Generate a document id: `<owning-ticket-id>-d<4 random Crockford base32
+   chars>`, e.g. `kp-01m2s4ecygyc-d7f3k`.
+
+   The owning ticket leads rather than the bare prefix, so the id carries its
+   owner. That is what keeps a document id from reading as a near-miss of a
+   ticket id — the two differ by a whole trailing segment now, not by one
+   letter in the middle.
+
+   The suffix is random, not a counter: see `ticket/random-suffix` for why."
+  [ticket-id]
+  (str ticket-id "-" doc-marker (ticket/random-suffix suffix-chars)))
 
 (def required-fields
   "Frontmatter keys every stored document carries."
@@ -52,9 +60,24 @@
   (str id "--" (ticket/derive-slug title) ".md"))
 
 (def ^:private filename-pat
-  ;; `<prefix>-d<suffix>--<slug>.md`. The `-d` is what distinguishes a
-  ;; document filename from a ticket one, so a ticket file never matches.
-  #"^([a-z0-9]+-d[0-9a-z]+)--.*\.md$")
+  ;; `<prefix>-<ticket-suffix>-d<suffix>--<slug>.md`. Two hyphen-separated
+  ;; segments before the `-d` marker is what distinguishes a document filename
+  ;; from a ticket one: a ticket has only `<prefix>-<suffix>`, so it never
+  ;; matches.
+  #"^([a-z0-9]+-[0-9a-z]+-d[0-9a-z]+)--.*\.md$")
+
+(defn owner-of
+  "The owning ticket id embedded in document id `did`, or nil when `did` does
+   not have the document shape.
+
+   The `:ticket` frontmatter field stays authoritative — ADR-0016 R10 says the
+   field decides and everything else locates — so this exists for `check` to
+   compare the two. Nesting the owner in the id creates a second place the
+   ownership is written down, and two places that can disagree need a check
+   that says so rather than a rule about which one wins."
+  [did]
+  (when (string? did)
+    (second (re-matches #"^([a-z0-9]+-[0-9a-z]+)-d[0-9a-z]+$" did))))
 
 (defn id-of
   "The leading document-id segment of `fname`, or nil when it does not name a

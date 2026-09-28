@@ -2206,7 +2206,7 @@
    Returns the written path, or with `:json? true` a success envelope
    carrying the document's metadata."
   [ctx {:keys [ticket title type json?] :as opts}]
-  (let [{:keys [project-root prefix tickets-dir doc-types default-doc-type
+  (let [{:keys [project-root tickets-dir doc-types default-doc-type
                 docs-root now]}
         (resolve-ctx ctx)
         owner (resolve-owner! project-root tickets-dir ticket)
@@ -2215,7 +2215,7 @@
     (let [body (resolve-note-content opts (str "Adding a document to " owner "."))
           path (store/save-new-doc!
                 docs-root
-                #(doc/generate-id prefix)
+                #(doc/generate-id owner)
                 (fn [id] {:doc {:frontmatter {:id id :ticket owner
                                               :title title :type type*}
                                 :body body}})

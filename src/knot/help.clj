@@ -780,8 +780,9 @@
     :restrict?   true
     :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope carrying the metadata and the body."}]
-    :notes       ["A selector is a document id, a unique prefix of one, or — with --ticket — an exact title. An ambiguous selector is refused with the candidates named, never resolved to a first match."]
-    :examples    [{:cmd "knot document show kno-d01abc"
+    :notes       ["A document id nests inside its owning ticket: `<ticket-id>-d<random>`, as in `kno-01m2s4ecygyc-d7f3k`. The owner is readable from the id without a lookup, and the id cannot be mistaken for the ticket id it embeds."
+                  "A selector is a document id, a unique prefix of one, or — with --ticket — an exact title. A prefix may truncate the owner and the tail together (`kno-01m2s4ec-d7f`). An ambiguous selector is refused with the candidates named, never resolved to a first match."]
+    :examples    [{:cmd "knot document show kno-01m2s4ecygyc-d7f3k"
                    :note "Print a document by id."}
                   {:cmd "knot document show \"Rollout plan\" --ticket kno-01abc"
                    :note "Print a document by title within its ticket."}]
@@ -802,7 +803,7 @@
     :notes       ["This is a replace, not a merge: --title and --type are both required, and the body is replaced by whatever the layered input resolves to. Nothing is carried over from the stored document except its id, its owning ticket and its creation timestamp."
                   "A selector matching no document is refused. replace never creates — that is `knot document add`."
                   "A retitle does not rename the file; the filename slug is recovered from the existing file, exactly as it is for tickets."]
-    :examples    [{:cmd "knot document replace kno-d01abc --title \"Rollout plan v2\" --type plan \"new body\""
+    :examples    [{:cmd "knot document replace kno-01m2s4ecygyc-d7f3k --title \"Rollout plan v2\" --type plan \"new body\""
                    :note "Replace the whole document."}]
     :exit-codes  [{:code 0 :when "document replaced"}
                   {:code 1 :when "no document matches, the selector is ambiguous, --title/--type is missing, or the type is not in :doc-types"}]}
@@ -815,7 +816,7 @@
     :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope ({deleted: {id, path}}) instead of the removed path."}]
     :notes       ["An ambiguous selector is refused instead of deleting a first match. Git is the undo path."]
-    :examples    [{:cmd "knot document delete kno-d01abc"
+    :examples    [{:cmd "knot document delete kno-01m2s4ecygyc-d7f3k"
                    :note "Delete a document by id."}]
     :exit-codes  [{:code 0 :when "document removed"}
                   {:code 1 :when "no document matches, or the selector is ambiguous"}]}

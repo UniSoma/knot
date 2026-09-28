@@ -322,11 +322,13 @@
                        ", not one of " (pr-str (vec allowed)))}])))
 
 (defn- check-doc-placement
-  "Per-document, in precedence order. The agreement check runs first: where
+  "Per-document, in precedence order. Two agreement checks run first: where
    the owner directory and the authoritative `:ticket` field disagree the
-   answer is misplacement, whatever either id resolves to. Only when they
-   agree can an unresolvable id mean an orphan. Reversing this yields two
-   issues with contradictory repairs for one file."
+   answer is misplacement, and where the owner embedded in the document id
+   disagrees with that field the answer is a lying id — whatever either
+   resolves to. Only when all three agree can an unresolvable ticket mean an
+   orphan. Reversing this yields two issues with contradictory repairs for one
+   file."
   [{:keys [all-ids]} doc]
   (let [{:keys [id ticket]} (:frontmatter doc)
         dir (:owner-dir doc)]
@@ -343,6 +345,17 @@
                        (if (nil? ticket)
                          " but has no ticket field"
                          (str " but its ticket field names " (pr-str ticket))))}]
+
+      (not= (doc/owner-of id) ticket)
+      [{:severity :error
+        :code     :doc_id_owner_mismatch
+        :ids      [id]
+        :path     (:path doc)
+        :message  (str "document " (pr-str id) " embeds owner "
+                       (if-let [embedded (doc/owner-of id)]
+                         (pr-str embedded)
+                         "nothing")
+                       " but its ticket field names " (pr-str ticket))}]
 
       (not (contains? all-ids ticket))
       [{:severity :error

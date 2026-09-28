@@ -27,6 +27,9 @@ the ticket carries rather than is — a spec, a plan, a transcript — with its 
 carry any number. Reach for a document when the content would swamp the ticket or has a life of its own; for the body
 when the content *is* the ticket.
 
+A document id nests inside its owning ticket — `kno-01m2s4ecygyc-d7f3k` belongs to `kno-01m2s4ecygyc` — so you can
+read the owner off the id without a lookup. `knot document --help` states the shape and what a selector accepts.
+
 `ls`, `ready` and `prime` show a DOCS column naming the types each ticket owns, so check there before
 writing a spec that may already exist. A project can require one: `.knot.edn`'s `:required-docs` names
 document types a ticket must own before it may enter a status, and the transition is refused until they

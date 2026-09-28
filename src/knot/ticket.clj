@@ -67,6 +67,17 @@
   ;; recompilation.
   (atom nil))
 
+(defn random-suffix
+  "`width` lowercase Crockford-base32 chars, drawn at random.
+
+   Exposed for the document id, whose suffix is random where a ticket's is
+   monotonic. A counter would collide when two agents add a document to one
+   ticket at once, and again when two branches each add one and git merges them
+   with no conflict. Random suffixes are why ticket ids do not have that
+   problem, and documents inherit it."
+  [width]
+  (encode-base32 (long (rand (Math/pow 32 width))) width))
+
 (defn generate-id
   "Generate a new ticket id of the form `<prefix>-<10 timestamp + 2 random>`.
    Within a single process the factory is monotonic (ULID spec): same-ms

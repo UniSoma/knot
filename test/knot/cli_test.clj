@@ -6439,6 +6439,15 @@ Restart the daemon.
         (is (fs/exists? p))
         (is (= 1 (count (store/load-docs-for (droot tmp) owner))))))))
 
+(defn- doc-partial
+  "A segment-wise partial of document id `did`: the owner truncated and the
+   tail truncated, which is the shape the reviewer asked to keep resolving
+   (`kp-01m2s4ec-d7f` for `kp-01m2s4ecygyc-d7f3k`)."
+  [did]
+  (let [[p owner tail] (str/split did #"-")]
+    (str p "-" (subs owner 0 (max 1 (- (count owner) 3)))
+         "-" (subs tail 0 (min (count tail) 3)))))
+
 (deftest document-selector-test
   (testing "a document resolves by a unique id prefix, and by owner-plus-title"
     (with-tmp tmp
@@ -6446,7 +6455,7 @@ Restart the daemon.
             p     (create-doc tmp owner "Design" "spec" "one")
             did   (doc-id p)]
         (is (= did (get-in (cheshire/parse-string
-                            (cli/document-show-cmd (ctx tmp) {:id (subs did 0 8) :json? true})
+                            (cli/document-show-cmd (ctx tmp) {:id (doc-partial did) :json? true})
                             true)
                            [:data :id])))
         (is (= did (get-in (cheshire/parse-string
@@ -6515,7 +6524,7 @@ Restart the daemon.
         (is (not (fs/exists? a)))))))
 
 (deftest document-list-cmd-test
-  (testing "ls lists one owner's documents, ordered by filename"
+  (testing "list gives one owner's documents in filename order"
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             other (mk-owner! tmp "Other")
@@ -6523,11 +6532,17 @@ Restart the daemon.
             _     (create-doc tmp owner "Alpha" "plan" "a")
             _     (create-doc tmp other "Gamma" "spec" "g")
             d     (cheshire/parse-string
-                   (cli/document-list-cmd (ctx tmp) {:ticket owner :json? true}) true)]
+                   (cli/document-list-cmd (ctx tmp) {:ticket owner :json? true}) true)
+            docs  (get-in d [:data :documents])
+            ids   (mapv :id docs)]
         (is (= owner (get-in d [:data :ticket])))
-        (is (= ["Bravo" "Alpha"] (mapv :title (get-in d [:data :documents])))
-            "filename order — the id leads, and ids are minted monotonically")
-        (is (not-any? #{"Gamma"} (map :title (get-in d [:data :documents])))))))
+        (is (= #{"Bravo" "Alpha"} (set (map :title docs))))
+        (is (= (vec (sort ids)) ids)
+            ;; Still filename order, but the random suffix means that is no
+            ;; longer creation order: a document id is minted at random within
+            ;; its owner, not monotonically.
+            "ordered by id, which is what the filename leads with")
+        (is (not-any? #{"Gamma"} (map :title docs))))))
 
   (testing "a ticket with no documents lists an empty array, not an error"
     (with-tmp tmp

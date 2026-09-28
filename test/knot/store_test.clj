@@ -861,31 +861,41 @@
 
 (deftest resolve-doc-layers-test
   (with-tmp tmp
-    (plant-doc! tmp ".tickets" (mkrec "kno-d01aaa" "kno-01A" "Design" "spec" "a"))
-    (plant-doc! tmp ".tickets" (mkrec "kno-d01bbb" "kno-01A" "Rollout" "plan" "b"))
-    (plant-doc! tmp ".tickets" (mkrec "kno-d02ccc" "kno-01B" "Design" "spec" "c"))
+    (plant-doc! tmp ".tickets" (mkrec "kno-01A-daaaa" "kno-01A" "Design" "spec" "a"))
+    (plant-doc! tmp ".tickets" (mkrec "kno-01A-dbbbb" "kno-01A" "Rollout" "plan" "b"))
+    (plant-doc! tmp ".tickets" (mkrec "kno-01B-dcccc" "kno-01B" "Design" "spec" "c"))
     (testing "an exact id resolves"
-      (is (= "kno-d01aaa"
-             (get-in (store/resolve-doc (droot tmp) "kno-d01aaa")
+      (is (= "kno-01A-daaaa"
+             (get-in (store/resolve-doc (droot tmp) "kno-01A-daaaa")
                      [:frontmatter :id]))))
-    (testing "a unique prefix resolves"
-      (is (= "kno-d02ccc"
-             (get-in (store/resolve-doc (droot tmp) "kno-d02")
+    (testing "a unique prefix resolves, truncated in both segments"
+      ;; The reviewer's example shape: the owner AND the tail are partial.
+      (is (= "kno-01B-dcccc"
+             (get-in (store/resolve-doc (droot tmp) "kno-01B-dc")
+                     [:frontmatter :id])))
+      (is (= "kno-01B-dcccc"
+             (get-in (store/resolve-doc (droot tmp) "kno-01-dc")
                      [:frontmatter :id]))))
     (testing "an ambiguous prefix is refused with its candidates named"
-      (let [e (try (store/resolve-doc (droot tmp) "kno-d01") nil
+      (let [e (try (store/resolve-doc (droot tmp) "kno-01A-d") nil
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :ambiguous (:kind (ex-data e))))
-        (is (= ["kno-d01aaa" "kno-d01bbb"] (:candidates (ex-data e))))))
+        (is (= ["kno-01A-daaaa" "kno-01A-dbbbb"] (:candidates (ex-data e))))))
+    (testing "a bare ticket id is not a document selector"
+      ;; It is a wrong-corpus call. Resolving it to that ticket's only document
+      ;; would be guessing; kno-01m3j5ncec1a turns this into a pointer.
+      (let [e (try (store/resolve-doc (droot tmp) "kno-01B") nil
+                   (catch clojure.lang.ExceptionInfo ex ex))]
+        (is (= :not-found (:kind (ex-data e))))))
     (testing "a title resolves only within its owning ticket"
-      (is (= "kno-d02ccc"
+      (is (= "kno-01B-dcccc"
              (get-in (store/resolve-doc (droot tmp) "Design" "kno-01B")
                      [:frontmatter :id])))
       (is (thrown? clojure.lang.ExceptionInfo
                    (store/resolve-doc (droot tmp) "Design"))
           "without an owning ticket a title is not a selector"))
     (testing "no match is refused"
-      (let [e (try (store/resolve-doc (droot tmp) "kno-d99") nil
+      (let [e (try (store/resolve-doc (droot tmp) "kno-01Z-dzzzz") nil
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :not-found (:kind (ex-data e))))))))
 

@@ -263,7 +263,7 @@ validators add `field` and `value`. Several codes add `path` (absolute, POSIX-se
 `terminal_outside_archive`, `frontmatter_parse_error` (which also interpolates it into `message`; read `path`, not
 `message`), `missing_required_field` when the missing field is `id`, `skill_stale`, whose `path` is the `SKILL.md`
 and whose `value` is always present: the stamped version, or `null` when the stamp is missing or unreadable, and the
-per-document codes `invalid_doc_type`, `doc_directory_mismatch` and `doc_unknown_ticket`, whose `path` is the document
+per-document codes `invalid_doc_type`, `doc_directory_mismatch`, `doc_id_owner_mismatch` and `doc_unknown_ticket`, whose `path` is the document
 file, and `unreachable_documents`, whose `path` is the directory holding them. Treat `path` as optional and branch on
 its presence.
 
@@ -287,6 +287,7 @@ its presence.
 | `duplicate_section`        | warning  | A body carries the same `## ` heading more than once; the copies concatenate, so nothing downstream shows it. |
 | `invalid_doc_type`         | error    | A document's `:type` is not in project `:doc-types`. Carries `path`.                                       |
 | `doc_directory_mismatch`   | error    | A document's owner directory and its own `ticket` field name different tickets, or it has no `ticket` field. Also covers a document file sitting in the ticket directory or `archive/` rather than under `docs/` — it is classified by filename, so it is diagnosed as misplaced rather than as a malformed ticket. Carries `path`. |
+| `doc_id_owner_mismatch`    | error    | The owning ticket embedded in a document's id and its own `ticket` field name different tickets, or the id does not carry an owner at all. The field decides; the id is a locator, so the id is what is wrong. Carries `path`. |
 | `doc_unknown_ticket`       | error    | A document names a ticket that resolves to nothing. Carries `path`.                                       |
 | `duplicate_doc_id`         | error    | Two or more document files claim the same document id; the message names every path. |
 | `unreachable_documents`    | warning  | Documents exist at the default corpus location (`<tickets-dir>/docs`) while `.knot.edn`'s `:docs-dir` points somewhere holding none, so no command can see them. Usually a mistyped or newly-set key. Carries `path`. Move the files or correct the key. |

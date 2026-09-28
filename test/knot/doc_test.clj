@@ -32,14 +32,20 @@
       (is (= (:frontmatter d) (:frontmatter round-tripped))))))
 
 (deftest document-id-is-distinguishable-test
-  (testing "a document id cannot be mistaken for a ticket id"
-    (let [did (doc/generate-id "kno")]
-      (is (re-matches #"kno-d[0-9a-z]{12}" did))
+  (testing "a document id carries its owning ticket and cannot be mistaken for one"
+    (let [did (doc/generate-id "kno-01abc0000")]
+      (is (re-matches #"kno-01abc0000-d[0-9a-z]{4}" did))
+      (is (str/starts-with? did "kno-01abc0000-")
+          "the owner leads, so the id names its owner without a lookup")
       (is (not (re-matches #"kno-[0-9a-z]{12}" did))
-          "a ticket id is prefix + 12 chars; a document id is prefix + d + 12")))
-  (testing "ids are unique across a burst"
-    (let [ids (repeatedly 50 #(doc/generate-id "kno"))]
-      (is (= 50 (count (set ids)))))))
+          "a ticket id is prefix + 12 chars and has one hyphen; a document id has two")))
+  (testing "every id in a burst still embeds the same owner"
+    ;; Uniqueness is the store's job, not the generator's: the suffix is random
+    ;; rather than a counter, so `save-new-doc!` regenerates on a collision and
+    ;; `check` reports one already on disk. Asserting 50-of-50 distinct here
+    ;; would be asserting a property the design deliberately does not promise.
+    (let [ids (repeatedly 50 #(doc/generate-id "kno-01abc0000"))]
+      (is (every? #(re-matches #"kno-01abc0000-d[0-9a-z]{4}" %) ids)))))
 
 (deftest document-filename-test
   (testing "the document's own id leads the filename, never the owning ticket"
@@ -52,7 +58,7 @@
 
 (deftest document-id-of-test
   (testing "the leading id segment is recoverable from a filename"
-    (is (= "kno-d01abc0000" (doc/id-of "kno-d01abc0000--a-design-note.md"))))
+    (is (= "kno-01abc0000-dwq0c" (doc/id-of "kno-01abc0000-dwq0c--a-design-note.md"))))
   (testing "a ticket filename is not a document filename"
     (is (nil? (doc/id-of "kno-01abc0000--some-ticket.md")))
     (is (nil? (doc/id-of "not-a-document.txt")))
