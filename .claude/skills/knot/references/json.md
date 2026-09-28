@@ -278,7 +278,7 @@ its presence.
 | `invalid_mode`             | error    | Ticket `:mode` is not in project `:modes`.                                                                |
 | `invalid_priority`         | error    | Ticket `:priority` is not an integer in `0..4`.                                                           |
 | `terminal_outside_archive` | error    | Bidirectional: a terminal-status ticket outside `archive/`, or a non-terminal one inside it.              |
-| `missing_required_field`   | error    | Ticket frontmatter is missing a required key.                                                             |
+| `missing_required_field`   | error    | Ticket or document frontmatter is missing a required key.                                                 |
 | `frontmatter_parse_error`  | error    | Ticket file has unparseable YAML frontmatter.                                                             |
 | `invalid_active_status`    | error    | `.knot.edn` `:active-status` is not in `:statuses`.                                                       |
 | `acceptance_invalid`       | error    | A frontmatter `:acceptance` entry is malformed (non-map, missing `:title` or `:done`).                    |

@@ -936,6 +936,15 @@
       (is (str/includes? (:message (first issues)) (:path a)))
       (is (str/includes? (:message (first issues)) (:path b)))))
 
+  (testing "documents with a nil or blank id are not duplicates; each is reported as missing it"
+    (let [a      (assoc (doc-rec "kno-01t" nil) :path "/tmp/fake/docs/kno-01t/one.md")
+          b      (assoc (doc-rec "kno-01t" nil) :path "/tmp/fake/docs/kno-01t/two.md")
+          c      (assoc (doc-rec "kno-01t" "") :path "/tmp/fake/docs/kno-01t/three.md")
+          d      (assoc (doc-rec "kno-01t" "") :path "/tmp/fake/docs/kno-01t/four.md")
+          issues (:issues (run-docs [a b c d] :tickets [(ticket "kno-01t" "open" [] :title "T")]))]
+      (is (= (repeat 4 :missing_required_field) (map :code issues)))
+      (is (= #{(:path a) (:path b) (:path c) (:path d)} (set (map :path issues))))))
+
   (testing "distinct ids are not duplicates"
     (is (empty? (:issues (run-docs [(doc-rec "kno-01t" "kno-01t-daaa")
                                     (doc-rec "kno-01t" "kno-01t-dbbb")]

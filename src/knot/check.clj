@@ -103,6 +103,9 @@
 (defn- blank-string? [v]
   (and (string? v) (str/blank? v)))
 
+(defn- missing-id? [id]
+  (or (nil? id) (blank-string? id)))
+
 (defn- check-required-fields
   "Per-ticket: id, title, status must be present and non-blank."
   [_ctx ticket]
@@ -346,7 +349,7 @@
                          " but has no ticket field"
                          (str " but its ticket field names " (pr-str ticket))))}]
 
-      (not= (doc/owner-of id) ticket)
+      (and (not (missing-id? id)) (not= (doc/owner-of id) ticket))
       [{:severity :error
         :code     :doc_id_owner_mismatch
         :ids      [id]
@@ -365,9 +368,20 @@
         :message  (str "document " (pr-str id) " names ticket " (pr-str ticket)
                        ", which resolves to no ticket")}])))
 
+(defn- check-doc-id
+  "Per-document: a document with no `:id` frontmatter."
+  [_ctx doc]
+  (when (missing-id? (get-in doc [:frontmatter :id]))
+    [{:severity :error
+      :code     :missing_required_field
+      :ids      []
+      :field    :id
+      :path     (:path doc)
+      :message  "missing required field :id"}]))
+
 (def ^:private per-document-validators
   "Functions of `[ctx doc]` -> seq of issues, run over every document."
-  [check-doc-type check-doc-placement])
+  [check-doc-id check-doc-type check-doc-placement])
 
 (defn- check-duplicate-doc-ids
   "Whole-corpus: two files claiming one document id. The backstop for the
@@ -375,6 +389,7 @@
    resolved by keeping both sides."
   [docs]
   (->> docs
+       (remove #(missing-id? (get-in % [:frontmatter :id])))
        (group-by #(get-in % [:frontmatter :id]))
        (keep (fn [[id group]]
                (when (< 1 (count group))
