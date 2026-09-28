@@ -146,6 +146,9 @@
                      (str "  " code "  " reason)))
          "\n")))
 
+(defn- column-note [{:keys [header note]}]
+  (str header "  " note))
+
 (def ^:private listing-column-notes
   "NOTES shared by the `list`, `ready` and `blocked` registry entries: the
    live-induced preamble, AGE (a base column, not a computed one), then one
@@ -153,7 +156,16 @@
    and `:note`."
   (into ["Computed columns are live-induced: a closed ticket is neither counted nor conductive, so a chain running through one is severed."
          "AGE  time since the ticket's `updated` stamp, bucketed as Nd / Nw / Nm, or `-` when there is no usable stamp. No --json field of its own: read the raw `updated` timestamp."]
-        (map (fn [{:keys [header note]}] (str header "  " note)))
+        (map column-note)
+        listing/columns))
+
+(def ^:private closed-column-notes
+  "NOTES for the `closed` registry entry: one line per `listing/columns`
+   declaration that view attaches. None of them is a live-graph metric, so
+   the live-induced preamble does not apply."
+  (into []
+        (comp (filter #(contains? (:sources %) :closed))
+              (map column-note))
         listing/columns))
 
 (def topics
@@ -174,7 +186,7 @@
    "autonomous" {:resource "knot/skill/references/autonomous.md"
                  :summary  "Modes as a contract, and the loop an unattended agent runs"}
    "writes"     {:resource "knot/skill/references/writes.md"
-                 :summary  "Appending versus overwriting, and the sections a body may not hold"}))
+                 :summary  "Appending versus overwriting, whether prose belongs in a note, the body or a document, and the sections a body may not hold"}))
 
 (defn topic-text
   "The markdown for `topic`, or nil when it names no topic. Leading YAML
@@ -284,7 +296,8 @@
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean :desc "Emit JSON instead of text."}
                   {:name :no-color :coerce :boolean :desc "Force plain output (no ANSI). Honors NO_COLOR env var."}]
-    :notes       ["--json adds `sections` — the body split by `## ` heading slug (description, design, user-stories, notes, ...), preamble under \"\" — alongside the unchanged `body` string, plus `acceptance` as the structured [{title, done}] list. Take one section with `jq -r '.data.sections.design'` instead of re-reading the whole render."]
+    :notes       ["--json adds `sections` — the body split by `## ` heading slug (description, design, user-stories, notes, ...), preamble under \"\" — alongside the unchanged `body` string, plus `acceptance` as the structured [{title, done}] list. Take one section with `jq -r '.data.sections.design'` instead of re-reading the whole render."
+                  "--json also carries `documents`, always present (`[]` when the ticket owns none): one {id, title, type} per attached document, metadata only. Read a body with `knot document show <id>`."]
     :examples    [{:cmd "knot show kno-01abc"
                    :note "Render the ticket whose id starts with 01abc."}
                   {:cmd "knot show kno-01abc --json | jq -r '.data.sections.description'"
@@ -398,7 +411,9 @@
     :flags       [{:name :json :coerce :boolean
                    :desc "Emit a JSON envelope instead of the removed path."}
                   {:name :cascade :coerce :boolean
-                   :desc "Rewrite every referrer (live + archive) to drop the target from :deps/:links and dissoc :parent before unlinking the file."}]
+                   :desc "Rewrite every referrer (live + archive) to drop the target from :deps/:links and dissoc :parent before unlinking the file, then remove the documents it owns."}]
+    :notes       ["A ticket that owns documents is refused like one with incoming refs, even as a leaf: remove each with `knot document delete`, or pass --cascade."
+                  "--cascade removes the documents after the ticket, not before, so an interrupted run leaves orphaned documents, which `knot check` reports, rather than a ticket silently missing its documents."]
     :examples    [{:cmd "knot delete kno-01abc"
                    :note "Remove a leaf ticket (live or archive) from disk; refuses on incoming refs."}
                   {:cmd "knot delete kno-01abc --json"
@@ -406,7 +421,7 @@
                   {:cmd "knot delete kno-01abc --cascade"
                    :note "Rewrite each referrer to drop the target, then delete."}]
     :exit-codes  [{:code 0 :when "file removed"}
-                  {:code 1 :when "not found, ambiguous id, or incoming refs present (without --cascade)"}]}
+                  {:code 1 :when "not found, ambiguous id, or incoming refs or owned documents present (without --cascade)"}]}
 
    :dep
    {:group       :graph
@@ -537,6 +552,7 @@
                   {:name :via      :coerce [] :desc "Restrict --closure to the listed axes (any of: parent, deps, links; comma-separated). Default: all three."}
                   {:name :acceptance-complete :coerce :boolean
                    :desc "Filter by acceptance completion. =false shows tickets with at least one undone AC; =true shows tickets where every AC is done. Tickets with no acceptance criteria are excluded."}]
+    :notes       closed-column-notes
     :examples    [{:cmd "knot closed --limit 10"
                    :note "Show the ten most-recently-closed tickets."}
                   {:cmd "knot closed --type bug"
@@ -676,7 +692,7 @@
 
    :check
    {:group       :project
-    :description "Validate project integrity (cycles, schema, dangling refs)."
+    :description "Validate project integrity (cycles, schema, dangling refs, documents)."
     :args        [{:name "id" :variadic true}]
     :restrict?   true
     :flags       [{:name :json     :coerce :boolean
@@ -687,7 +703,9 @@
                    :desc "Filter by issue code (repeatable; unknown codes ok)."}]
     :notes       ["reserved_section is a warning: a body carries a ## Blockers, ## Blocking, ## Children or ## Linked heading, which knot show renders from the ticket's fields. Delete the section by hand — unlike legacy_acceptance_section there is no automatic fix, because the prose under a graph heading is usually narrative."
                   "duplicate_section is a warning: one body carries the same ## heading twice or more, usually from an old --description write that replaced only the first copy. Body sections concatenate rather than clobber, so nothing downstream shows the duplication. Keep one copy by hand with update --body or knot edit."
-                  "skill_stale is a warning: the project's installed skill (:skill-dir, else .claude/skills/knot) carries a `<!-- installed by knot <version> -->` stamp that is missing, unreadable, or differs from this CLI's version, older or newer. Run `knot skill install` and commit. A copy under ~/.claude/skills/knot is never checked here; `knot prime` flags that one."]
+                  "skill_stale is a warning: the project's installed skill (:skill-dir, else .claude/skills/knot) carries a `<!-- installed by knot <version> -->` stamp that is missing, unreadable, or differs from this CLI's version, older or newer. Run `knot skill install` and commit. A copy under ~/.claude/skills/knot is never checked here; `knot prime` flags that one."
+                  "unreachable_documents is a warning: documents sit at the default <tickets-dir>/docs while .knot.edn's :docs-dir points somewhere holding none, so no command can see them. Usually a mistyped or newly set key: move the files or correct the key."
+                  "legacy_documents_section is a warning: a body carries a ## Documents heading written before knot show began rendering that section from the document corpus. Remove the heading by hand and re-add its content with `knot document add`; the warning then clears."]
     :examples    [{:cmd "knot check"
                    :note "Validate every ticket and config; exit 0/1/2."}
                   {:cmd "knot check kno-01abc kno-01def --json"

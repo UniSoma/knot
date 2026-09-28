@@ -811,6 +811,26 @@
       (is (re-find #"(?i)warning" notes)
           "the note should say duplicate_section is a warning"))))
 
+(deftest document-help-gaps-are-documented-test
+  (testing "check --help names the two document warning codes"
+    (let [notes (str/join "\n" (get-in help/registry [:check :notes]))]
+      (is (str/includes? notes "unreachable_documents"))
+      (is (str/includes? notes "legacy_documents_section"))))
+
+  (testing "delete --help says owned documents refuse the delete and --cascade removes them"
+    (let [notes (str/join "\n" (get-in help/registry [:delete :notes]))]
+      (is (str/includes? notes "knot document delete"))
+      (is (str/includes? notes "--cascade"))))
+
+  (testing "show --help names the documents array"
+    (let [notes (str/join "\n" (get-in help/registry [:show :notes]))]
+      (is (str/includes? notes "`documents`"))))
+
+  (testing "closed --help describes the columns closed renders, not the live-graph metrics"
+    (let [notes (str/join "\n" (get-in help/registry [:closed :notes]))]
+      (is (str/includes? notes "DOCS"))
+      (is (not (str/includes? notes "LEV"))))))
+
 ;; ---- Bundled concept guides (`knot help <topic>`) ----
 
 (def ^:private skill-src

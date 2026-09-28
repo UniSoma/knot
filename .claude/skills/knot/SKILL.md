@@ -154,7 +154,7 @@ stands alone. The full skip-condition matrix and the reason for that asymmetry a
 
 `knot add-note` appends a timestamped entry, `knot update` replaces (`--description` the section, `--body` the whole
 body), and `knot edit` opens `$EDITOR`. Before writing prose into a ticket, load
-[`references/writes.md`](references/writes.md) — which of the three fits, the five `knot show` sections that render a
+[`references/writes.md`](references/writes.md) — which of the three fits, the six `knot show` sections that render a
 field and must never be hand-written, and the whole-list flags whose delta counterparts you want instead.
 
 ## Graph: deps vs links

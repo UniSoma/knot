@@ -184,6 +184,9 @@ Optional keys:
   on key presence. `cc` is `null` for a singleton; `leverage` and `coupling` are `null` on a closed row surfaced by
   `list --status closed`; `level` is `null` on such a row and on a live deps cycle. Definitions are in `knot help list`,
   scope rules and what to do with the numbers in [`graph.md`](graph.md).
+- `doc_types` (array of strings) — the distinct types of the documents the ticket owns, the `DOCS` column. **Present
+  only on owning rows** of `list` / `ready` / `blocked` / `closed` and of `prime`'s `ready` and `in_progress`
+  entries; absent on a ticket owning none, and never on `show`, which carries the fuller `documents` array instead.
 - `body` (string) — single-ticket-shape only.
 - `sections` (object) — `show --json` only: the same body split by `## ` heading, keyed by the heading slugified the
   way ticket filenames are (`## User Stories` → `user-stories`), each value the raw markdown below it, untrimmed, in
