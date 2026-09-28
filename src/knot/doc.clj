@@ -79,6 +79,20 @@
   (when (string? did)
     (second (re-matches #"^([a-z0-9]+-[0-9a-z]+)-d[0-9a-z]+$" did))))
 
+(defn wrong-corpus-hint
+  "The clause a ticket resolver appends when `id` is document-shaped:
+   \" — that is a document id; use `knot document show <id>`\". Nil otherwise,
+   so a caller can `str` it unconditionally.
+
+   It lives here rather than in either resolver because two of them need the
+   identical sentence — `knot.main`'s message builder and `knot.store`'s
+   not-found throw — and a second copy drifts. A reviewer proved that
+   concretely: changing one copy to name `knot doc show`, a command that does
+   not exist, left the suite green."
+  [id]
+  (when (owner-of id)
+    (str " — that is a document id; use `knot document show " id "`")))
+
 (defn id-of
   "The leading document-id segment of `fname`, or nil when it does not name a
    document. A ticket filename returns nil rather than a truncated id."

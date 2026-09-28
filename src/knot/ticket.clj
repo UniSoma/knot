@@ -67,6 +67,15 @@
   ;; recompilation.
   (atom nil))
 
+(defn id-shaped?
+  "True when `s` looks like a full ticket id: `<prefix>-<12 Crockford base32>`.
+
+   Exposed so the DOCUMENT resolver can recognise a wrong-corpus selector and
+   point at `knot show`, without copying this grammar into `knot.store`. The
+   mirror of `doc/owner-of`, which does the same in the other direction."
+  [s]
+  (boolean (and (string? s) (re-matches #"[a-z0-9]+-[0-9a-z]{12}" s))))
+
 (defn random-suffix
   "`width` lowercase Crockford-base32 chars, drawn at random.
 

@@ -3934,6 +3934,79 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command: doc"))))))
 
+(deftest wrong-corpus-id-points-at-the-other-command-test
+  ;; The reviewer hit this while using the branch: handing a document id to
+  ;; `show` answered "no ticket matching" with no hint that the document
+  ;; commands exist, and the reverse did the same. Both are correct and useless.
+  ;; Recognition is by SHAPE, so neither failure path touches the other corpus.
+  (testing "a document id handed to a ticket command names the document command"
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            did (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "spec"
+                                                  "--json" "body")))]
+        (let [{:keys [exit err]} (run-knot tmp "show" did)]
+          (is (= 1 exit))
+          (is (str/includes? err "that is a document id"))
+          (is (str/includes? err (str "knot document show " did))))
+
+        (testing "and says the same thing under --json"
+          (let [{:keys [exit out]} (run-knot tmp "show" did "--json")
+                parsed (json/parse-string out true)]
+            (is (= 1 exit))
+            (is (= "not_found" (get-in parsed [:error :code])))
+            (is (str/includes? (get-in parsed [:error :message]) "that is a document id"))))
+
+        (testing "every ticket command that takes an id says it, not only show"
+          ;; One shared message builder, so `start` cannot say something `show`
+          ;; does not.
+          (doseq [cmd ["start" "close" "update" "add-note"]]
+            (let [{:keys [err]} (run-knot tmp cmd did)]
+              (is (str/includes? err "that is a document id")
+                  (str cmd " should point at the document command")))))
+
+        (testing "a ticket id handed to a document command names the ticket command"
+          (let [{:keys [exit err]} (run-knot tmp "document" "show" tid)]
+            (is (= 1 exit))
+            (is (str/includes? err "that is a ticket id"))
+            (is (str/includes? err (str "knot show " tid))))
+
+          (let [{:keys [exit out]} (run-knot tmp "document" "show" tid "--json")
+                parsed (json/parse-string out true)]
+            (is (= 1 exit))
+            (is (= "doc_not_found" (get-in parsed [:error :code])))
+            (is (str/includes? (get-in parsed [:error :message]) "that is a ticket id")))))))
+
+  (testing "the store's own not-found path points across too"
+    ;; Two message builders reach a caller: main's, for the commands that
+    ;; resolve inline, and store/not-found!'s, for those that resolve through
+    ;; the store. A reviewer proved the store copy was untested by deleting it
+    ;; and by pointing it at a command that does not exist -- the suite stayed
+    ;; green both times. `link` is the cheapest command on that path.
+    (with-tmp tmp
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            did (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                  "--title" "Design" "--type" "spec"
+                                                  "--json" "body")))]
+        (doseq [argv [["link" did tid]
+                      ["delete" did]
+                      ["document" "list" did]]]
+          (let [{:keys [exit err]} (apply run-knot tmp argv)]
+            (is (= 1 exit) (str/join " " argv))
+            (is (str/includes? err "that is a document id")
+                (str (str/join " " argv) " should point at the document command"))
+            (is (str/includes? err (str "knot document show " did))
+                (str (str/join " " argv) " must name a command that exists")))))))
+
+  (testing "a genuine miss in either corpus says nothing extra"
+    (with-tmp tmp
+      (let [{:keys [err]} (run-knot tmp "show" "kno-01nosuchthing")]
+        (is (str/includes? err "no ticket matching"))
+        (is (not (str/includes? err "that is a"))))
+      (let [{:keys [err]} (run-knot tmp "document" "show" "kno-01nosuch-dzzzz")]
+        (is (str/includes? err "document not found"))
+        (is (not (str/includes? err "that is a")))))))
+
 (deftest show-renders-documents-end-to-end-test
   (testing "show names the same documents in text and JSON"
     (with-tmp tmp

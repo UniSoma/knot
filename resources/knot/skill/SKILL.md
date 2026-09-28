@@ -1,6 +1,6 @@
 ---
 name: knot
-description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`), or on ticket-shaped intent — "what's next?", "the backlog", "show me <id>", "track this", "close this" — including an autonomous agent picking up unblocked work. Hosted-tracker ids (`GH-1234`, `ENG-1234`) belong to their own tools.
+description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`) or the document shape that nests inside it (`kno-01kqa9sh-d7f3k`), or on ticket-shaped intent — "what's next?", "the backlog", "show me <id>", "track this", "close this" — including an autonomous agent picking up unblocked work. Hosted-tracker ids (`GH-1234`, `ENG-1234`) belong to their own tools.
 ---
 
 # knot — file-based ticket tracker

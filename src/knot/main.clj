@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [knot.cli :as cli]
             [knot.config :as config]
+            [knot.doc :as doc]
             [knot.help :as help]
             [knot.output :as output]
             [knot.store :as store]
@@ -286,12 +287,26 @@
     (print (str s "\n")))
   (flush))
 
+(defn- no-ticket-msg
+  "`no ticket matching <id>`, with a pointer at the document command when `id`
+   is document-shaped.
+
+   A document id handed to a ticket command is a wrong-corpus call, not a
+   missing ticket, and saying only the latter leaves the caller looking for
+   something that was never there. The shape test lives in `knot.doc`, which
+   owns it.
+
+   Shared by every ticket command that can be handed an id, so the two output
+   modes cannot drift and `start` cannot say something `show` does not."
+  [id]
+  (str "no ticket matching " id (doc/wrong-corpus-hint id)))
+
 (defn- emit-not-found-envelope!
   "Print a v0.3 not_found error envelope to stdout and exit 1."
   [id]
   (println-out (output/error-envelope-str
                 {:code    "not_found"
-                 :message (str "no ticket matching " id)}))
+                 :message (no-ticket-msg id)}))
   (System/exit 1))
 
 (defn- emit-ambiguous-envelope!
@@ -570,7 +585,7 @@
         (cond
           out   (println-out out)
           json? (emit-not-found-envelope! id)
-          :else (die (str "knot show: no ticket matching " id))))
+          :else (die (str "knot show: " (no-ticket-msg id)))))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (if (and json? (= :ambiguous (:kind data)))
@@ -633,7 +648,7 @@
           (cond
             out   (println-out (str out))
             json? (emit-not-found-envelope! id)
-            :else (die (str "knot " cmd-name ": no ticket matching " id))))
+            :else (die (str "knot " cmd-name ": " (no-ticket-msg id)))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -682,7 +697,7 @@
           (cond
             out   (println-out (str out))
             json? (emit-not-found-envelope! from)
-            :else (die (str "knot " cmd-name ": no ticket matching " from))))
+            :else (die (str "knot " cmd-name ": " (no-ticket-msg from)))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -961,7 +976,7 @@
               (System/exit 0)
               (if json?
                 (emit-not-found-envelope! id)
-                (die (str "knot add-note: no ticket matching " id))))))
+                (die (str "knot add-note: " (no-ticket-msg id)))))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -1066,7 +1081,7 @@
         (cond
           out   (println-out (str out))
           json? (emit-not-found-envelope! id)
-          :else (die (str "knot update: no ticket matching " id))))
+          :else (die (str "knot update: " (no-ticket-msg id)))))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (cond
@@ -1134,7 +1149,7 @@
                              {:id id :editor-fn (editor-fn-for-edit)})]
       (if path
         (println-out (str path))
-        (die (str "knot edit: no ticket matching " id))))))
+        (die (str "knot edit: " (no-ticket-msg id)))))))
 
 (defn- emit-check-result!
   "Apply a `cli/check-cmd` result map to stdout/stderr and exit with its

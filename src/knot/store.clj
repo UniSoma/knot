@@ -350,9 +350,14 @@
 
 (defn- not-found!
   "Throw an `ex-info` reporting that no ticket matched `input`. The message
-   format is the AC-mandated `ticket not found: <input>`."
+   format is the AC-mandated `ticket not found: <input>`.
+
+   When `input` is document-shaped the message names the document command
+   instead of leaving the caller to guess: a document id handed to `show` is a
+   wrong-corpus call, not a missing ticket. The shape test lives in `knot.doc`,
+   which owns it — this resolver does not carry a second copy of that grammar."
   [input]
-  (throw (ex-info (str "ticket not found: " input)
+  (throw (ex-info (str "ticket not found: " input (doc/wrong-corpus-hint input))
                   {:kind :not-found :input input})))
 
 (defn resolve-id
@@ -668,9 +673,18 @@
 
 (defn- doc-not-found!
   "Throw an `ex-info` reporting that no document matched `input`. Separate
-   from `not-found!` only because that one's message names a ticket."
+   from `not-found!` only because that one's message names a ticket.
+
+   When `input` is a full ticket id the message names the ticket command. That
+   case is reachable precisely because a ticket id is no longer a document
+   selector: nesting made it a prefix of every document the ticket owns, and
+   resolving it to one of them would have been a guess. The shape test lives in
+   `knot.ticket`, which owns it."
   [input]
-  (throw (ex-info (str "document not found: " input)
+  (throw (ex-info (if (ticket/id-shaped? input)
+                    (str "document not found: " input
+                         " — that is a ticket id; use `knot show " input "`")
+                    (str "document not found: " input))
                   {:kind :not-found :input input})))
 
 (defn- doc-id-prefix-match?
