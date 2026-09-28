@@ -4472,6 +4472,23 @@
 (deftest required-docs-gate-end-to-end-test
   ;; The gate is only real if it reaches the command. Drives `knot start`
   ;; through the CLI with a configured requirement.
+  (testing "forcing past it into a terminal status requires a --summary"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {}"
+                               " :required-docs {\"closed\" [\"spec\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "start" tid)
+        (doseq [argv [["close" tid "--force"]
+                      ["status" tid "closed" "--force"]
+                      ["update" tid "--status" "closed" "--force"]]]
+          (let [{:keys [exit err]} (apply run-knot tmp argv)]
+            (is (= 1 exit) (first argv))
+            (is (str/includes? err "--force requires a non-blank --summary") (first argv))))
+        (is (zero? (:exit (run-knot tmp "close" tid "--force" "--summary" "no spec")))))))
+
   (testing "the refusal names each missing type once, in the bullets not the headline"
     ;; Reported upstream as a nit: the headline listed the types and the bullet
     ;; list repeated them, which reads as a stutter on the common single-type

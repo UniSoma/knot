@@ -476,14 +476,13 @@
    that nothing refuses to act on only stops a typo; a transition that
    refuses without a spec is the reason to have named the type at all.
 
-   `--force` overrides and needs no summary, matching
-   `gate-open-children!` on a start: ADR 0003 makes a start provisional, so
-   it does not demand a recorded reason the way a close does. Returns
+   `--force` needs a non-blank `summary` when `target` is terminal, as the
+   other two gates do; into any other status it needs none. Returns
    `:bypass` when the gate would fire but is forced through (caller emits a
    stderr warning); returns nil otherwise. `:ticket-docs` may be a delay:
    it is forced only when `target` carries a requirement, so a project with
    no `:required-docs` never reads the corpus."
-  [{:keys [source target ticket-docs required-docs force?]}]
+  [{:keys [source target ticket-docs required-docs terminal-statuses force? summary]}]
   (let [;; Deref only when this target actually carries a requirement. The
         ;; question is the gate's own, so it is asked here rather than in
         ;; each caller: a caller that forgot to ask would hand over nil and
@@ -508,6 +507,11 @@
                :missing-doc-types     missing
                :target                target}))
 
+      (and (contains? (or terminal-statuses #{}) target)
+           (str/blank? (or summary "")))
+      (throw (ex-info "--force requires a non-blank --summary"
+                      {:invalid-argument :force-summary}))
+
       :else :bypass)))
 
 (defn- warn-required-docs-bypass!
@@ -522,12 +526,14 @@
    this rather than repeating the block: `update --status` reaching the
    same transition as `start` while skipping the gate is exactly the bug
    this shape prevents."
-  [{:keys [source target ticket-docs required-docs force?]}]
-  (when (= :bypass (gate-required-docs! {:source        source
-                                         :target        target
-                                         :ticket-docs   ticket-docs
-                                         :required-docs required-docs
-                                         :force?        force?}))
+  [{:keys [source target ticket-docs required-docs terminal-statuses force? summary]}]
+  (when (= :bypass (gate-required-docs! {:source            source
+                                         :target            target
+                                         :ticket-docs       ticket-docs
+                                         :required-docs     required-docs
+                                         :terminal-statuses terminal-statuses
+                                         :force?            force?
+                                         :summary           summary}))
     (warn-required-docs-bypass!
      (missing-required-docs required-docs target (force ticket-docs)) target)))
 
@@ -664,11 +670,13 @@
             docs*    (delay (query/documents-for
                              (store/load-docs-meta-for docs-root full-id)
                              full-id))
-            _        (run-required-docs-gate! {:source        source
-                                                 :target        status
-                                                 :ticket-docs   docs*
-                                                 :required-docs required-docs
-                                                 :force?        force?})
+            _        (run-required-docs-gate! {:source            source
+                                                 :target            status
+                                                 :ticket-docs       docs*
+                                                 :required-docs     required-docs
+                                                 :terminal-statuses terminal-statuses
+                                                 :force?            force?
+                                                 :summary           summary})
             new-fm   (cond-> (assoc (:frontmatter loaded) :status status)
                        (contains? opts :assignee)
                        (clear-when :assignee str/blank? assignee)
@@ -1395,11 +1403,13 @@
                              (store/load-docs-meta-for docs-root full-id)
                              full-id))
             _        (when (contains? opts :status)
-                       (run-required-docs-gate! {:source        source
-                                                 :target        target
-                                                 :ticket-docs   docs*
-                                                 :required-docs required-docs
-                                                 :force?        (:force? opts)}))
+                       (run-required-docs-gate! {:source            source
+                                                 :target            target
+                                                 :ticket-docs       docs*
+                                                 :required-docs     required-docs
+                                                 :terminal-statuses terminal-statuses
+                                                 :force?            (:force? opts)
+                                                 :summary           (:summary opts)}))
             fm**     (cond-> fm*
                        (contains? opts :status) (assoc :status target))
             body0    (update-body (:body loaded) opts)
