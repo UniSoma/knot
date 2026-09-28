@@ -630,7 +630,7 @@
         docs-root (fs/path docs-root)
         live-glob    (when (fs/directory? live)      (vec (fs/glob live    "*.md")))
         archive-glob (when (fs/directory? archive)   (vec (fs/glob archive "*.md")))
-        docs-glob    (when (fs/directory? docs-root) (vec (fs/glob docs-root "*/*.md")))
+        docs-glob    (when (fs/directory? docs-root) (vec (fs/glob docs-root store/corpus-glob)))
         doc-file?    (fn [p] (some? (doc/id-of (str (fs/file-name p)))))
         misplaced    (vec (filter doc-file? (concat (or live-glob [])
                                                     (or archive-glob []))))
@@ -650,7 +650,7 @@
         stranded     (when (and (not= (str default-root) (str docs-root))
                                 (empty? docs-glob)
                                 (fs/directory? default-root))
-                       (vec (fs/glob default-root "*/*.md")))]
+                       (vec (fs/glob default-root store/corpus-glob)))]
     {:tickets      (vec (keep #(when (:ok? %) (:ticket %)) results))
      :documents    (vec (keep #(when (:ok? %) (:doc %)) doc-results))
      :stranded-docs {:count (count stranded) :root (str default-root)}

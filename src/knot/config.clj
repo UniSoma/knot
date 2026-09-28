@@ -180,8 +180,9 @@
   merged)
 
 (defn- docs-dir-inside!
-  "Refuse a `:docs-dir` that resolves outside `root`."
-  [root docs-dir]
+  "Refuse a `:docs-dir` that resolves outside `root`, or that is or contains
+   the tickets directory, whose archive would then read as documents."
+  [root tickets-dir docs-dir]
   (when docs-dir
     (let [expanded (fs/expand-home docs-dir)
           resolved (fs/normalize (if (fs/absolute? expanded)
@@ -196,6 +197,10 @@
         (throw (ex-info (str ".knot.edn :docs-dir must resolve inside the project: "
                              (pr-str docs-dir) " resolves to " resolved
                              ", which is outside " root)
+                        {:docs-dir docs-dir})))
+      (when (fs/starts-with? (fs/normalize (fs/path root tickets-dir)) resolved)
+        (throw (ex-info (str ".knot.edn :docs-dir " (pr-str docs-dir)
+                             " must not be or contain :tickets-dir " (pr-str tickets-dir))
                         {:docs-dir docs-dir}))))))
 
 (defn load-config
@@ -219,7 +224,7 @@
           (warn! (str "knot: ignoring unknown .knot.edn keys: "
                       (str/join ", " (map name unknown)))))
         (let [merged (validate! (merge defs (select-keys raw known-keys)))]
-          (docs-dir-inside! root (:docs-dir merged))
+          (docs-dir-inside! root (:tickets-dir merged) (:docs-dir merged))
           merged)))))
 
 (defn discover

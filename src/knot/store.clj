@@ -467,6 +467,13 @@
            (mapv (fn [p]
                    (assoc (ticket/parse (slurp (str p))) :path (str p))))))))
 
+(def corpus-glob
+  "Every document file one owner directory down. The `--` slug separator
+   every knot filename carries keeps other markdown sharing the directory,
+   such as ADRs, out of the corpus. Filtering on the full document-id shape
+   instead would also hide a document with a mangled id from `check`."
+  "*/*--*.md")
+
 (defn load-all-docs
   "Every document across every owner directory, for whole-project checks.
    Each is annotated with `:path` and `:owner-dir` — `check` reports the
@@ -476,7 +483,7 @@
   (let [root (fs/path docs-root)]
     (if-not (fs/directory? root)
       []
-      (->> (fs/glob root "*/*.md")
+      (->> (fs/glob root corpus-glob)
            (sort-by str)
            (mapv (fn [p]
                    (assoc (ticket/parse (slurp (str p)))
@@ -517,7 +524,7 @@
   (let [root (fs/path docs-root)]
     (if-not (fs/directory? root)
       []
-      (->> (fs/glob root "*/*.md")
+      (->> (fs/glob root corpus-glob)
            (sort-by str)
            (mapv (fn [p]
                    {:frontmatter (:frontmatter (ticket/parse (read-frontmatter-head p)))

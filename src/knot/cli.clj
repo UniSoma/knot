@@ -1988,7 +1988,7 @@
                 ;; separate corpus, and a consumer reading total_count today
                 ;; means tickets.
                 :total_count   (+ live archive)
-                :doc_count     (count-md-files docs-path "*/*.md")})}))
+                :doc_count     (count-md-files docs-path store/corpus-glob)})}))
 
 (defn info-cmd
   "Report the project's effective runtime configuration and allowed values.

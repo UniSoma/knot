@@ -3974,6 +3974,19 @@
     (let [{:keys [out]} (run-knot tmp "info" "--json")]
       (is (= "config_invalid" (get-in (json/parse-string out true) [:error :code]))))))
 
+(deftest other-markdown-under-docs-dir-is-not-a-document-test
+  (with-tmp tmp
+    (run-knot tmp "init" "--prefix" "kno")
+    (let [cfg (str (fs/path tmp ".knot.edn"))]
+      (spit cfg (str/replace-first (slurp cfg) "\n{" "\n{:docs-dir \"docs\"")))
+    (fs/create-dirs (fs/path tmp "docs" "adr"))
+    (spit (str (fs/path tmp "docs" "adr" "0001-record.md")) "# ADR 1\n\nbody\n")
+    (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+      (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "body")
+      (is (zero? (:exit (run-knot tmp "check"))))
+      (is (= 1 (get-in (json/parse-string (:out (run-knot tmp "info" "--json")) true)
+                       [:data :counts :doc_count]))))))
+
 (deftest check-table-shows-a-dash-for-a-document-with-no-id-test
   (with-tmp tmp
     (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
