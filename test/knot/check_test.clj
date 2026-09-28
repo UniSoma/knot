@@ -855,6 +855,7 @@
       (is (= [:invalid_doc_type] (mapv :code issues)))
       (is (= :error (:severity (first issues))))
       (is (str/includes? (:message (first issues)) "\"wat\""))
+      (is (str/includes? (:message (first issues)) "document \"kno-01t-daaa\""))
       (is (str/includes? (:message (first issues)) "spec"))))
 
   (testing "every configured type is accepted"
@@ -926,6 +927,23 @@
     ;; ticket field, not the path.
     (is (empty? (:issues (run-docs [(doc-rec "kno-01old" "kno-01old-daaa")]
                                    :tickets [(archived-ticket "kno-01old" "closed" [] :title "T")]))))))
+
+(deftest doc-message-without-id-test
+  (let [path "/tmp/fake/docs/kno-01t/blank.md"]
+    (testing "a document with no frontmatter is named by its path and prints no nil"
+      (let [bare   (assoc (doc-rec "kno-01t" nil :ticket nil :type nil) :path path)
+            issues (:issues (run-docs [bare] :tickets [(ticket "kno-01t" "open" [] :title "T")]))
+            by-code (into {} (map (juxt :code :message)) issues)]
+        (is (= #{:missing_required_field :doc_directory_mismatch :invalid_doc_type}
+               (set (keys by-code))))
+        (is (str/includes? (by-code :doc_directory_mismatch) (str "document at " path)))
+        (is (str/includes? (by-code :invalid_doc_type) (str "document at " path " has no type")))
+        (is (not-any? #(str/includes? % "nil") (vals by-code)))))
+
+    (testing "an orphaned document with a blank id is named by its path"
+      (let [issues (:issues (run-docs [(assoc (doc-rec "kno-01t" "") :path path)]))
+            msg    (:message (first (filter #(= :doc_unknown_ticket (:code %)) issues)))]
+        (is (str/includes? msg (str "document at " path " names ticket")))))))
 
 (deftest duplicate-doc-id-test
   (testing "two files claiming one document id are reported once, naming both paths"

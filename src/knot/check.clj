@@ -106,6 +106,11 @@
 (defn- missing-id? [id]
   (or (nil? id) (blank-string? id)))
 
+(defn- doc-label [{:keys [frontmatter path]}]
+  (if (missing-id? (:id frontmatter))
+    (str "document at " path)
+    (str "document " (pr-str (:id frontmatter)))))
+
 (defn- check-required-fields
   "Per-ticket: id, title, status must be present and non-blank."
   [_ctx ticket]
@@ -321,7 +326,8 @@
         :code     :invalid_doc_type
         :ids      [id]
         :path     (:path doc)
-        :message  (str "document " (pr-str id) " has type " (pr-str type)
+        :message  (str (doc-label doc)
+                       (if (nil? type) " has no type" (str " has type " (pr-str type)))
                        ", not one of " (pr-str (vec allowed)))}])))
 
 (defn- check-doc-placement
@@ -344,7 +350,7 @@
         ;; A document with NO :ticket field lands here, not in the
         ;; orphan branch, which is correct — but `(pr-str nil)` renders as
         ;; the literal "nil", so say "has no ticket field" instead.
-        :message  (str "document " (pr-str id) " sits under " (pr-str dir)
+        :message  (str (doc-label doc) " sits under " (pr-str dir)
                        (if (nil? ticket)
                          " but has no ticket field"
                          (str " but its ticket field names " (pr-str ticket))))}]
@@ -354,7 +360,7 @@
         :code     :doc_id_owner_mismatch
         :ids      [id]
         :path     (:path doc)
-        :message  (str "document " (pr-str id) " embeds owner "
+        :message  (str (doc-label doc) " embeds owner "
                        (if-let [embedded (doc/owner-of id)]
                          (pr-str embedded)
                          "nothing")
@@ -365,7 +371,7 @@
         :code     :doc_unknown_ticket
         :ids      [id]
         :path     (:path doc)
-        :message  (str "document " (pr-str id) " names ticket " (pr-str ticket)
+        :message  (str (doc-label doc) " names ticket " (pr-str ticket)
                        ", which resolves to no ticket")}])))
 
 (defn- check-doc-id
