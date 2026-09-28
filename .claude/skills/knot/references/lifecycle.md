@@ -1,7 +1,7 @@
 # Lifecycle gates
 
-Two gates guard status transitions — the **acceptance gate** (terminal transitions) and the **open-children gate**
-(start *and* close) — and an opt-in check, the **conditional claim** (`--if-unassigned`), guards who gets to do the
+Three gates guard status transitions — the **acceptance gate** (terminal transitions), the **open-children gate**
+(start *and* close) and the **required-documents gate** (any status `.knot.edn` names) — and an opt-in check, the **conditional claim** (`--if-unassigned`), guards who gets to do the
 work. `SKILL.md` covers what fires the gates and how to clear them in the moment; this file is the full skip-condition
 matrix, the start-vs-close `--summary` asymmetry, and the judgment behind the claim predicate.
 
@@ -29,11 +29,25 @@ Skips on:
 - Active → active no-ops and intake → terminal (no meaningful start or close).
 - Terminal → terminal reclassification.
 
+## Required-documents gate
+
+Fires on a move into any status that `.knot.edn`'s `:required-docs` lists, through `start`, `close`, `status` or
+`update --status`, when the ticket does not own a document of every type that status requires
+(`error.code = "missing_required_docs"`, exit 1, `error.missing_doc_types` naming only the missing types).
+
+Skips on:
+
+- A status with no entry in `:required-docs`, or a project with no `:required-docs` at all.
+- Re-entering the status the ticket already holds: the gate guards the move, not residence.
+
+Unlike the other two, it does not skip intake → terminal or terminal → terminal: if `closed` requires a document, every
+route into `closed` needs one.
+
 ## `--force` and the `--summary` asymmetry
 
 - **Close**: `--force --summary "<reason>"` is a required pair — `--force` with a blank `--summary` exits
-  `invalid_argument`. The summary lands as a Notes entry and is the override's record. When both gates would fire on the
-  same close, one `--force` bypasses both and stderr warns once per gate. The pair is checked only when a gate actually
+  `invalid_argument`. The summary lands as a Notes entry and is the override's record. When several gates would fire on the
+  same close, one `--force` bypasses them all and stderr warns once per gate. The pair is checked only when a gate actually
   fires: with nothing to bypass, `--force` is a no-op and a summary-less close goes through like any other.
 - **Start**: `--force` alone; a `--summary` on a non-terminal target is rejected up front. Start is provisional —
   `update --status` back to intake costs nothing — so the bypass leaves only the stderr enumeration as a trace, not a

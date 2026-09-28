@@ -56,7 +56,7 @@
 (defn owner-of
   "The owning ticket id embedded in document id `did`, or nil when `did` does
    not have the document shape.
-   The `:ticket` field stays authoritative (ADR-0016 R10); `check` uses this
+   The `:ticket` field stays authoritative; `check` uses this
    to report when the two disagree."
   [did]
   (when (string? did)

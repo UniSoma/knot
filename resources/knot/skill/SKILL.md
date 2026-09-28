@@ -135,15 +135,17 @@ and `git checkout` is the recovery path.
 
 ### Transition gates
 
-Two gates block a transition with exit 1 and a JSON `error.code`:
+Three gates block a transition with exit 1 and a JSON `error.code`:
 
 - `acceptance_incomplete` — closing (any active→terminal move) with a frontmatter `:acceptance` entry still unchecked.
   Clear it by checking the box: `knot update <id> --ac 3 --done`, which composes with `--status`, so
   `knot update <id> --ac 3 --done --status closed` checks and closes in one call.
 - `open_children` — starting *or* closing a ticket that has a child in a non-terminal status. Clear it by finishing
   the children.
+- `missing_required_docs` — entering a status that `.knot.edn`'s `:required-docs` lists while the ticket lacks a
+  document of a required type. Clear it by attaching the document.
 
-Override either with `--force`: on close it needs `--summary "<reason>"` alongside (recorded as a note), on start it
+Override any of them with `--force`: on close it needs `--summary "<reason>"` alongside (recorded as a note), on start it
 stands alone. The full skip-condition matrix and the reason for that asymmetry are in
 [`references/lifecycle.md`](references/lifecycle.md).
 

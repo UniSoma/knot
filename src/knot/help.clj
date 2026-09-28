@@ -166,7 +166,7 @@
    "intro"      {:resource "knot/skill/SKILL.md"
                  :summary  "What knot is, and the contract between the CLI, the tickets and .knot.edn"}
    "lifecycle"  {:resource "knot/skill/references/lifecycle.md"
-                 :summary  "The acceptance and open-children gates, and the conditional claim"}
+                 :summary  "The acceptance, open-children and required-documents gates, and the conditional claim"}
    "graph"      {:resource "knot/skill/references/graph.md"
                  :summary  "How far each listing filter reaches, and how to read the computed columns"}
    "json"       {:resource "knot/skill/references/json.md"
@@ -579,7 +579,7 @@
                   {:name :status       :desc "Transition the status. Acceptance gate fires on active→terminal."}
                   {:name :summary      :desc "Closing summary recorded on the ticket (terminal transitions only)."}
                   {:name :force        :coerce :boolean :default false
-                   :desc "Bypass the acceptance and open-children gates on a --status transition. When a gate fires on a terminal target, --summary is required; on active-status targets, --summary is not required. With no gate to bypass, --force is a no-op."}
+                   :desc "Bypass the acceptance, open-children and required-documents gates on a --status transition. When a gate fires on a terminal target, --summary is required; on active-status targets, --summary is not required. With no gate to bypass, --force is a no-op."}
                   {:name :priority     :coerce :long :desc "Replace the priority (0-4)."}
                   {:name :mode         :desc "Replace the mode (afk|hitl)."}
                   {:name :assignee     :desc "Set or clear (\"\") the assignee."}
@@ -618,8 +618,8 @@
                   {:name :body         :body? true
                    :desc (str "Replace the whole body. Destructive (no --force); git is the documented undo path."
                               " Mutually exclusive with --description / --design."
-                              " The five sections show renders from fields — ## Acceptance Criteria, ## Blockers,"
-                              " ## Blocking, ## Children, ## Linked — are display-only and refused here:"
+                              " The six sections show renders from fields — ## Acceptance Criteria, ## Blockers,"
+                              " ## Blocking, ## Children, ## Linked, ## Documents — are display-only and refused here:"
                               " if a frontmatter field holds it, the body doesn't."
                               " Use --add-ac / --remove-ac / --ac to mutate criteria.")}]
     :notes       ["--if-unassigned is the same conditional claim `knot start` offers: the assignee is read before any write, and a losing claim drops every other flag in the call."
