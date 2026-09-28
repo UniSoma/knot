@@ -491,6 +491,19 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":tickets-dir"
                           (#'config/docs-dir-inside! "/p/proj" ".tickets" "."))))
 
+  (testing "a symlink is judged by where it points"
+    (with-tmp root
+      (with-tmp outside
+        (fs/create-sym-link (fs/path root "out") outside)
+        (fs/create-dirs (fs/path root "real"))
+        (fs/create-sym-link (fs/path root "in") (fs/path root "real"))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inside the project"
+                              (#'config/docs-dir-inside! root ".tickets" "out")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inside the project"
+                              (#'config/docs-dir-inside! root ".tickets" "out/not-yet")))
+        (is (nil? (#'config/docs-dir-inside! root ".tickets" "in")))
+        (is (nil? (#'config/docs-dir-inside! root ".tickets" "not/yet/made"))))))
+
   (testing "an inside path and a nil path pass the guard"
     (is (nil? (#'config/docs-dir-inside! "/p/proj" ".tickets" "docs/tickets")))
     (is (nil? (#'config/docs-dir-inside! "/p/proj" ".tickets" ".tickets/docs")))

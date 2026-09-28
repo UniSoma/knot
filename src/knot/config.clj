@@ -179,16 +179,25 @@
                           {:status status :type t :doc-types doc-types}))))))
   merged)
 
+(defn- real-path
+  "`p` with symlinks resolved as far as it exists; the missing tail is kept
+   as written, since a `:docs-dir` often does not exist yet."
+  [p]
+  (loop [p (fs/normalize (fs/absolutize p)) tail ()]
+    (if (or (fs/exists? p) (nil? (fs/parent p)))
+      (apply fs/path (fs/real-path p) tail)
+      (recur (fs/parent p) (cons (str (fs/file-name p)) tail)))))
+
 (defn- docs-dir-inside!
   "Refuse a `:docs-dir` that resolves outside `root`, or that is or contains
    the tickets directory, whose archive would then read as documents."
   [root tickets-dir docs-dir]
   (when docs-dir
     (let [expanded (fs/expand-home docs-dir)
-          resolved (fs/normalize (if (fs/absolute? expanded)
-                                   (fs/path expanded)
-                                   (fs/path root expanded)))
-          root     (fs/normalize (fs/path root))]
+          resolved (real-path (if (fs/absolute? expanded)
+                                (fs/path expanded)
+                                (fs/path root expanded)))
+          root     (real-path root)]
       ;; A `.knot.edn` travels with the repo, so cloning a project and
       ;; running knot in it must not read or write outside that project.
       ;; Compared by path segments, not string prefix, so a sibling like
@@ -198,7 +207,7 @@
                              (pr-str docs-dir) " resolves to " resolved
                              ", which is outside " root)
                         {:docs-dir docs-dir})))
-      (when (fs/starts-with? (fs/normalize (fs/path root tickets-dir)) resolved)
+      (when (fs/starts-with? (real-path (fs/path root tickets-dir)) resolved)
         (throw (ex-info (str ".knot.edn :docs-dir " (pr-str docs-dir)
                              " must not be or contain :tickets-dir " (pr-str tickets-dir))
                         {:docs-dir docs-dir}))))))
