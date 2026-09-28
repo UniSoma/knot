@@ -4224,6 +4224,39 @@
                                  (:out (run-knot tmp "list" "--json")) true) [:data])))
             "a refused delete removes nothing"))))
 
+  (testing "a document filed here but owned elsewhere is neither counted nor destroyed"
+    (with-tmp tmp
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (run-knot tmp "document" "add" a "--title" "A doc" "--type" "spec" "--json" "a")
+        (run-knot tmp "document" "add" b "--title" "B doc" "--type" "spec" "--json" "b")
+        ;; misfile b's document under a, leaving its ticket field naming b
+        (let [from (first (fs/glob (fs/path tmp ".tickets" "docs" b) "*.md"))
+              to   (fs/path tmp ".tickets" "docs" a (fs/file-name from))]
+          (fs/move from to))
+
+        (testing "the refusal counts only what the ticket owns"
+          (let [{:keys [err]} (run-knot tmp "delete" a)]
+            (is (str/includes? err "1 attached document prevents")
+                "only the owned document")))
+
+        (let [{:keys [exit out]} (run-knot tmp "delete" a "--cascade" "--json")
+              deleted (get-in (json/parse-string out true) [:data :documents])]
+          (is (zero? exit))
+          (is (= 1 (count deleted)) "the cascade removes only the ticket's own"))
+
+        (testing "the other ticket is untouched and its document still exists"
+          (is (= "open" (get-in (json/parse-string
+                                 (:out (run-knot tmp "show" b "--json")) true)
+                                [:data :status])))
+          (is (seq (fs/glob (fs/path tmp ".tickets" "docs" a) "*.md"))
+              "b's file survives")
+          (let [codes (set (map :code (get-in (json/parse-string
+                                               (:out (run-knot tmp "check" "--json")) true)
+                                              [:data :issues])))]
+            (is (contains? codes "doc_directory_mismatch")
+                "check still reports the misfiling"))))))
+
   (testing "--cascade removes the ticket and its documents, and check stays clean"
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")

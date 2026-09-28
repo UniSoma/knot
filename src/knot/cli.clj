@@ -919,8 +919,10 @@
         full-id  (get-in loaded [:frontmatter :id])
         all      (store/load-all project-root tickets-dir)
         refs     (incoming-refs all full-id)
-        docs     (store/load-docs-for
-                  docs-root full-id)
+        ;; Filter by the `ticket` field: a misfiled document is not this ticket's.
+        docs     (query/documents-for
+                  (store/load-docs-for docs-root full-id)
+                  full-id)
         doc-ids  (mapv #(get-in % [:frontmatter :id]) docs)]
     (when (and (or (seq refs) (seq docs)) (not cascade?))
       (let [clauses (remove nil?
