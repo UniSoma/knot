@@ -333,6 +333,31 @@
       (is (= ["a" "b" "c"] (mapv #(get-in % [:frontmatter :id])
                                  (query/blocking [a b c] "t")))))))
 
+(deftest documents-for-test
+  (testing "documents are matched to their owner by the ticket field"
+    (let [docs [{:frontmatter {:id "kno-d01a" :ticket "kno-01x"}}
+                {:frontmatter {:id "kno-d01b" :ticket "kno-01y"}}
+                {:frontmatter {:id "kno-d01c" :ticket "kno-01x"}}]]
+      (is (= ["kno-d01a" "kno-d01c"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/documents-for docs "kno-01x"))))
+      (is (empty? (query/documents-for docs "kno-01none")))))
+
+  (testing "documents-for is nil-safe on records without :ticket"
+    (let [docs [{:frontmatter {:id "kno-d01a"}}
+                {:frontmatter {:id "kno-d01b" :ticket "kno-01x"}}]]
+      (is (= ["kno-d01b"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/documents-for docs "kno-01x"))))))
+
+  (testing "documents-for preserves input order"
+    (let [docs [{:frontmatter {:id "kno-d01c" :ticket "kno-01x"}}
+                {:frontmatter {:id "kno-d01a" :ticket "kno-01x"}}
+                {:frontmatter {:id "kno-d01b" :ticket "kno-01x"}}]]
+      (is (= ["kno-d01c" "kno-d01a" "kno-d01b"]
+             (mapv #(get-in % [:frontmatter :id])
+                   (query/documents-for docs "kno-01x")))))))
+
 (deftest children-test
   (testing "children returns tickets whose :parent is id"
     (let [p {:frontmatter {:id "p" :status "open"}}

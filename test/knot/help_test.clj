@@ -348,7 +348,8 @@
     :dep :dep/tree :undep
     :link :unlink
     :ready :blocked :closed
-    :add-note :edit})
+    :add-note :edit
+    :document :document/add :document/show :document/replace :document/delete :document/list})
 
 (deftest registry-parity-test
   (testing "every dispatched command has a registry entry"
@@ -363,9 +364,9 @@
     (is (= ["ls"] (:aliases (get help/registry :list))))))
 
 (deftest registry-shape-test
-  (testing "every entry has a :group from the canonical five"
+  (testing "every entry has a :group from the canonical set"
     (doseq [[k entry] help/registry]
-      (is (contains? #{:project :lifecycle :graph :listing :notes}
+      (is (contains? #{:project :lifecycle :graph :listing :notes :documents}
                      (:group entry))
           (str k " has invalid :group " (:group entry)))))
 
@@ -652,7 +653,12 @@
     (let [{:keys [exit out err]} (run-knot "create" "--design=--help")]
       (is (= 1 exit))
       (is (str/blank? out))
-      (is (str/includes? err "title is required")))))
+      (is (str/includes? err "title is required"))))
+
+  (testing "--help before a trailing valueless body flag still prints help"
+    (let [{:keys [exit out]} (run-knot "create" "--help" "--description")]
+      (is (zero? exit))
+      (is (str/includes? out "USAGE")))))
 
 (deftest help-help-collapse-test
   (testing "knot help help is treated as bare top-level help (exit 0, USAGE)"
@@ -910,3 +916,29 @@
   (testing "top-level help advertises the concept guides"
     (let [{:keys [out]} (run-knot "--help")]
       (is (str/includes? out "knot help topics")))))
+
+(deftest document-group-registry-test
+  (testing "the group registers its five subcommands"
+    (is (= [:document/add :document/show :document/replace :document/delete :document/list]
+           (get-in help/registry [:document :subcommands])))
+    (doseq [k (get-in help/registry [:document :subcommands])]
+      (is (contains? help/registry k) (str "missing subcommand entry: " k))))
+
+  (testing "no doc or docs alias is registered"
+    ;; `doc` already means documentation in this repo — two guards named
+    ;; doc_flags_test and doc_codes_test — and an alias would make prose
+    ;; about either resolve to this command group.
+    (is (nil? (help/resolve-key help/registry "doc")))
+    (is (nil? (help/resolve-key help/registry "docs")))
+    (is (nil? (:aliases (get help/registry :document)))))
+
+  (testing "replace declares the flags its total-replace semantics require"
+    (let [flags (set (map :name (get-in help/registry [:document/replace :flags])))]
+      (is (contains? flags :title))
+      (is (contains? flags :type))
+      (is (contains? flags :json))))
+
+  (testing "the replace-is-total and never-creates caveats live in replace's notes"
+    (let [notes (str/join " " (get-in help/registry [:document/replace :notes]))]
+      (is (str/includes? notes "not a merge"))
+      (is (str/includes? notes "never creates")))))

@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [knot.cli :as cli]
             [knot.config :as config]
+            [knot.doc :as doc]
             [knot.help :as help]
             [knot.output :as output]
             [knot.store :as store]
@@ -136,10 +137,11 @@
    survive intact. `flag-map` scopes which flags get extracted — pass
    `create-body-flags` from `create-handler`, `update-body-flags` from
    `update-handler`, `body-flag->key` from `help-requested?` (the
-   union, since help detection is command-agnostic). Returns
+   union, since help detection is command-agnostic). A body flag followed
+   by nothing, or by one of `tokens`, is refused. Returns
    `{:body-opts {kw value} :argv [...]}` where `:argv` is argv with
    the consumed tokens removed."
-  [argv flag-map]
+  [argv flag-map tokens]
   (loop [in argv, out [], opts {}]
     (if (empty? in)
       {:body-opts opts :argv out}
@@ -152,9 +154,13 @@
           (recur tail out
                  (assoc opts (flag-map eq-flag) (subs head (inc eq-idx))))
 
-          (and (contains? flag-map head) (seq tail))
+          (and (contains? flag-map head) (seq tail) (not (tokens (first tail))))
           (recur (rest tail) out
                  (assoc opts (flag-map head) (first tail)))
+
+          (contains? flag-map head)
+          (throw (ex-info (str head " needs a value")
+                          {:kind :invalid-argument :field (flag-map head)}))
 
           :else
           (recur tail (conj out head) opts))))))
@@ -188,6 +194,15 @@
    {}
    flags))
 
+(defn- flag-tokens
+  "Every flag token `entry` accepts, value or boolean, plus the global help flags."
+  [{:keys [flags]}]
+  (into #{"--help" "-h"}
+        (mapcat (fn [{flag-name :name :keys [alias]}]
+                  (cond-> [(str "--" (name flag-name))]
+                    alias (conj (str "-" (name alias))))))
+        flags))
+
 (defn- extract-value-flags
   "Walk argv and pull value-bearing string flag tokens out before
    babashka.cli sees them, so dash-leading values like `\"- text\"` or
@@ -197,11 +212,14 @@
    `extract-body-flags`: handles both `--flag value` and `--flag=value`.
    For `:coerce []` flags (`:repeat? true` in `flag-map`), accumulates
    into a vector; otherwise last-wins (matching babashka.cli semantics).
-   `flag-map` comes from `value-flag-map`. Returns
+   A value flag followed by nothing, or by another of this command's flags,
+   is refused rather than bound to `true` or to that flag's name. Returns
    `{:value-opts {kw value-or-vec} :argv [...]}` where `:argv` is argv
    with the consumed tokens removed. See kno-01kr0129m0y9."
-  [argv flag-map]
-  (let [add (fn [opts {:keys [key repeat?]} v]
+  [argv entry]
+  (let [flag-map (value-flag-map entry)
+        tokens   (flag-tokens entry)
+        add (fn [opts {:keys [key repeat?]} v]
               (if repeat?
                 (update opts key (fnil conj []) v)
                 (assoc opts key v)))]
@@ -217,9 +235,13 @@
             (recur tail out
                    (add opts (flag-map eq-flag) (subs head (inc eq-idx))))
 
-            (and (contains? flag-map head) (seq tail))
+            (and (contains? flag-map head) (seq tail) (not (tokens (first tail))))
             (recur (rest tail) out
                    (add opts (flag-map head) (first tail)))
+
+            (contains? flag-map head)
+            (throw (ex-info (str head " needs a value")
+                            {:kind :invalid-argument :field (:key (flag-map head))}))
 
             :else
             (recur tail (conj out head) opts)))))))
@@ -286,12 +308,18 @@
     (print (str s "\n")))
   (flush))
 
+(defn- no-ticket-msg
+  "`no ticket matching <id>`, with a pointer at the document command when `id`
+   is document-shaped. Shared by every ticket command that takes an id."
+  [id]
+  (str "no ticket matching " id (doc/wrong-corpus-hint id)))
+
 (defn- emit-not-found-envelope!
   "Print a v0.3 not_found error envelope to stdout and exit 1."
   [id]
   (println-out (output/error-envelope-str
                 {:code    "not_found"
-                 :message (str "no ticket matching " id)}))
+                 :message (no-ticket-msg id)}))
   (System/exit 1))
 
 (defn- emit-ambiguous-envelope!
@@ -347,6 +375,10 @@
                (str "use 'knot update <id> --ac \"<title>\" --done' for each one, "
                     "or --force --summary \"<reason>\" to override.")]
               "already_assigned" ["; nothing was written." nil nil]
+              "missing_required_docs"
+              [nil (:missing_doc_types extra)
+               (str "attach each one with `knot document add <id> --type <type>`, "
+                    "or pass --force to proceed without them.")]
               "open_children"
               [nil (:open_children extra)
                (case (:gate extra)
@@ -356,12 +388,14 @@
                              "to start the umbrella anyway."))]
               ;; rows arrive JSON-stringified; `name` passes a string through
               "has_incoming_refs"
-              [nil (map (fn [{:keys [id field]}] (str id " " (name field)))
-                        (:referrers extra))
+              [nil (concat (map (fn [{:keys [id field]}] (str id " " (name field)))
+                                (:referrers extra))
+                           (map (fn [doc-id] (str doc-id " document")) (:documents extra)))
                (str "drop each reference first "
                     "(`knot undep`, `knot unlink`, "
-                    "or `knot update <id> --parent \"\"`) "
-                    "and re-run.")])]
+                    "or `knot update <id> --parent \"\"`), "
+                    "remove each document (`knot document delete`), "
+                    "and re-run — or pass --cascade.")])]
         (println (str "knot " cmd-name ": " msg suffix))
         (doseq [item items]
           (println (str "  - " item)))
@@ -392,11 +426,13 @@
           (recur (rest a) acc))))))
 
 (defn- create-handler [argv]
-  (let [{:keys [body-opts argv]}   (extract-body-flags argv create-body-flags)
+  (let [{:keys [body-opts argv]}   (extract-body-flags
+                                    argv create-body-flags
+                                    (flag-tokens (get help/registry :create)))
         rel-order                  (extract-rel-order argv)
         {:keys [value-opts argv]}  (extract-value-flags
                                     argv
-                                    (value-flag-map (get help/registry :create)))
+                                    (get help/registry :create))
         {:keys [opts args]}        (bcli/parse-args argv (spec :create))
         title (first args)
         json? (boolean (:json opts))]
@@ -564,7 +600,7 @@
         (cond
           out   (println-out out)
           json? (emit-not-found-envelope! id)
-          :else (die (str "knot show: no ticket matching " id))))
+          :else (die (str "knot show: " (no-ticket-msg id)))))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (if (and json? (= :ambiguous (:kind data)))
@@ -574,7 +610,7 @@
 (defn- init-handler [argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry :init)))
+                                   (get help/registry :init))
         {:keys [opts]}            (bcli/parse-args argv (spec :init))
         opts                      (merge opts value-opts)
         ;; init runs in cwd by design — it's how you create a project root
@@ -596,7 +632,7 @@
   [cmd-name cmd-key arg-count transition-fn argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry cmd-key)))
+                                   (get help/registry cmd-key))
         {:keys [args opts]}       (bcli/parse-args argv (spec cmd-key))
         merged                    (merge opts value-opts)
         json?                     (boolean (:json opts))]
@@ -627,7 +663,7 @@
           (cond
             out   (println-out (str out))
             json? (emit-not-found-envelope! id)
-            :else (die (str "knot " cmd-name ": no ticket matching " id))))
+            :else (die (str "knot " cmd-name ": " (no-ticket-msg id)))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -643,6 +679,12 @@
               (emit-gate-failure!
                cmd-name json? "open_children" (.getMessage e)
                {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
+
+              (:missing-required-docs data)
+              (emit-gate-failure!
+               cmd-name json? "missing_required_docs" (.getMessage e)
+               {:missing_doc_types (vec (:missing-doc-types data))
+                :target            (:target data)})
 
               (:already-assigned data)
               (emit-gate-failure!
@@ -670,7 +712,7 @@
           (cond
             out   (println-out (str out))
             json? (emit-not-found-envelope! from)
-            :else (die (str "knot " cmd-name ": no ticket matching " from))))
+            :else (die (str "knot " cmd-name ": " (no-ticket-msg from)))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -724,7 +766,7 @@
   [cmd-key argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry cmd-key)))
+                                   (get help/registry cmd-key))
         {:keys [opts]}            (bcli/parse-args argv (spec cmd-key))
         opts                      (merge opts value-opts)
         _        (validate-priority-filter! opts)
@@ -843,7 +885,8 @@
             (= :has-incoming-refs (:kind data))
             (emit-gate-failure!
              "delete" json? "has_incoming_refs" (.getMessage e)
-             {:referrers (mapv (fn [r] (update r :field name)) (:referrers data))})
+             {:referrers (mapv (fn [r] (update r :field name)) (:referrers data))
+              :documents (vec (:documents data))})
 
             (and json? (= :ambiguous (:kind data)))
             (emit-ambiguous-envelope! e data)
@@ -948,7 +991,7 @@
               (System/exit 0)
               (if json?
                 (emit-not-found-envelope! id)
-                (die (str "knot add-note: no ticket matching " id))))))
+                (die (str "knot add-note: " (no-ticket-msg id)))))))
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)]
             (cond
@@ -974,10 +1017,12 @@
    conflicting body flags emit `invalid_argument`. Tag splitting mirrors
    `create-handler` so the on-disk `:tags` field stays a YAML list."
   [argv]
-  (let [{:keys [body-opts argv]}  (extract-body-flags argv update-body-flags)
+  (let [{:keys [body-opts argv]}  (extract-body-flags
+                                   argv update-body-flags
+                                   (flag-tokens (get help/registry :update)))
         {:keys [value-opts argv]} (extract-value-flags
                                    argv
-                                   (value-flag-map (get help/registry :update)))
+                                   (get help/registry :update))
         {:keys [opts args]}       (bcli/parse-args argv (spec :update))
         json? (boolean (:json opts))
         id    (first args)]
@@ -1053,7 +1098,7 @@
         (cond
           out   (println-out (str out))
           json? (emit-not-found-envelope! id)
-          :else (die (str "knot update: no ticket matching " id))))
+          :else (die (str "knot update: " (no-ticket-msg id)))))
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (cond
@@ -1069,6 +1114,12 @@
             (emit-gate-failure!
              "update" json? "open_children" (.getMessage e)
              {:open_children (vec (:open-child-ids data)) :gate (:gate data)})
+
+            (:missing-required-docs data)
+            (emit-gate-failure!
+             "update" json? "missing_required_docs" (.getMessage e)
+             {:missing_doc_types (vec (:missing-doc-types data))
+              :target            (:target data)})
 
             (:already-assigned data)
             (emit-gate-failure!
@@ -1115,7 +1166,7 @@
                              {:id id :editor-fn (editor-fn-for-edit)})]
       (if path
         (println-out (str path))
-        (die (str "knot edit: no ticket matching " id))))))
+        (die (str "knot edit: " (no-ticket-msg id)))))))
 
 (defn- emit-check-result!
   "Apply a `cli/check-cmd` result map to stdout/stderr and exit with its
@@ -1144,16 +1195,16 @@
    Argument-parse errors land on stderr with exit 2 (per the
    arg-parsing-stays-on-stderr policy from the JSON-envelope ticket)."
   [argv]
-  (let [{:keys [value-opts argv]} (extract-value-flags
-                                   argv
-                                   (value-flag-map (get help/registry :check)))
-        parsed                    (try
-                                    (bcli/parse-args argv (spec :check))
-                                    (catch Exception e e))]
+  (let [parsed (try
+                 (let [{:keys [value-opts argv]} (extract-value-flags
+                                                  argv
+                                                  (get help/registry :check))]
+                   (-> (bcli/parse-args argv (spec :check))
+                       (update :opts merge value-opts)))
+                 (catch Exception e e))]
     (if (instance? Exception parsed)
       (check-cannot-scan! false "invalid_argument" (.getMessage ^Exception parsed))
       (let [{:keys [opts args]} parsed
-            opts       (merge opts value-opts)
             json?      (boolean (:json opts))
             cwd        (str (fs/cwd))
             discovered (try (config/discover cwd)
@@ -1296,7 +1347,7 @@
   (let [out (try
               (let [{:keys [value-opts argv]} (extract-value-flags
                                                argv
-                                               (value-flag-map (get help/registry :prime)))
+                                               (get help/registry :prime))
                     {:keys [opts]}            (bcli/parse-args argv (spec :prime))
                     opts                      (merge opts value-opts)
                     _            (validate-priority-filter! opts)
@@ -1393,12 +1444,157 @@
     nil       (do (print-command-help :skill) (System/exit 1))
     (die (str "knot skill: unknown subcommand: " (first argv)))))
 
+(defn- emit-document-failure!
+  "Route a `knot document` failure to its `--json` error envelope (every
+   branch exits 1). The document corpus gets its own codes: `not_found` on
+   a document selector would send the reader looking for a ticket."
+  [^Exception e data]
+  (case (:kind data)
+    :doc-not-found    (emit-error-envelope! {:code    "doc_not_found"
+                                             :message (.getMessage e)})
+    :ambiguous-doc    (emit-error-envelope! {:code       "ambiguous_doc"
+                                             :message    (.getMessage e)
+                                             :candidates (:candidates data)})
+    :invalid-doc-type (emit-error-envelope! {:code    "invalid_doc_type"
+                                             :message (.getMessage e)
+                                             :value   (:value data)
+                                             :allowed (:allowed data)})
+    (emit-json-failure! e data)))
+
+(defn- run-document!
+  "Run one `knot document` subcommand, printing its result. On failure,
+   emits the document error envelope under `--json` and a
+   `knot document <sub>: <message>` stderr line otherwise."
+  [sub json? f]
+  (try
+    (println-out (str (f)))
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (if json?
+          (emit-document-failure! e data)
+          (die (str "knot document " sub ": " (.getMessage e))))))))
+
+(defn- parse-document-args
+  "`bcli/parse-args` for document subcommand `k`, with value flags
+   pre-extracted as every other command does. A refusal goes through
+   `run-document!`, so `--json` still gets the document envelope."
+  [argv k]
+  (try
+    (let [{:keys [value-opts argv]} (extract-value-flags argv (get help/registry k))]
+      (update (bcli/parse-args argv (spec k)) :opts merge value-opts))
+    (catch clojure.lang.ExceptionInfo e
+      (run-document! (name k) (boolean (some #{"--json"} argv)) #(throw e)))))
+
+(defn- require-opt!
+  "Throw the `:invalid-argument` ex-info `run-document!` knows how to
+   route. A `die` here would bypass the `--json` envelope. The message
+   carries no command prefix: `run-document!` adds it, and both would
+   print."
+  [flag value]
+  (when (str/blank? value)
+    (throw (ex-info (str flag " is required")
+                    {:kind :invalid-argument :field flag}))))
+
+(defn- document-body-opts
+  "The layered body input every document write shares — the same three
+   layers `add-note` uses."
+  [text]
+  {:text            text
+   :stdin-tty?      (some? (System/console))
+   :stdin-reader-fn (fn [] (slurp *in*))
+   :editor-fn       (editor-fn-for-note)})
+
+(defn- variadic-text
+  "Join the trailing positional words into one body string, or nil when
+   there are none — nil is what makes the input fall through to stdin or
+   the editor."
+  [args]
+  (when (>= (count args) 2) (str/join " " (rest args))))
+
+(defn- document-add-handler [argv]
+  (let [{:keys [args opts]} (parse-document-args argv :document/add)
+        json? (boolean (:json opts))
+        tid   (first args)]
+    (when (or (nil? tid) (str/blank? tid))
+      (die "knot document add: a ticket id is required"))
+    (run-document!
+     "add" json?
+     #(let [title (:title opts)]
+        (require-opt! "--title" title)
+        (cli/document-add-cmd
+         (discover-ctx)
+         (merge (document-body-opts (variadic-text args))
+                {:ticket tid :title title :type (:type opts)
+                 :json?  json?}))))))
+
+(defn- document-show-handler [argv]
+  (let [{:keys [args opts]} (parse-document-args argv :document/show)
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document show: a selector is required"))
+    (run-document!
+     "show" json?
+     #(cli/document-show-cmd (discover-ctx)
+                             {:id selector :ticket (:ticket opts)
+                              :type (:type opts) :json? json?}))))
+
+(defn- document-replace-handler [argv]
+  (let [{:keys [args opts]} (parse-document-args argv :document/replace)
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document replace: a selector is required"))
+    (run-document!
+     "replace" json?
+     #(cli/document-replace-cmd
+       (discover-ctx)
+       (merge (document-body-opts (variadic-text args))
+              {:id     selector :ticket (:ticket opts)
+               :title  (:title opts) :type (:type opts)
+               :json?  json?})))))
+
+(defn- document-delete-handler [argv]
+  (let [{:keys [args opts]} (parse-document-args argv :document/delete)
+        json?    (boolean (:json opts))
+        selector (first args)]
+    (when (or (nil? selector) (str/blank? selector))
+      (die "knot document delete: a selector is required"))
+    (run-document!
+     "delete" json?
+     #(cli/document-delete-cmd (discover-ctx)
+                               {:id selector :ticket (:ticket opts) :json? json?}))))
+
+(defn- document-list-handler [argv]
+  (let [{:keys [args opts]} (parse-document-args argv :document/list)
+        json? (boolean (:json opts))
+        tid   (first args)]
+    (when (or (nil? tid) (str/blank? tid))
+      (die "knot document list: a ticket id is required"))
+    (run-document!
+     "list" json? #(cli/document-list-cmd (discover-ctx) {:ticket tid :json? json?}))))
+
+(defn- document-handler
+  "Route `knot document ...`. Five subcommands; bare `knot document`
+   prints the group help and exits 1, like `knot skill`."
+  [argv]
+  (case (first argv)
+    "add"     (document-add-handler     (rest argv))
+    "show"    (document-show-handler    (rest argv))
+    "replace" (document-replace-handler (rest argv))
+    "delete"  (document-delete-handler  (rest argv))
+    "list"    (document-list-handler    (rest argv))
+    nil       (do (print-command-help :document) (System/exit 1))
+    (die (str "knot document: unknown subcommand: " (first argv)))))
+
 (defn- help-requested?
   "True when `argv` (after body-flag extraction) contains `--help` or
    `-h`. Body extraction keeps a literal `--help` inside a body string
    from triggering a false positive."
   [argv]
-  (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv body-flag->key)))))
+  ;; Drop a trailing valueless body flag so extraction can't refuse it before help is seen.
+  (let [argv (cond-> argv (body-flag->key (last argv)) butlast)]
+    (boolean (some #{"--help" "-h"} (:argv (extract-body-flags argv body-flag->key #{}))))))
 
 (defn -main [& argv]
   (try
@@ -1469,6 +1665,7 @@
         "update"   (update-handler rest-argv)
         "migrate-ac" (migrate-ac-handler rest-argv)
         "skill"   (skill-handler rest-argv)
+        "document" (document-handler rest-argv)
         nil      (do (usage) (System/exit 1))
         (do (binding [*out* *err*]
               (println (str "knot: unknown command: " cmd)))

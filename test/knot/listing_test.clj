@@ -93,7 +93,7 @@
       (is (not (contains? c :level)))
       (is (not (contains? c :cc)))))
   (testing "every column is one declaration with the fields output and help iterate"
-    (is (= [:acceptance :children :leverage :coupling :level :cc]
+    (is (= [:acceptance :children :doc-types :leverage :coupling :level :cc]
            (mapv :key listing/columns)))
     (doseq [c listing/columns]
       (is (every? #(contains? c %) [:key :header :align :sources :shown? :cell :json])

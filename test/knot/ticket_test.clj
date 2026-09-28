@@ -350,7 +350,7 @@
 
 (deftest reserved-section-owners-test
   (testing "the table lists every reserved heading in render order"
-    (is (= ["Acceptance Criteria" "Blockers" "Blocking" "Children" "Linked"]
+    (is (= ["Acceptance Criteria" "Blockers" "Blocking" "Children" "Linked" "Documents"]
            (mapv :heading ticket/reserved-section-owners)))
     (is (= ticket/reserved-section-names
            (mapv :heading ticket/reserved-section-owners))))
@@ -362,7 +362,9 @@
     (is (= "other tickets' deps" (ticket/reserved-section-source "Blocking")))
     (is (= "other tickets' parent" (ticket/reserved-section-source "Children")))
     (is (= "the links field" (ticket/reserved-section-source "Linked")))
-    (is (= "the acceptance field" (ticket/reserved-section-source "Acceptance Criteria"))))
+    (is (= "the acceptance field" (ticket/reserved-section-source "Acceptance Criteria")))
+    (is (= "each document's ticket field" (ticket/reserved-section-source "Documents"))
+        "the one inverse whose other side is not a ticket supplies its own phrase"))
   (testing "provenance is the comment show prints under each derived heading"
     (is (= "<!-- from frontmatter acceptance; edit with --add-ac / --ac -->"
            (ticket/reserved-section-provenance "Acceptance Criteria")))
@@ -373,7 +375,9 @@
     (is (= "<!-- inverse of other tickets' parent; edit with --parent on the child -->"
            (ticket/reserved-section-provenance "Children")))
     (is (= "<!-- from frontmatter links; edit with knot link -->"
-           (ticket/reserved-section-provenance "Linked")))))
+           (ticket/reserved-section-provenance "Linked")))
+    (is (= "<!-- derived from each document's ticket field; edit with knot document add -->"
+           (ticket/reserved-section-provenance "Documents")))))
 
 (deftest section-breaking-heading-test
   (testing "the first H1 or H2 line, trailing whitespace trimmed"

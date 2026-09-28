@@ -2841,22 +2841,26 @@
            :config_path "/root/.knot.edn"
            :tickets_dir ".tickets"
            :tickets_path "/root/.tickets"
-           :archive_path "/root/.tickets/archive"}
+           :archive_path "/root/.tickets/archive"
+           :docs_path "/root/.tickets/docs"}
    :defaults {:default_assignee nil
               :effective_create_assignee "alice"
               :default_type "task"
               :default_priority 2
-              :default_mode "hitl"}
+              :default_mode "hitl"
+              :default_doc_type "other"}
    :allowed_values {:statuses ["open" "in_progress" "closed"]
                     :active_status "in_progress"
                     :terminal_statuses ["closed"]
                     :types ["bug" "feature" "task"]
                     :modes ["afk" "hitl"]
                     :afk_mode "afk"
+                    :doc_types ["spec" "plan" "other"]
                     :priority_range {:min 0 :max 4}}
    :counts {:live_count 5
             :archive_count 3
-            :total_count 8}})
+            :total_count 8
+            :doc_count 4}})
 
 (deftest info-text-rendering-test
   (testing "info-text emits the five fixed section headings"
@@ -2877,6 +2881,7 @@
       (is (str/includes? s "Tickets dir: .tickets"))
       (is (str/includes? s "Tickets path: /root/.tickets"))
       (is (str/includes? s "Archive path: /root/.tickets/archive"))
+      (is (str/includes? s "Docs path: /root/.tickets/docs"))
       (is (str/includes? s "Default type: task"))
       (is (str/includes? s "Default priority: 2"))
       (is (str/includes? s "Default mode: hitl"))
@@ -2886,12 +2891,15 @@
       (is (str/includes? s "Terminal statuses: closed"))
       (is (str/includes? s "Types: bug, feature, task"))
       (is (str/includes? s "Modes: afk, hitl"))
+      (is (str/includes? s "Doc types: spec, plan, other"))
+      (is (str/includes? s "Default doc type: other"))
       (is (str/includes? s "Afk mode: afk")
           "the autonomous-mode label surfaces in the Allowed Values block")
       (is (str/includes? s "Priority range: 0-4"))
       (is (str/includes? s "Live count: 5"))
       (is (str/includes? s "Archive count: 3"))
-      (is (str/includes? s "Total count: 8"))))
+      (is (str/includes? s "Total count: 8"))
+      (is (str/includes? s "Doc count: 4"))))
 
   (testing "unset scalars render as (none); config_present renders yes/no"
     (let [s (output/info-text full-info-data)]
@@ -2939,3 +2947,67 @@
         (is (false? (:skill_stale data)))
         (is (contains? data :skill_version))
         (is (nil? (:skill_version data)))))))
+
+(def ^:private doc-owner
+  {:frontmatter {:id "kno-01t" :title "Owner" :status "open" :type "task"}
+   :body        "Description.\n"})
+
+(defn- mk-doc
+  ([id title type] (mk-doc id title type ""))
+  ([id title type body]
+   {:frontmatter {:id id :ticket "kno-01t" :title title :type type}
+    :body        body}))
+
+(deftest documents-array-always-present-test
+  (testing "the key is present and empty when the ticket owns nothing"
+    (let [d (json/parse-string (output/show-json doc-owner nil []) true)]
+      (is (contains? (:data d) :documents))
+      (is (= [] (get-in d [:data :documents])))))
+
+  (testing "the key is present even when no document seq is supplied at all"
+    (let [d (json/parse-string (output/show-json doc-owner nil) true)]
+      (is (= [] (get-in d [:data :documents]))))))
+
+(deftest documents-metadata-only-test
+  (testing "a long body never reaches the envelope"
+    (let [docs  [(mk-doc "kno-d01a" "T" "spec" (apply str (repeat 10000 "x")))]
+          out   (output/show-json doc-owner nil docs)
+          entry (first (get-in (json/parse-string out true) [:data :documents]))]
+      (is (= #{:id :title :type} (set (keys entry))))
+      (is (< (count out) 2000)
+          "a body in the envelope would make the most common read unbounded"))))
+
+(deftest documents-both-modes-agree-test
+  (testing "human and JSON name the same documents, legacy heading or not"
+    (let [legacy (assoc doc-owner :body "## Documents\n\nauthored prose\n")
+          docs   [(mk-doc "kno-d01a" "Real" "spec")]
+          text   (output/show-text legacy nil docs)
+          j      (json/parse-string (output/show-json legacy nil docs) true)]
+      (is (re-find #"kno-d01a" text))
+      (is (= ["kno-d01a"] (mapv :id (get-in j [:data :documents]))))
+      (is (not (re-find #"authored prose"
+                        (pr-str (get-in j [:data :documents]))))
+          "the authored text is ordinary body content, never merged into the derived section")
+      (is (str/includes? text "authored prose")
+          "and it still renders — as body, where it was written")))
+
+  (testing "the derived section carries its provenance comment"
+    (let [text (output/show-text doc-owner nil [(mk-doc "kno-d01a" "Real" "spec")])]
+      (is (str/includes? text "## Documents"))
+      (is (str/includes? text "Real (spec) — kno-d01a"))
+      (is (str/includes?
+           text "<!-- derived from each document's ticket field; edit with knot document add -->"))))
+
+  (testing "a ticket owning no documents renders no heading"
+    (is (not (str/includes? (output/show-text doc-owner nil []) "## Documents")))))
+
+(deftest check-footer-reports-document-count-test
+  (testing "the docs count appears when the project has documents"
+    (is (str/includes? (output/check-summary-footer [] {:live 3 :archive 1 :docs 2})
+                       "live=3 archive=1 docs=2")))
+
+  (testing "and is omitted when it has none, so the old footer is unchanged"
+    (is (= "knot check: ok — scanned: live=3 archive=1"
+           (output/check-summary-footer [] {:live 3 :archive 1 :docs 0})))
+    (is (= "knot check: ok — scanned: live=3 archive=1"
+           (output/check-summary-footer [] {:live 3 :archive 1})))))

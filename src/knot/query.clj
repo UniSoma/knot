@@ -218,6 +218,15 @@
   (filter (fn [t] (= id (get-in t [:frontmatter :parent])))
           tickets))
 
+(defn documents-for
+  "Return documents whose `:ticket` equals `id`. Preserves input order.
+   Documents without `:ticket` are skipped (nil-safe). The document side
+   owns the edge; nothing is stored on the ticket, so there is nothing to
+   drift. Mirrors `children`."
+  [docs id]
+  (filter (fn [d] (= id (get-in d [:frontmatter :ticket])))
+          docs))
+
 (defn children-progress
   "Return `[terminal-count total-count]` for the direct children of `id`
    within `tickets`, mirroring `acceptance/progress`. `total` is the number

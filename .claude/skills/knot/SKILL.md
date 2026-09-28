@@ -1,8 +1,8 @@
 ---
 name: knot
-description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`), or on ticket-shaped intent — "what's next?", "the backlog", "show me <id>", "track this", "close this" — including an autonomous agent picking up unblocked work. Hosted-tracker ids (`GH-1234`, `ENG-1234`) belong to their own tools.
+description: Ticket tracking through the `knot` CLI — markdown tickets under `.tickets/`, config in `.knot.edn`. Use when a project carries either marker, when an id matches `<prefix>-01<base32>` (`kno-01kqa9sh`) or the document shape that nests inside it (`kno-01kqa9sh-d7f3k`), or on ticket-shaped intent — "what's next?", "the backlog", "show me <id>", "track this", "close this" — including an autonomous agent picking up unblocked work. Hosted-tracker ids (`GH-1234`, `ENG-1234`) belong to their own tools.
 ---
-<!-- installed by knot 0.13.0 -->
+<!-- installed by knot 0.14.0 -->
 
 # knot — file-based ticket tracker
 
@@ -136,15 +136,17 @@ and `git checkout` is the recovery path.
 
 ### Transition gates
 
-Two gates block a transition with exit 1 and a JSON `error.code`:
+Three gates block a transition with exit 1 and a JSON `error.code`:
 
 - `acceptance_incomplete` — closing (any active→terminal move) with a frontmatter `:acceptance` entry still unchecked.
   Clear it by checking the box: `knot update <id> --ac 3 --done`, which composes with `--status`, so
   `knot update <id> --ac 3 --done --status closed` checks and closes in one call.
 - `open_children` — starting *or* closing a ticket that has a child in a non-terminal status. Clear it by finishing
   the children.
+- `missing_required_docs` — entering a status that `.knot.edn`'s `:required-docs` lists while the ticket lacks a
+  document of a required type. Clear it by attaching the document.
 
-Override either with `--force`: on close it needs `--summary "<reason>"` alongside (recorded as a note), on start it
+Override any of them with `--force`: on close it needs `--summary "<reason>"` alongside (recorded as a note), on start it
 stands alone. The full skip-condition matrix and the reason for that asymmetry are in
 [`references/lifecycle.md`](references/lifecycle.md).
 
