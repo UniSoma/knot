@@ -106,6 +106,9 @@
 (defn- missing-id? [id]
   (or (nil? id) (blank-string? id)))
 
+(defn- doc-ids [id]
+  (if (missing-id? id) [] [id]))
+
 (defn- doc-label [{:keys [frontmatter path]}]
   (if (missing-id? (:id frontmatter))
     (str "document at " path)
@@ -324,7 +327,7 @@
     (when-not (contains? (set allowed) type)
       [{:severity :error
         :code     :invalid_doc_type
-        :ids      [id]
+        :ids      (doc-ids id)
         :path     (:path doc)
         :message  (str (doc-label doc)
                        (if (nil? type) " has no type" (str " has type " (pr-str type)))
@@ -345,7 +348,7 @@
       (not= dir ticket)
       [{:severity :error
         :code     :doc_directory_mismatch
-        :ids      [id]
+        :ids      (doc-ids id)
         :path     (:path doc)
         ;; A document with NO :ticket field lands here, not in the
         ;; orphan branch, which is correct — but `(pr-str nil)` renders as
@@ -369,7 +372,7 @@
       (not (contains? all-ids ticket))
       [{:severity :error
         :code     :doc_unknown_ticket
-        :ids      [id]
+        :ids      (doc-ids id)
         :path     (:path doc)
         :message  (str (doc-label doc) " names ticket " (pr-str ticket)
                        ", which resolves to no ticket")}])))

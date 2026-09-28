@@ -3963,6 +3963,19 @@
         (is (= "--json" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
                                 [:data :title])))))))
 
+(deftest check-table-shows-a-dash-for-a-document-with-no-id-test
+  (with-tmp tmp
+    (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+          _    (run-knot tmp "document" "add" tid "--title" "D" "--type" "spec" "body")
+          f    (str (first (fs/glob (fs/path tmp ".tickets" "docs" tid) "*.md")))
+          _    (spit f (str/replace (slurp f) #"(?m)^(id|type): .*\n" ""))
+          {:keys [out]} (run-knot tmp "check")
+          row  (first (filter #(str/includes? % "invalid_doc_type") (str/split-lines out)))]
+      (is (some? row))
+      (is (str/includes? row "—"))
+      (is (not-any? nil? (mapcat :ids (get-in (json/parse-string (:out (run-knot tmp "check" "--json")) true)
+                                            [:data :issues])))))))
+
 (deftest check-refuses-a-valueless-flag-as-an-argument-error-test
   (with-tmp tmp
     (doseq [argv [["check" "--code"] ["check" "--code" "--json"] ["check" "--severity"]]]

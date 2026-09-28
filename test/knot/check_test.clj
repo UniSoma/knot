@@ -856,6 +856,7 @@
       (is (= :error (:severity (first issues))))
       (is (str/includes? (:message (first issues)) "\"wat\""))
       (is (str/includes? (:message (first issues)) "document \"kno-01t-daaa\""))
+      (is (= ["kno-01t-daaa"] (:ids (first issues))))
       (is (str/includes? (:message (first issues)) "spec"))))
 
   (testing "every configured type is accepted"
@@ -933,12 +934,14 @@
                (set (keys by-code))))
         (is (str/includes? (by-code :doc_directory_mismatch) (str "document at " path)))
         (is (str/includes? (by-code :invalid_doc_type) (str "document at " path " has no type")))
-        (is (not-any? #(str/includes? % "nil") (vals by-code)))))
+        (is (not-any? #(str/includes? % "nil") (vals by-code)))
+        (is (every? #(= [] (:ids %)) issues))))
 
     (testing "an orphaned document with a blank id is named by its path"
       (let [issues (:issues (run-docs [(assoc (doc-rec "kno-01t" "") :path path)]))
             msg    (:message (first (filter #(= :doc_unknown_ticket (:code %)) issues)))]
-        (is (str/includes? msg (str "document at " path " names ticket")))))))
+        (is (str/includes? msg (str "document at " path " names ticket")))
+        (is (every? #(= [] (:ids %)) issues))))))
 
 (deftest duplicate-doc-id-test
   (testing "two files claiming one document id are reported once, naming both paths"
