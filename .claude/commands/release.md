@@ -74,7 +74,18 @@ Ask the user to confirm if unclear.
 
 ### Step 3: Update version
 
-Edit `src/knot/version.clj` to the new version.
+Edit `src/knot/version.clj` to the new version, then regenerate the committed
+skill copy so its `<!-- installed by knot X.Y.Z -->` stamp matches:
+
+```bash
+bb -m knot.main skill install
+grep -q 'installed by knot X.Y.Z' .claude/skills/knot/SKILL.md
+```
+
+Run it from source (`bb -m`, which puts `resources/` on the classpath), not
+the `knot` on PATH: that one stamps its own, older version. `bb test` ignores
+the stamp, so a stale copy passes every check and only shows up later as
+`skill_stale` from `knot check` and `knot prime`.
 
 ### Step 4: Coverage audit (before CHANGELOG rename)
 
