@@ -434,30 +434,15 @@
    means `<tickets-dir>/docs`, so renaming the tickets directory carries the
    corpus with it. A string resolves against the project root and expands
    `~`, matching how `:skill-dir` is treated, which lets a project file this
-   writing wherever it already files long-form writing."
+   writing wherever it already files long-form writing. `knot.config` refuses
+   a value that resolves outside the project before this is reached."
   [project-root tickets-dir docs-dir]
   (if (str/blank? docs-dir)
     (str (fs/path project-root tickets-dir docs-subdir))
-    (let [expanded (fs/expand-home docs-dir)
-          resolved (fs/normalize (if (fs/absolute? expanded)
-                                   (fs/path expanded)
-                                   (fs/path project-root expanded)))
-          root     (fs/normalize (fs/path project-root))]
-      ;; A `.knot.edn` travels with the repo, so cloning a project and
-      ;; running knot in it must not read or write outside that project.
-      ;; Refused rather than warned: a warning an agent does not read is
-      ;; not a boundary, and no stated use case wants the corpus outside
-      ;; the tree. Compared by path segments, not string prefix, so a
-      ;; sibling like `<root>-evil` cannot pass for a child.
-      (when-not (fs/starts-with? resolved root)
-        (throw (ex-info (str ".knot.edn :docs-dir must resolve inside the project: "
-                             (pr-str docs-dir) " resolves to " resolved
-                             ", which is outside " root)
-                        {:kind :docs-dir-outside-project
-                         :docs-dir docs-dir
-                         :resolved (str resolved)
-                         :project-root (str root)})))
-      (str resolved))))
+    (let [expanded (fs/expand-home docs-dir)]
+      (str (fs/normalize (if (fs/absolute? expanded)
+                           (fs/path expanded)
+                           (fs/path project-root expanded)))))))
 
 (defn owner-dir
   "The directory holding `ticket-id`'s documents, under an already-resolved

@@ -467,15 +467,15 @@
   ;; :docs-dir that escapes the root is refused rather than resolved.
   (testing "a relative path that climbs out is refused"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
-                          (store/docs-root "/p/proj" ".tickets" "../outside"))))
+                          (#'config/docs-dir-inside! "/p/proj" "../outside"))))
 
   (testing "an absolute path outside the project is refused"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
-                          (store/docs-root "/p/proj" ".tickets" "/etc"))))
+                          (#'config/docs-dir-inside! "/p/proj" "/etc"))))
 
   (testing "a home-relative path is refused unless home is inside the project"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
-                          (store/docs-root "/p/proj" ".tickets" "~/private"))))
+                          (#'config/docs-dir-inside! "/p/proj" "~/private"))))
 
   (testing "paths inside the project are accepted, including deep ones"
     (is (= (str (fs/path "/p/proj" "docs" "tickets"))
@@ -484,6 +484,10 @@
            (store/docs-root "/p/proj" ".tickets" "a/b/c")))
     (is (= (str (fs/path "/p/proj" "docs"))
            (store/docs-root "/p/proj" ".tickets" "./docs"))))
+
+  (testing "an inside path and a nil path pass the guard"
+    (is (nil? (#'config/docs-dir-inside! "/p/proj" "docs/tickets")))
+    (is (nil? (#'config/docs-dir-inside! "/p/proj" nil))))
 
   (testing "an absolute path that happens to be inside the project is accepted"
     (is (= (str (fs/path "/p/proj" "docs"))
@@ -496,4 +500,4 @@
   (testing "a sibling directory sharing a name prefix is not mistaken for inside"
     ;; /p/proj-evil starts with /p/proj as a string but is not under it.
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":docs-dir"
-                          (store/docs-root "/p/proj" ".tickets" "/p/proj-evil/docs")))))
+                          (#'config/docs-dir-inside! "/p/proj" "/p/proj-evil/docs")))))

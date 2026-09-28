@@ -179,6 +179,25 @@
                           {:status status :type t :doc-types doc-types}))))))
   merged)
 
+(defn- docs-dir-inside!
+  "Refuse a `:docs-dir` that resolves outside `root`."
+  [root docs-dir]
+  (when docs-dir
+    (let [expanded (fs/expand-home docs-dir)
+          resolved (fs/normalize (if (fs/absolute? expanded)
+                                   (fs/path expanded)
+                                   (fs/path root expanded)))
+          root     (fs/normalize (fs/path root))]
+      ;; A `.knot.edn` travels with the repo, so cloning a project and
+      ;; running knot in it must not read or write outside that project.
+      ;; Compared by path segments, not string prefix, so a sibling like
+      ;; `<root>-evil` cannot pass for a child.
+      (when-not (fs/starts-with? resolved root)
+        (throw (ex-info (str ".knot.edn :docs-dir must resolve inside the project: "
+                             (pr-str docs-dir) " resolves to " resolved
+                             ", which is outside " root)
+                        {:docs-dir docs-dir}))))))
+
 (defn load-config
   "Read `<root>/.knot.edn` (when present), validate, and merge on top of
    `defaults`. Unknown keys are dropped with a stderr warning. Invalid
@@ -199,7 +218,9 @@
         (when (seq unknown)
           (warn! (str "knot: ignoring unknown .knot.edn keys: "
                       (str/join ", " (map name unknown)))))
-        (validate! (merge defs (select-keys raw known-keys)))))))
+        (let [merged (validate! (merge defs (select-keys raw known-keys)))]
+          (docs-dir-inside! root (:docs-dir merged))
+          merged)))))
 
 (defn discover
   "Walk up from `start-dir` for the project root and load `.knot.edn`.

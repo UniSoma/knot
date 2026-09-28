@@ -3963,6 +3963,17 @@
         (is (= "--json" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
                                 [:data :title])))))))
 
+(deftest an-outside-docs-dir-is-invalid-config-test
+  (with-tmp tmp
+    (run-knot tmp "init" "--prefix" "kno")
+    (let [cfg (str (fs/path tmp ".knot.edn"))]
+      (spit cfg (str/replace-first (slurp cfg) "\n{" "\n{:docs-dir \"../elsewhere\"")))
+    (let [{:keys [exit out]} (run-knot tmp "check" "--json")]
+      (is (= 2 exit))
+      (is (= "config_invalid" (get-in (json/parse-string out true) [:error :code]))))
+    (let [{:keys [out]} (run-knot tmp "info" "--json")]
+      (is (= "config_invalid" (get-in (json/parse-string out true) [:error :code]))))))
+
 (deftest check-table-shows-a-dash-for-a-document-with-no-id-test
   (with-tmp tmp
     (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
