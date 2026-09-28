@@ -847,9 +847,9 @@ before issuing other Knot commands.")
     (section-has-docs? tickets) (conj :docs)))
 
 (defn- prime-in-progress-line
-  "Format an in-progress ticket as `id  type  mode  pri  age  title` (6
-   cols), or with an AC slot before the title (`id  type  mode  pri  age
-   ac  title`, 7 cols) when `ac-column?` is true. Missing fields render
+  "Format an in-progress ticket as `id  type  mode  pri  age  [ac]  [docs]
+   title`. The bracketed slots appear when `cols` holds `:ac` or `:docs`
+   (see `prime-columns`). Missing fields render
    as `-` so columns stay aligned. The age column comes from
    `:age-days` (set by the cli pipeline from `:updated` and `now-iso`,
    via the helper shared with list / ready / blocked / closed); see
@@ -873,9 +873,9 @@ before issuing other Knot commands.")
          (or ac "") (or docs "") title)))
 
 (defn- prime-ready-line
-  "Format a ready ticket as `id  type  mode  pri  title` (5 cols), or
-   `id  type  mode  pri  ac  title` (6 cols) when `ac-column?` is true.
-   Missing fields render as `-` so columns stay aligned. Whitespace-only
+  "Format a ready ticket as `id  type  mode  pri  [ac]  [docs]  title`. The
+   bracketed slots appear when `cols` holds `:ac` or `:docs` (see
+   `prime-columns`). Missing fields render as `-` so columns stay aligned. Whitespace-only
    — no ANSI codes — because prime output is consumed by AI agents."
   [ticket cols]
   (let [fm    (:frontmatter ticket)
@@ -946,10 +946,10 @@ before issuing other Knot commands.")
      5. `## Ready` ticket lines (with behavioral nudge and optional footer)
      6. `## Recently Closed` (omitted when no entries are supplied — gives
         agents a 'what shipped lately' view without scrolling the archive)
-   Ready rows are `id  type  mode  pri  title` (5 cols, +1 for AC slot
-   when any ticket in the section has acceptance); In Progress and
-   Ready-to-close rows are `id  type  mode  pri  age  title` (6 cols, +1
-   for AC slot). Caller controls sort and limit — this function does not
+   Ready rows are `id  type  mode  pri  [ac]  [docs]  title`; In Progress
+   and Ready-to-close rows add `age` after `pri`. Each section shows the
+   AC or DOCS slot when any of its tickets has acceptance criteria or
+   documents. Caller controls sort and limit — this function does not
    reorder or truncate."
   [{:keys [project in-progress ready-to-close ready ready-truncated? ready-remaining
            recently-closed mode afk-mode skill-installed? skill-notice]
