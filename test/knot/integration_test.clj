@@ -3830,7 +3830,7 @@
             "a document id carries the -d marker that distinguishes it from a ticket id")
         (is (not (re-matches #"[a-z0-9]+-01[0-9a-z]+" did)))
 
-        (let [{:keys [exit out]} (run-knot tmp "document" "ls" tid "--json")
+        (let [{:keys [exit out]} (run-knot tmp "document" "list" tid "--json")
               docs (get-in (json/parse-string out true) [:data :documents])]
           (is (zero? exit))
           (is (= ["Rollout plan"] (mapv :title docs)))
@@ -3840,7 +3840,7 @@
           (is (zero? exit))
           (is (= "step one" (get-in (json/parse-string out true) [:data :body]))))
 
-        (let [{:keys [exit]} (run-knot tmp "document" "put" did
+        (let [{:keys [exit]} (run-knot tmp "document" "replace" did
                                        "--title" "Rollout plan v2" "--type" "spec"
                                        "step two")
               {:keys [out]}  (run-knot tmp "document" "show" did "--json")
@@ -3850,8 +3850,8 @@
           (is (= "spec" (:type d)))
           (is (= "step two" (:body d))))
 
-        (let [{:keys [exit]} (run-knot tmp "document" "rm" did)
-              {:keys [out]}  (run-knot tmp "document" "ls" tid "--json")]
+        (let [{:keys [exit]} (run-knot tmp "document" "delete" did)
+              {:keys [out]}  (run-knot tmp "document" "list" tid "--json")]
           (is (zero? exit))
           (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
 
@@ -3871,13 +3871,13 @@
   (testing "put on a selector that matches nothing emits doc_not_found and creates nothing"
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
-            {:keys [exit out]} (run-knot tmp "document" "put" "kno-dnope"
+            {:keys [exit out]} (run-knot tmp "document" "replace" "kno-dnope"
                                          "--title" "T" "--type" "spec" "--json" "b")
             parsed (json/parse-string out true)]
         (is (= 1 exit))
         (is (false? (:ok parsed)))
         (is (= "doc_not_found" (get-in parsed [:error :code])))
-        (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+        (let [{:keys [out]} (run-knot tmp "document" "list" tid "--json")]
           (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
 
   (testing "an ambiguous selector emits ambiguous_doc with its candidates"
@@ -3906,7 +3906,7 @@
         (is (= "invalid_doc_type" (get-in parsed [:error :code])))
         (is (= "wat" (get-in parsed [:error :value])))
         (is (= ["spec" "plan" "other"] (get-in parsed [:error :allowed])))
-        (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+        (let [{:keys [out]} (run-knot tmp "document" "list" tid "--json")]
           (is (= [] (get-in (json/parse-string out true) [:data :documents])))))))
 
   (testing "documents never appear in the ticket corpus, and check stays clean"
@@ -4023,7 +4023,7 @@
         (let [{:keys [exit err]} (run-knot tmp "delete" tid)]
           (is (= 1 exit))
           (is (str/includes? err did))
-          (is (str/includes? err "knot document rm")))
+          (is (str/includes? err "knot document delete")))
         (is (= 1 (count (get-in (json/parse-string
                                  (:out (run-knot tmp "list" "--json")) true) [:data])))
             "a refused delete removes nothing"))))
@@ -4055,12 +4055,12 @@
                 [["add without --title"
                   ["document" "add" tid "body"]
                   "knot document add: --title is required"]
-                 ["put without --title"
-                  ["document" "put" "kno-dx" "--type" "spec" "body"]
-                  "knot document put: --title is required"]
-                 ["put without --type"
-                  ["document" "put" "kno-dx" "--title" "T" "body"]
-                  "knot document put: --type is required"]
+                 ["replace without --title"
+                  ["document" "replace" "kno-dx" "--type" "spec" "body"]
+                  "knot document replace: --title is required"]
+                 ["replace without --type"
+                  ["document" "replace" "kno-dx" "--title" "T" "body"]
+                  "knot document replace: --type is required"]
                  ["show with no match"
                   ["document" "show" "kno-dnope"]
                   "knot document show: document not found: kno-dnope"]]]
@@ -4068,7 +4068,7 @@
                 line (str/trim (last (remove str/blank? (str/split-lines err))))]
             (is (= 1 exit) label)
             (is (= expected line) label)
-            (is (= 1 (count (re-seq #"document (add|put|show|rm|ls):" line)))
+            (is (= 1 (count (re-seq #"document (add|replace|show|delete|list):" line)))
                 (str label " — the prefix must appear once, not twice"))))))))
 
 (defn- plant-doc-file!
@@ -4167,7 +4167,7 @@
             "and nothing was written to the default root")
 
         (testing "ls and show resolve the configured root"
-          (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+          (let [{:keys [out]} (run-knot tmp "document" "list" tid "--json")]
             (is (= ["Design"] (mapv :title (get-in (json/parse-string out true)
                                                    [:data :documents])))))
           (let [{:keys [out]} (run-knot tmp "document" "show" did "--json")]
@@ -4186,11 +4186,11 @@
             (is (= 1 (get-in (json/parse-string out true) [:data :counts :doc_count])))))
 
         (testing "put and rm reach it too"
-          (run-knot tmp "document" "put" did "--title" "Design v2" "--type" "plan" "new")
+          (run-knot tmp "document" "replace" did "--title" "Design v2" "--type" "plan" "new")
           (let [{:keys [out]} (run-knot tmp "document" "show" did "--json")]
             (is (= "new" (get-in (json/parse-string out true) [:data :body]))))
-          (run-knot tmp "document" "rm" did)
-          (let [{:keys [out]} (run-knot tmp "document" "ls" tid "--json")]
+          (run-knot tmp "document" "delete" did)
+          (let [{:keys [out]} (run-knot tmp "document" "list" tid "--json")]
             (is (= [] (get-in (json/parse-string out true) [:data :documents]))))))))
 
   (testing "the default still tracks a renamed tickets dir"
@@ -4355,7 +4355,7 @@
           (is (zero? exit) "a warning does not fail the check"))
 
         (testing "every document surface agrees they are gone"
-          (is (str/includes? (:out (run-knot tmp "document" "ls" tid))
+          (is (str/includes? (:out (run-knot tmp "document" "list" tid))
                              "has no documents"))
           (is (= [] (get-in (json/parse-string
                              (:out (run-knot tmp "show" tid "--json")) true)

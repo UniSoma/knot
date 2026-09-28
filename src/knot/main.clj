@@ -366,7 +366,7 @@
                (str "drop each reference first "
                     "(`knot undep`, `knot unlink`, "
                     "or `knot update <id> --parent \"\"`), "
-                    "remove each document (`knot document rm`), "
+                    "remove each document (`knot document delete`), "
                     "and re-run — or pass --cascade.")])]
         (println (str "knot " cmd-name ": " msg suffix))
         (doseq [item items]
@@ -1494,52 +1494,52 @@
      #(cli/document-show-cmd (discover-ctx)
                              {:id selector :ticket (:ticket opts) :json? json?}))))
 
-(defn- document-put-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/put))
+(defn- document-replace-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/replace))
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
-      (die "knot document put: a selector is required"))
+      (die "knot document replace: a selector is required"))
     (run-document!
-     "put" json?
-     #(cli/document-put-cmd
+     "replace" json?
+     #(cli/document-replace-cmd
        (discover-ctx)
        (merge (document-body-opts (variadic-text args))
               {:id     selector :ticket (:ticket opts)
                :title  (:title opts) :type (:type opts)
                :json?  json?})))))
 
-(defn- document-rm-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/rm))
+(defn- document-delete-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/delete))
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
-      (die "knot document rm: a selector is required"))
+      (die "knot document delete: a selector is required"))
     (run-document!
-     "rm" json?
-     #(cli/document-rm-cmd (discover-ctx)
-                           {:id selector :ticket (:ticket opts) :json? json?}))))
+     "delete" json?
+     #(cli/document-delete-cmd (discover-ctx)
+                               {:id selector :ticket (:ticket opts) :json? json?}))))
 
-(defn- document-ls-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/ls))
+(defn- document-list-handler [argv]
+  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/list))
         json? (boolean (:json opts))
         tid   (first args)]
     (when (or (nil? tid) (str/blank? tid))
-      (die "knot document ls: a ticket id is required"))
+      (die "knot document list: a ticket id is required"))
     (run-document!
-     "ls" json? #(cli/document-ls-cmd (discover-ctx) {:ticket tid :json? json?}))))
+     "list" json? #(cli/document-list-cmd (discover-ctx) {:ticket tid :json? json?}))))
 
 (defn- document-handler
   "Route `knot document ...`. Five subcommands; bare `knot document`
    prints the group help and exits 1, like `knot skill`."
   [argv]
   (case (first argv)
-    "add"  (document-add-handler  (rest argv))
-    "show" (document-show-handler (rest argv))
-    "put"  (document-put-handler  (rest argv))
-    "rm"   (document-rm-handler   (rest argv))
-    "ls"   (document-ls-handler   (rest argv))
-    nil    (do (print-command-help :document) (System/exit 1))
+    "add"     (document-add-handler     (rest argv))
+    "show"    (document-show-handler    (rest argv))
+    "replace" (document-replace-handler (rest argv))
+    "delete"  (document-delete-handler  (rest argv))
+    "list"    (document-list-handler    (rest argv))
+    nil       (do (print-command-help :document) (System/exit 1))
     (die (str "knot document: unknown subcommand: " (first argv)))))
 
 (defn- help-requested?

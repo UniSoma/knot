@@ -349,7 +349,7 @@
     :link :unlink
     :ready :blocked :closed
     :add-note :edit
-    :document :document/add :document/show :document/put :document/rm :document/ls})
+    :document :document/add :document/show :document/replace :document/delete :document/list})
 
 (deftest registry-parity-test
   (testing "every dispatched command has a registry entry"
@@ -914,7 +914,7 @@
 
 (deftest document-group-registry-test
   (testing "the group registers its five subcommands"
-    (is (= [:document/add :document/show :document/put :document/rm :document/ls]
+    (is (= [:document/add :document/show :document/replace :document/delete :document/list]
            (get-in help/registry [:document :subcommands])))
     (doseq [k (get-in help/registry [:document :subcommands])]
       (is (contains? help/registry k) (str "missing subcommand entry: " k))))
@@ -927,13 +927,13 @@
     (is (nil? (help/resolve-key help/registry "docs")))
     (is (nil? (:aliases (get help/registry :document)))))
 
-  (testing "put declares the flags its total-replace semantics require"
-    (let [flags (set (map :name (get-in help/registry [:document/put :flags])))]
+  (testing "replace declares the flags its total-replace semantics require"
+    (let [flags (set (map :name (get-in help/registry [:document/replace :flags])))]
       (is (contains? flags :title))
       (is (contains? flags :type))
       (is (contains? flags :json))))
 
-  (testing "the replace-is-total and never-creates caveats live in put's notes"
-    (let [notes (str/join " " (get-in help/registry [:document/put :notes]))]
+  (testing "the replace-is-total and never-creates caveats live in replace's notes"
+    (let [notes (str/join " " (get-in help/registry [:document/replace :notes]))]
       (is (str/includes? notes "not a merge"))
       (is (str/includes? notes "never creates")))))

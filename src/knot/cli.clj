@@ -653,7 +653,7 @@
             ;; target, so the gate costs nothing in the common case where
             ;; :required-docs is empty.
             ;; Directory-scoped read, then filtered by the authoritative
-            ;; `ticket` field, exactly as `show` and `document ls` do. The
+            ;; `ticket` field, exactly as `show` and `document list` do. The
             ;; directory scopes; the field decides. Unfiltered, a ticket
             ;; passes its gate on a document that belongs to another one.
             docs*    (delay (query/documents-for
@@ -1381,7 +1381,7 @@
             ;; paths and not others makes the ungated one a documented
             ;; bypass.
             ;; Directory-scoped read, then filtered by the authoritative
-            ;; `ticket` field, exactly as `show` and `document ls` do. The
+            ;; `ticket` field, exactly as `show` and `document list` do. The
             ;; directory scopes; the field decides. Unfiltered, a ticket
             ;; passes its gate on a document that belongs to another one.
             docs*    (delay (query/documents-for
@@ -2237,7 +2237,7 @@
       (output/envelope-str (assoc (doc->json d) :body (:body d)))
       (ticket/render {:frontmatter (:frontmatter d) :body (:body d)}))))
 
-(defn document-put-cmd
+(defn document-replace-cmd
   "Replace a document: title, type and body together. Refuses a selector
    that matches nothing — creation is `document add`, and an update that
    silently created would let a mistyped selector produce a second document
@@ -2276,7 +2276,7 @@
         (output/envelope-str (doc->json (ticket/parse (slurp path))))
         path))))
 
-(defn document-rm-cmd
+(defn document-delete-cmd
   "Delete the one document `(:id opts)` resolves to. Refuses an ambiguous
    selector rather than deleting a first match."
   [ctx {:keys [id ticket json?]}]
@@ -2290,7 +2290,7 @@
                                       :path (fs/unixify removed)}})
       removed)))
 
-(defn document-ls-cmd
+(defn document-list-cmd
   "List the documents owned by `(:ticket opts)`, in filename order. A ticket
    owning none lists an empty set, not an error: absent and empty are
    the same answer."

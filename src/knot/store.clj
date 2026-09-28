@@ -591,7 +591,7 @@
 
    The corpus-wide check is the one deliberately unscoped cost here. It does
    not weaken the per-owner read invariant that governs the hot path (`show`,
-   `document ls`) — a create is not that path, and the check is one
+   `document list`) — a create is not that path, and the check is one
    filename-only glob with no parsing.
 
    Returns the written path. `opts` is `{:now <iso-string?>

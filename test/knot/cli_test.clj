@@ -6380,11 +6380,11 @@ Restart the daemon.
         (is (fs/exists? p))
         (is (= "" (:body (ticket/parse (slurp p)))))))))
 
-(deftest document-put-refuses-missing-target-test
+(deftest document-replace-refuses-missing-target-test
   (testing "replace never upserts: a mistyped selector must not create a second document"
     (with-tmp tmp
-      (let [e (try (cli/document-put-cmd (ctx tmp) {:id "kno-dnope" :title "T"
-                                                    :type "spec" :text "b"})
+      (let [e (try (cli/document-replace-cmd (ctx tmp) {:id "kno-dnope" :title "T"
+                                                        :type "spec" :text "b"})
                    nil
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :doc-not-found (:kind (ex-data e))))
@@ -6395,8 +6395,8 @@ Restart the daemon.
       (let [owner (mk-owner! tmp "Owner")
             p     (create-doc tmp owner "Old" "spec" "one")]
         (doseq [missing [{:type "spec"} {:title "New"}]]
-          (let [e (try (cli/document-put-cmd (ctx tmp)
-                                             (merge {:id (doc-id p) :text "two"} missing))
+          (let [e (try (cli/document-replace-cmd (ctx tmp)
+                                                 (merge {:id (doc-id p) :text "two"} missing))
                        nil
                        (catch clojure.lang.ExceptionInfo ex ex))]
             (is (= :invalid-argument (:kind (ex-data e))))))
@@ -6407,22 +6407,22 @@ Restart the daemon.
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             p     (create-doc tmp owner "Old" "spec" "one")
-            e     (try (cli/document-put-cmd (ctx tmp) {:id (doc-id p) :title "New"
-                                                        :type "wat" :text "two"})
+            e     (try (cli/document-replace-cmd (ctx tmp) {:id (doc-id p) :title "New"
+                                                            :type "wat" :text "two"})
                        nil
                        (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :invalid-doc-type (:kind (ex-data e))))
         (is (= "one" (:body (ticket/parse (slurp p)))))))))
 
-(deftest document-put-preserves-created-test
+(deftest document-replace-preserves-created-test
   (testing "replace is total over fields but preserves the creation stamp"
     (with-tmp tmp
       (let [owner   (mk-owner! tmp "Owner")
             p       (create-doc tmp owner "Old" "spec" "one")
             created (get-in (ticket/parse (slurp p)) [:frontmatter :created])
-            _       (cli/document-put-cmd (assoc (ctx tmp) :now "2026-05-01T00:00:00Z")
-                                          {:id (doc-id p) :title "New"
-                                           :type "plan" :text "two"})
+            _       (cli/document-replace-cmd (assoc (ctx tmp) :now "2026-05-01T00:00:00Z")
+                                              {:id (doc-id p) :title "New"
+                                               :type "plan" :text "two"})
             after   (:frontmatter (ticket/parse (slurp p)))]
         (is (= created (:created after)))
         (is (= "2026-05-01T00:00:00Z" (:updated after)))
@@ -6434,8 +6434,8 @@ Restart the daemon.
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             p     (create-doc tmp owner "Old" "spec" "one")]
-        (cli/document-put-cmd (ctx tmp) {:id (doc-id p) :title "Completely different"
-                                         :type "spec" :text "one"})
+        (cli/document-replace-cmd (ctx tmp) {:id (doc-id p) :title "Completely different"
+                                             :type "spec" :text "one"})
         (is (fs/exists? p))
         (is (= 1 (count (store/load-docs-for (droot tmp) owner))))))))
 
@@ -6482,14 +6482,14 @@ Restart the daemon.
         (is (= "the body" (get-in d [:data :body])))
         (is (= owner (get-in d [:data :ticket])))))))
 
-(deftest document-rm-cmd-test
+(deftest document-delete-cmd-test
   (testing "delete removes exactly one and leaves siblings byte-identical"
     (with-tmp tmp
       (let [owner   (mk-owner! tmp "Owner")
             a       (create-doc tmp owner "A" "spec" "a")
             b       (create-doc tmp owner "B" "spec" "b")
             a-bytes (slurp a)]
-        (cli/document-rm-cmd (ctx tmp) {:id (doc-id b)})
+        (cli/document-delete-cmd (ctx tmp) {:id (doc-id b)})
         (is (not (fs/exists? b)))
         (is (fs/exists? a))
         (is (= a-bytes (slurp a))))))
@@ -6498,7 +6498,7 @@ Restart the daemon.
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             a     (create-doc tmp owner "A" "spec" "a")
-            e     (try (cli/document-rm-cmd (ctx tmp) {:id "kno-dnope"}) nil
+            e     (try (cli/document-delete-cmd (ctx tmp) {:id "kno-dnope"}) nil
                        (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :doc-not-found (:kind (ex-data e))))
         (is (fs/exists? a)))))
@@ -6509,12 +6509,12 @@ Restart the daemon.
             a     (create-doc tmp owner "A" "spec" "a")
             did   (doc-id a)
             d     (cheshire/parse-string
-                   (cli/document-rm-cmd (ctx tmp) {:id did :json? true}) true)]
+                   (cli/document-delete-cmd (ctx tmp) {:id did :json? true}) true)]
         (is (= did (get-in d [:data :deleted :id])))
         (is (str/ends-with? (get-in d [:data :deleted :path]) ".md"))
         (is (not (fs/exists? a)))))))
 
-(deftest document-ls-cmd-test
+(deftest document-list-cmd-test
   (testing "ls lists one owner's documents, ordered by filename"
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
@@ -6523,7 +6523,7 @@ Restart the daemon.
             _     (create-doc tmp owner "Alpha" "plan" "a")
             _     (create-doc tmp other "Gamma" "spec" "g")
             d     (cheshire/parse-string
-                   (cli/document-ls-cmd (ctx tmp) {:ticket owner :json? true}) true)]
+                   (cli/document-list-cmd (ctx tmp) {:ticket owner :json? true}) true)]
         (is (= owner (get-in d [:data :ticket])))
         (is (= ["Bravo" "Alpha"] (mapv :title (get-in d [:data :documents])))
             "filename order — the id leads, and ids are minted monotonically")
@@ -6533,7 +6533,7 @@ Restart the daemon.
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             d     (cheshire/parse-string
-                   (cli/document-ls-cmd (ctx tmp) {:ticket owner :json? true}) true)]
+                   (cli/document-list-cmd (ctx tmp) {:ticket owner :json? true}) true)]
         (is (= [] (get-in d [:data :documents])))))))
 
 (deftest delete-refuses-while-documents-exist-test
@@ -6632,7 +6632,7 @@ Restart the daemon.
         (is (= 1 (count (get-in d [:data :documents]))))
         (is (= owner (get-in d [:data :deleted :id])))))))
 
-(deftest document-rm-refuses-an-ambiguous-selector-test
+(deftest document-delete-refuses-an-ambiguous-selector-test
   ;; AC-9c's second half. The no-match branch was covered; this is the one
   ;; where picking a first match would silently delete the wrong file.
   (testing "rm refuses an ambiguous selector and removes nothing"
@@ -6640,7 +6640,7 @@ Restart the daemon.
       (let [owner (mk-owner! tmp "Owner")
             a     (create-doc tmp owner "Design" "spec" "a")
             b     (create-doc tmp owner "Design" "plan" "b")
-            e     (try (cli/document-rm-cmd (ctx tmp) {:id "Design" :ticket owner}) nil
+            e     (try (cli/document-delete-cmd (ctx tmp) {:id "Design" :ticket owner}) nil
                        (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :ambiguous-doc (:kind (ex-data e))))
         (is (= (sort [(doc-id a) (doc-id b)]) (sort (:candidates (ex-data e)))))
@@ -6658,9 +6658,9 @@ Restart the daemon.
     (with-tmp tmp
       (let [owner (mk-owner! tmp "Owner")
             p     (create-doc tmp owner "Original title" "spec" "body")]
-        (cli/document-put-cmd (ctx tmp) {:id (doc-id p)
-                                         :title "Completely unrelated now"
-                                         :type "spec" :text "body"})
+        (cli/document-replace-cmd (ctx tmp) {:id (doc-id p)
+                                             :title "Completely unrelated now"
+                                             :type "spec" :text "body"})
         (is (str/includes? p "original-title")
             "the filename still carries the ORIGINAL slug")
         (is (= "Completely unrelated now"
@@ -6670,7 +6670,7 @@ Restart the daemon.
           (is (empty? issues)
               (str "check must stay silent about a stale slug, got " (pr-str issues))))))))
 
-(deftest document-put-on-a-misplaced-document-test
+(deftest document-replace-on-a-misplaced-document-test
   ;; R10: the ticket field is authoritative, the directory is a locator.
   ;; Recomputing the write path from the field made `put` fail doc_not_found
   ;; on a document that plainly exists.
@@ -6684,8 +6684,8 @@ Restart the daemon.
             moved (str (fs/path (store/owner-dir (droot tmp) b) (fs/file-name p)))]
         (fs/create-dirs (store/owner-dir (droot tmp) b))
         (fs/move p moved)
-        (is (= moved (cli/document-put-cmd (ctx tmp) {:id did :title "Design v2"
-                                                      :type "plan" :text "two"}))
+        (is (= moved (cli/document-replace-cmd (ctx tmp) {:id did :title "Design v2"
+                                                          :type "plan" :text "two"}))
             "the replace writes the file that exists, not one recomputed from the field")
         (is (= "two" (:body (ticket/parse (slurp moved)))))
         (is (= 1 (count (store/load-all-docs (droot tmp))))
@@ -6753,7 +6753,7 @@ Restart the daemon.
         (create-doc tmp a "One" "spec" "1")
         (is (str/includes? (cli/info-cmd (ctx tmp) {}) "Doc count: 1"))))))
 
-(deftest show-and-ls-honour-the-authoritative-ticket-field-test
+(deftest show-and-list-honour-the-authoritative-ticket-field-test
   ;; R10: the `ticket` field is authoritative, the directory is a locator.
   ;; A document filed under Alpha while its frontmatter names Bravo is not
   ;; Alpha's to list — listing it there would make `show` assert an ownership
@@ -6771,7 +6771,7 @@ Restart the daemon.
                              (cli/show-cmd (ctx tmp) {:id a :json? true}) true)
                             [:data :documents])
               listed (get-in (cheshire/parse-string
-                              (cli/document-ls-cmd (ctx tmp) {:ticket a :json? true}) true)
+                              (cli/document-list-cmd (ctx tmp) {:ticket a :json? true}) true)
                              [:data :documents])]
           (is (= [] shown) "show must not claim it for the directory's ticket")
           (is (= [] listed) "nor must ls"))

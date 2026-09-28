@@ -746,10 +746,10 @@
     :args        []
     :restrict?   true
     :flags       []
-    :subcommands [:document/add :document/show :document/put :document/rm :document/ls]
+    :subcommands [:document/add :document/show :document/replace :document/delete :document/list]
     :notes       ["A document is a whole markdown file owned by one ticket, stored under .knot.edn's :docs-dir (default <tickets-dir>/docs) in a directory named for the owning ticket. Its type must be one of :doc-types."
                   "The command is `document`; no `doc` or `docs` alias exists."]
-    :examples    [{:cmd "knot document ls kno-01abc"
+    :examples    [{:cmd "knot document list kno-01abc"
                    :note "List the documents a ticket owns."}]
     :exit-codes  [{:code 1 :when "no subcommand given — `document` is a group; run a subcommand"}]}
 
@@ -788,7 +788,7 @@
     :exit-codes  [{:code 0 :when "document printed"}
                   {:code 1 :when "no document matches, or the selector is ambiguous"}]}
 
-   :document/put
+   :document/replace
    {:group       :documents
     :description "Replace a document's title, type and body together."
     :args        [{:name "selector" :required true}
@@ -800,14 +800,14 @@
                   {:name :json :coerce :boolean
                    :desc "Emit a JSON envelope (the replaced document's metadata) instead of the saved path."}]
     :notes       ["This is a replace, not a merge: --title and --type are both required, and the body is replaced by whatever the layered input resolves to. Nothing is carried over from the stored document except its id, its owning ticket and its creation timestamp."
-                  "A selector matching no document is refused. put never creates — that is `knot document add`."
+                  "A selector matching no document is refused. replace never creates — that is `knot document add`."
                   "A retitle does not rename the file; the filename slug is recovered from the existing file, exactly as it is for tickets."]
-    :examples    [{:cmd "knot document put kno-d01abc --title \"Rollout plan v2\" --type plan \"new body\""
+    :examples    [{:cmd "knot document replace kno-d01abc --title \"Rollout plan v2\" --type plan \"new body\""
                    :note "Replace the whole document."}]
     :exit-codes  [{:code 0 :when "document replaced"}
                   {:code 1 :when "no document matches, the selector is ambiguous, --title/--type is missing, or the type is not in :doc-types"}]}
 
-   :document/rm
+   :document/delete
    {:group       :documents
     :description "Delete one document."
     :args        [{:name "selector" :required true}]
@@ -815,12 +815,12 @@
     :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope ({deleted: {id, path}}) instead of the removed path."}]
     :notes       ["An ambiguous selector is refused instead of deleting a first match. Git is the undo path."]
-    :examples    [{:cmd "knot document rm kno-d01abc"
+    :examples    [{:cmd "knot document delete kno-d01abc"
                    :note "Delete a document by id."}]
     :exit-codes  [{:code 0 :when "document removed"}
                   {:code 1 :when "no document matches, or the selector is ambiguous"}]}
 
-   :document/ls
+   :document/list
    {:group       :documents
     :description "List the documents a ticket owns."
     :args        [{:name "ticket" :required true}]
@@ -828,7 +828,7 @@
     :flags       [{:name :json :coerce :boolean
                    :desc "Emit a JSON envelope ({ticket, documents}) instead of the text table."}]
     :notes       ["A ticket owning no documents lists an empty set and exits 0: absent and empty are the same answer."]
-    :examples    [{:cmd "knot document ls kno-01abc"
+    :examples    [{:cmd "knot document list kno-01abc"
                    :note "List one ticket's documents."}]
     :exit-codes  [{:code 0 :when "documents listed (possibly none)"}
                   {:code 1 :when "no ticket matches"}]}})
