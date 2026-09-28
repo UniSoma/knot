@@ -1474,15 +1474,16 @@
           (emit-document-failure! e data)
           (die (str "knot document " sub ": " (.getMessage e))))))))
 
-(defn- flag-value
-  "`(k opts)`, refused when it is `true`: babashka.cli binds a value flag given
-   no value to `true`."
-  [opts k]
-  (let [v (get opts k)]
-    (when (true? v)
-      (throw (ex-info (str "--" (name k) " needs a value")
-                      {:kind :invalid-argument :field k})))
-    v))
+(defn- parse-document-args
+  "`bcli/parse-args` for document subcommand `k`, with value flags
+   pre-extracted as every other command does. A refusal goes through
+   `run-document!`, so `--json` still gets the document envelope."
+  [argv k]
+  (try
+    (let [{:keys [value-opts argv]} (extract-value-flags argv (get help/registry k))]
+      (update (bcli/parse-args argv (spec k)) :opts merge value-opts))
+    (catch clojure.lang.ExceptionInfo e
+      (run-document! (name k) (boolean (some #{"--json"} argv)) #(throw e)))))
 
 (defn- require-opt!
   "Throw the `:invalid-argument` ex-info `run-document!` knows how to
@@ -1511,23 +1512,23 @@
   (when (>= (count args) 2) (str/join " " (rest args))))
 
 (defn- document-add-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/add))
+  (let [{:keys [args opts]} (parse-document-args argv :document/add)
         json? (boolean (:json opts))
         tid   (first args)]
     (when (or (nil? tid) (str/blank? tid))
       (die "knot document add: a ticket id is required"))
     (run-document!
      "add" json?
-     #(let [title (flag-value opts :title)]
+     #(let [title (:title opts)]
         (require-opt! "--title" title)
         (cli/document-add-cmd
          (discover-ctx)
          (merge (document-body-opts (variadic-text args))
-                {:ticket tid :title title :type (flag-value opts :type)
+                {:ticket tid :title title :type (:type opts)
                  :json?  json?}))))))
 
 (defn- document-show-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/show))
+  (let [{:keys [args opts]} (parse-document-args argv :document/show)
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
@@ -1535,11 +1536,11 @@
     (run-document!
      "show" json?
      #(cli/document-show-cmd (discover-ctx)
-                             {:id selector :ticket (flag-value opts :ticket)
-                              :type (flag-value opts :type) :json? json?}))))
+                             {:id selector :ticket (:ticket opts)
+                              :type (:type opts) :json? json?}))))
 
 (defn- document-replace-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/replace))
+  (let [{:keys [args opts]} (parse-document-args argv :document/replace)
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
@@ -1549,12 +1550,12 @@
      #(cli/document-replace-cmd
        (discover-ctx)
        (merge (document-body-opts (variadic-text args))
-              {:id     selector :ticket (flag-value opts :ticket)
-               :title  (flag-value opts :title) :type (flag-value opts :type)
+              {:id     selector :ticket (:ticket opts)
+               :title  (:title opts) :type (:type opts)
                :json?  json?})))))
 
 (defn- document-delete-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/delete))
+  (let [{:keys [args opts]} (parse-document-args argv :document/delete)
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
@@ -1562,10 +1563,10 @@
     (run-document!
      "delete" json?
      #(cli/document-delete-cmd (discover-ctx)
-                               {:id selector :ticket (flag-value opts :ticket) :json? json?}))))
+                               {:id selector :ticket (:ticket opts) :json? json?}))))
 
 (defn- document-list-handler [argv]
-  (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/list))
+  (let [{:keys [args opts]} (parse-document-args argv :document/list)
         json? (boolean (:json opts))
         tid   (first args)]
     (when (or (nil? tid) (str/blank? tid))

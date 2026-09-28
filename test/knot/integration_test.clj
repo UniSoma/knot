@@ -4008,6 +4008,17 @@
         (is (str/blank? out) (str/join " " argv))
         (is (str/includes? err "needs a value") (str/join " " argv))))))
 
+(deftest document-flags-accept-a-dash-leading-value-test
+  (with-tmp tmp
+    (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+          did (doc-id-from-json (:out (run-knot tmp "document" "add" tid "--title" "-draft notes"
+                                                "--type" "spec" "--json" "b")))
+          title #(get-in (json/parse-string (:out (run-knot tmp "document" "show" did "--json")) true)
+                         [:data :title])]
+      (is (= "-draft notes" (title)))
+      (is (zero? (:exit (run-knot tmp "document" "replace" did "--title" "-v2" "--type" "spec" "c"))))
+      (is (= "-v2" (title))))))
+
 (deftest a-value-flag-given-no-value-is-refused-test
   (with-tmp tmp
     (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
