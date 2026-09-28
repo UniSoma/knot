@@ -771,7 +771,10 @@
                                                                         owned)))))
                                "; it owns no documents"))
                         {:kind :not-found :input owner-id :type type}))
-      (ambiguous! owner-id hits))))
+      (let [ids (mapv #(get-in % [:frontmatter :id]) hits)]
+        (throw (ex-info (str "ambiguous: " (count ids) " " type " documents on " owner-id ": "
+                             (str/join ", " ids))
+                        {:kind :ambiguous :input owner-id :candidates ids}))))))
 
 (defn delete-doc!
   "Unlink the document file at `path` and return the path string. A sibling

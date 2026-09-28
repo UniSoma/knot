@@ -4156,7 +4156,9 @@
         (testing "several of that type refuses with the candidates named"
           (let [{:keys [exit err]} (run-knot tmp "document" "show" tid "--type" "plan")]
             (is (= 1 exit))
-            (is (str/includes? err "ambiguous")))
+            (is (str/includes? err "ambiguous"))
+            (is (str/includes? err (str "2 plan documents on " tid))
+                "the ticket is the owner, not the ambiguous selector"))
           (let [{:keys [out]} (run-knot tmp "document" "show" tid "--type" "plan" "--json")
                 e (:error (json/parse-string out true))]
             (is (= "ambiguous_doc" (:code e)))
