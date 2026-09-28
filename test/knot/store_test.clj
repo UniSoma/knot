@@ -615,20 +615,22 @@
     ;; pass vacuously — which is exactly the defect this case was written to
     ;; replace, so it must not be reintroduced here. CI containers commonly
     ;; run as root, so this is a live path, not a hypothetical one.
-    (with-tmp tmp
-      (let [locked (fs/path tmp "locked")]
-        (fs/create-dirs locked)
-        (fs/set-posix-file-permissions locked "r-xr-xr-x")
-        (try
-          (if (fs/writable? locked)
-            (println (str "SKIP write-new-classifies-failures-test: this process can "
-                          "write to a mode r-xr-xr-x directory (uid 0?), so the "
-                          "non-collision IO failure cannot be provoked here."))
-            (is (thrown? java.io.IOException
-                         (store/write-new! (fs/path locked "z.md")
-                                           (.getBytes "x" "UTF-8")))))
-          (finally
-            (fs/set-posix-file-permissions locked "rwxr-xr-x")))))))
+    (if (fs/windows?)
+      (println "SKIP write-new-classifies-failures-test: Windows has no POSIX modes to lock a directory with.")
+      (with-tmp tmp
+        (let [locked (fs/path tmp "locked")]
+          (fs/create-dirs locked)
+          (fs/set-posix-file-permissions locked "r-xr-xr-x")
+          (try
+            (if (fs/writable? locked)
+              (println (str "SKIP write-new-classifies-failures-test: this process can "
+                            "write to a mode r-xr-xr-x directory (uid 0?), so the "
+                            "non-collision IO failure cannot be provoked here."))
+              (is (thrown? java.io.IOException
+                           (store/write-new! (fs/path locked "z.md")
+                                             (.getBytes "x" "UTF-8")))))
+            (finally
+              (fs/set-posix-file-permissions locked "rwxr-xr-x"))))))))
 
 (deftest save-new-exhaustion-test
   (testing "save-new! throws :id-collision-exhausted after default max-retries=10"
