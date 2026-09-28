@@ -496,9 +496,14 @@
 
       (not force?)
       (throw (ex-info
+              ;; Count only, no names. `emit-gate-failure!` prints one bullet
+              ;; per missing type below this line, so naming them here stutters
+              ;; on the common single-type case. Both sibling gates already read
+              ;; this way: "3 of 5 acceptance criteria are unchecked",
+              ;; "2 open children block this close".
               (str (count missing) " required document type"
                    (when (> (count missing) 1) "s")
-                   " missing: " (str/join ", " missing))
+                   " missing")
               {:missing-required-docs true
                :missing-doc-types     missing
                :target                target}))

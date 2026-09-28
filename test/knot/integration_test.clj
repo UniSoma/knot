@@ -4281,6 +4281,49 @@
 (deftest required-docs-gate-end-to-end-test
   ;; The gate is only real if it reaches the command. Drives `knot start`
   ;; through the CLI with a configured requirement.
+  (testing "the refusal names each missing type once, in the bullets not the headline"
+    ;; Reported upstream as a nit: the headline listed the types and the bullet
+    ;; list repeated them, which reads as a stutter on the common single-type
+    ;; case. Both sibling gates carry a count and let the bullets do the naming.
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {}"
+                               " :required-docs {\"in_progress\" [\"spec\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [err]} (run-knot tmp "start" tid)]
+        (is (str/includes? err "1 required document type missing")
+            "singular, and the headline carries the count only")
+        (is (= 1 (count (re-seq #"spec" err)))
+            "the type is named exactly once, in the bullet")
+        (is (str/includes? err "  - spec")))
+
+      ;; Two missing types: plural, and the bullet list earns its place.
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {\"in_progress\" [\"spec\"]}"
+                               " :required-docs {\"in_progress\" [\"spec\" \"plan\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")
+            {:keys [err]} (run-knot tmp "start" tid)]
+        (is (str/includes? err "2 required document types missing")
+            "plural on more than one")
+        (is (= 1 (count (re-seq #"spec" err))))
+        (is (= 1 (count (re-seq #"plan" err))))))
+
+    ;; The structured field still carries the names, so a machine reader loses
+    ;; nothing by the headline dropping them.
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :required-docs {}"
+                               " :required-docs {\"in_progress\" [\"spec\"]}")))
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [out]} (run-knot tmp "start" tid "--json")
+            parsed (json/parse-string out true)]
+        (is (= ["spec"] (get-in parsed [:error :missing_doc_types]))))))
+
   (testing "start refuses, names only what's missing, and writes nothing"
     (with-tmp tmp
       (run-knot tmp "init" "--prefix" "kno")
