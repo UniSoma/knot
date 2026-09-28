@@ -3963,6 +3963,14 @@
         (is (= "--json" (get-in (json/parse-string (:out (run-knot tmp "show" tid "--json")) true)
                                 [:data :title])))))))
 
+(deftest check-refuses-a-valueless-flag-as-an-argument-error-test
+  (with-tmp tmp
+    (doseq [argv [["check" "--code"] ["check" "--code" "--json"] ["check" "--severity"]]]
+      (let [{:keys [exit out err]} (apply run-knot tmp argv)]
+        (is (= 2 exit) (str/join " " argv))
+        (is (str/blank? out) (str/join " " argv))
+        (is (str/includes? err "needs a value") (str/join " " argv))))))
+
 (deftest a-value-flag-given-no-value-is-refused-test
   (with-tmp tmp
     (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")

@@ -1195,16 +1195,16 @@
    Argument-parse errors land on stderr with exit 2 (per the
    arg-parsing-stays-on-stderr policy from the JSON-envelope ticket)."
   [argv]
-  (let [{:keys [value-opts argv]} (extract-value-flags
-                                   argv
-                                   (get help/registry :check))
-        parsed                    (try
-                                    (bcli/parse-args argv (spec :check))
-                                    (catch Exception e e))]
+  (let [parsed (try
+                 (let [{:keys [value-opts argv]} (extract-value-flags
+                                                  argv
+                                                  (get help/registry :check))]
+                   (-> (bcli/parse-args argv (spec :check))
+                       (update :opts merge value-opts)))
+                 (catch Exception e e))]
     (if (instance? Exception parsed)
       (check-cannot-scan! false "invalid_argument" (.getMessage ^Exception parsed))
       (let [{:keys [opts args]} parsed
-            opts       (merge opts value-opts)
             json?      (boolean (:json opts))
             cwd        (str (fs/cwd))
             discovered (try (config/discover cwd)
