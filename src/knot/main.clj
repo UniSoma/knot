@@ -341,6 +341,14 @@
   (println-out (output/error-envelope-str error))
   (System/exit 1))
 
+(defn- die-missing-arg
+  "Refuse a missing required positional: an `invalid_argument` envelope
+   under `--json`, else `knot <cmd-name>: <msg>` on stderr. Exits 1."
+  [cmd-name json? msg]
+  (if json?
+    (emit-error-envelope! {:code "invalid_argument" :message msg})
+    (die (str "knot " cmd-name ": " msg))))
+
 (defn- emit-json-failure!
   "Route a command failure to its `--json` error envelope (every branch
    exits 1): the ambiguous_id and not_found envelopes for those two
@@ -437,7 +445,7 @@
         title (first args)
         json? (boolean (:json opts))]
     (when (or (nil? title) (str/blank? title))
-      (die "knot create: a title is required"))
+      (die-missing-arg "create" json? "a title is required"))
     (let [opts (-> opts
                    (merge body-opts)
                    (merge value-opts)
@@ -594,7 +602,7 @@
         id (first args)
         json? (boolean (:json opts))]
     (when (or (nil? id) (str/blank? id))
-      (die "knot show: an id is required"))
+      (die-missing-arg "show" json? "an id is required"))
     (try
       (let [out (cli/show-cmd (discover-ctx) {:id id :json? json?})]
         (cond
@@ -627,8 +635,8 @@
    through; the cli layer rejects it on transitions to non-terminal
    statuses. `--force` bypasses the acceptance gate (requires a
    non-blank `--summary`). Under `--json`, not-found, ambiguous-id, and
-   `acceptance_incomplete` failures route to the v0.3 error envelope;
-   arg-parsing errors stay on stderr."
+   `acceptance_incomplete` failures and a missing positional route to the
+   v0.3 error envelope; other arg-parsing errors stay on stderr."
   [cmd-name cmd-key arg-count transition-fn argv]
   (let [{:keys [value-opts argv]} (extract-value-flags
                                    argv
@@ -637,10 +645,10 @@
         merged                    (merge opts value-opts)
         json?                     (boolean (:json opts))]
     (when (< (count args) arg-count)
-      (die (str "knot " cmd-name ": "
-                (case arg-count
-                  1 "an id is required"
-                  2 "an id and new status are required"))))
+      (die-missing-arg cmd-name json?
+                       (case arg-count
+                         1 "an id is required"
+                         2 "an id and new status are required")))
     (let [id    (first args)
           base  (if (= arg-count 2)
                   {:id id :status (second args)}
@@ -705,7 +713,7 @@
   (let [{:keys [args opts]} (bcli/parse-args argv (spec cmd-key))
         json?               (boolean (:json opts))]
     (when (< (count args) 2)
-      (die (str "knot " cmd-name ": <from> and <to> ids are required")))
+      (die-missing-arg cmd-name json? "<from> and <to> ids are required"))
     (let [[from to] args]
       (try
         (let [out (edge-fn (discover-ctx) {:from from :to to :json? json?})]
@@ -734,7 +742,7 @@
         id    (first args)
         json? (boolean (:json opts))]
     (when (or (nil? id) (str/blank? id))
-      (die "knot dep tree: an id is required"))
+      (die-missing-arg "dep tree" json? "an id is required"))
     (try
       (let [out (cli/dep-tree-cmd (discover-ctx)
                                   {:id    id
@@ -802,7 +810,7 @@
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :link))
         json?               (boolean (:json opts))]
     (when (< (count args) 2)
-      (die "knot link: two or more ticket ids are required"))
+      (die-missing-arg "link" json? "two or more ticket ids are required"))
     (try
       (let [out (cli/link-cmd (discover-ctx) {:ids (vec args) :json? json?})]
         (if json?
@@ -825,7 +833,7 @@
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :unlink))
         json?               (boolean (:json opts))]
     (when (< (count args) 2)
-      (die "knot unlink: <from> and <to> ids are required"))
+      (die-missing-arg "unlink" json? "<from> and <to> ids are required"))
     (try
       (let [out (cli/unlink-cmd (discover-ctx)
                                 {:from (first args) :to (second args)
@@ -870,7 +878,7 @@
         json?               (boolean (:json opts))
         cascade?            (boolean (:cascade opts))]
     (when (or (nil? id) (str/blank? id))
-      (die "knot delete: an id is required"))
+      (die-missing-arg "delete" json? "an id is required"))
     (try
       (let [out (cli/delete-cmd (discover-ctx)
                                 {:id id :json? json? :cascade? cascade?})]
@@ -953,7 +961,7 @@
         text  (when (>= (count args) 2)
                 (str/join " " (rest args)))]
     (when (or (nil? id) (str/blank? id))
-      (die "knot add-note: an id is required"))
+      (die-missing-arg "add-note" json? "an id is required"))
     ;; (System/console) returns nil when *either* stdin or stdout is
     ;; redirected. That handles the common shapes correctly (piped stdin
     ;; reads stdin; pure-interactive opens the editor). The unusual shape
@@ -1027,7 +1035,7 @@
         json? (boolean (:json opts))
         id    (first args)]
     (when (or (nil? id) (str/blank? id))
-      (die "knot update: an id is required"))
+      (die-missing-arg "update" json? "an id is required"))
     (try
       (let [merged (-> opts
                        (merge body-opts)
@@ -1516,7 +1524,7 @@
         json? (boolean (:json opts))
         tid   (first args)]
     (when (or (nil? tid) (str/blank? tid))
-      (die "knot document add: a ticket id is required"))
+      (die-missing-arg "document add" json? "a ticket id is required"))
     (run-document!
      "add" json?
      #(let [title (:title opts)]
@@ -1532,7 +1540,7 @@
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
-      (die "knot document show: a selector is required"))
+      (die-missing-arg "document show" json? "a selector is required"))
     (run-document!
      "show" json?
      #(cli/document-show-cmd (discover-ctx)
@@ -1544,7 +1552,7 @@
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
-      (die "knot document replace: a selector is required"))
+      (die-missing-arg "document replace" json? "a selector is required"))
     (run-document!
      "replace" json?
      #(cli/document-replace-cmd
@@ -1559,7 +1567,7 @@
         json?    (boolean (:json opts))
         selector (first args)]
     (when (or (nil? selector) (str/blank? selector))
-      (die "knot document delete: a selector is required"))
+      (die-missing-arg "document delete" json? "a selector is required"))
     (run-document!
      "delete" json?
      #(cli/document-delete-cmd (discover-ctx)
@@ -1570,7 +1578,7 @@
         json? (boolean (:json opts))
         tid   (first args)]
     (when (or (nil? tid) (str/blank? tid))
-      (die "knot document list: a ticket id is required"))
+      (die-missing-arg "document list" json? "a ticket id is required"))
     (run-document!
      "list" json? #(cli/document-list-cmd (discover-ctx) {:ticket tid :json? json?}))))
 

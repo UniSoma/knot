@@ -4415,6 +4415,42 @@
             (is (= 1 (count (re-seq #"document (add|replace|show|delete|list):" line)))
                 (str label " — the prefix must appear once, not twice"))))))))
 
+(deftest missing-positional-emits-json-envelope-test
+  (testing "under --json a missing positional is an invalid_argument envelope on stdout"
+    (with-tmp tmp
+      (doseq [[argv message]
+              [[["create"] "a title is required"]
+               [["create" ""] "a title is required"]
+               [["show"] "an id is required"]
+               [["start"] "an id is required"]
+               [["status" "kno-x"] "an id and new status are required"]
+               [["dep" "kno-x"] "<from> and <to> ids are required"]
+               [["dep" "tree"] "an id is required"]
+               [["link" "kno-x"] "two or more ticket ids are required"]
+               [["unlink" "kno-x"] "<from> and <to> ids are required"]
+               [["delete"] "an id is required"]
+               [["add-note"] "an id is required"]
+               [["update"] "an id is required"]
+               [["document" "add"] "a ticket id is required"]
+               [["document" "show"] "a selector is required"]
+               [["document" "replace"] "a selector is required"]
+               [["document" "delete"] "a selector is required"]
+               [["document" "list"] "a ticket id is required"]]]
+        (let [{:keys [exit out err]} (apply run-knot tmp (conj argv "--json"))
+              label (str/join " " argv)]
+          (is (= 1 exit) label)
+          (is (= {:ok false :error {:code "invalid_argument" :message message}}
+                 (dissoc (json/parse-string out true) :schema_version))
+              label)
+          (is (str/blank? err) label)))))
+
+  (testing "without --json the stderr line and exit code are unchanged"
+    (with-tmp tmp
+      (let [{:keys [exit out err]} (run-knot tmp "show")]
+        (is (= 1 exit))
+        (is (str/blank? out))
+        (is (= "knot show: an id is required" (str/trim err)))))))
+
 (defn- plant-doc-file!
   "Write a document file straight to disk under `dir`, bypassing the CLI.
    `knot document add` cannot produce a faulty document, so the only way to
