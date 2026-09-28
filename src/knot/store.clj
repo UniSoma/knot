@@ -328,6 +328,8 @@
         files   (concat (when (fs/directory? live)    (fs/glob live    "*.md"))
                         (when (fs/directory? archive) (fs/glob archive "*.md")))]
     (->> files
+         ;; A document misfiled in the tickets directory is not a ticket.
+         (remove #(doc/id-of (str (fs/file-name %))))
          (sort-by (comp str fs/file-name))
          (map (comp ticket/parse slurp str)))))
 

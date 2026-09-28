@@ -3934,6 +3934,28 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command: doc"))))))
 
+(deftest misfiled-document-is-not-a-ticket-test
+  (testing "a document file in the tickets directory is never read or written as a ticket"
+    (with-tmp tmp
+      (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            did  (doc-id-from-json (:out (run-knot tmp "document" "add" tid
+                                                   "--title" "D" "--type" "spec"
+                                                   "--json" "body")))
+            from (first (fs/glob (fs/path tmp ".tickets" "docs" tid) "*.md"))
+            to   (fs/path tmp ".tickets" (fs/file-name from))
+            _    (fs/move from to)
+            before (slurp (str to))]
+        (is (= [tid] (map :id (:data (json/parse-string
+                                      (:out (run-knot tmp "list" "--json")) true)))))
+        (is (= tid (get-in (json/parse-string
+                            (:out (run-knot tmp "show" (subs tid 0 9) "--json")) true)
+                           [:data :id])))
+        (doseq [argv [["start" did] ["close" did "--summary" "x"]
+                      ["status" did "open"] ["update" did "--priority" "1"]]]
+          (is (= 1 (:exit (apply run-knot tmp argv))) (first argv)))
+        (is (= before (slurp (str to))) "no command wrote to the file")
+        (is (not (str/includes? (:out (run-knot tmp "prime")) did)))))))
+
 (deftest type-as-a-document-selector-end-to-end-test
   ;; The owner's sentence is "show me the spec of kno-01abc", which previously
   ;; took a list, an id read back by eye, and a second command. With --type the
