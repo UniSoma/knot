@@ -4008,6 +4008,20 @@
         (is (str/blank? out) (str/join " " argv))
         (is (str/includes? err "needs a value") (str/join " " argv))))))
 
+(deftest a-malformed-document-does-not-break-other-commands-test
+  (with-tmp tmp
+    (let [a    (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+          b    (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")
+          good (doc-id-from-json (:out (run-knot tmp "document" "add" a "--title" "G"
+                                                 "--type" "spec" "--json" "g")))
+          _    (run-knot tmp "document" "add" b "--title" "Bad" "--type" "spec" "b")
+          bad  (str (first (fs/glob (fs/path tmp ".tickets" "docs" b) "*.md")))]
+      (spit bad "---\nid: [unclosed\ntitle: x\n---\nbody\n")
+      (is (zero? (:exit (run-knot tmp "document" "show" good))))
+      (doseq [cmd ["list" "ready" "blocked" "closed"]]
+        (is (zero? (:exit (run-knot tmp cmd))) cmd))
+      (is (= 1 (:exit (run-knot tmp "check"))) "check still reports it"))))
+
 (deftest document-flags-accept-a-dash-leading-value-test
   (with-tmp tmp
     (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")

@@ -474,6 +474,13 @@
    instead would also hide a document with a mangled id from `check`."
   "*/*--*.md")
 
+(defn- parse-or-skip
+  "`(f)`, or nil when the file it parses is malformed. The whole-corpus
+   loaders skip such a file so one bad document cannot break commands about
+   other ones; `knot check` is what reports it."
+  [f]
+  (try (f) (catch Exception _ nil)))
+
 (defn load-all-docs
   "Every document across every owner directory, for whole-project checks.
    Each is annotated with `:path` and `:owner-dir` — `check` reports the
@@ -485,10 +492,11 @@
       []
       (->> (fs/glob root corpus-glob)
            (sort-by str)
-           (mapv (fn [p]
-                   (assoc (ticket/parse (slurp (str p)))
-                          :path      (str p)
-                          :owner-dir (str (fs/file-name (fs/parent p))))))))))
+           (into [] (keep (fn [p]
+                            (when-let [d (parse-or-skip #(ticket/parse (slurp (str p))))]
+                              (assoc d
+                                     :path      (str p)
+                                     :owner-dir (str (fs/file-name (fs/parent p))))))))))))
 
 (defn- read-frontmatter-head
   "The leading slice of `path` that is guaranteed to contain the whole
@@ -526,10 +534,11 @@
       []
       (->> (fs/glob root corpus-glob)
            (sort-by str)
-           (mapv (fn [p]
-                   {:frontmatter (:frontmatter (ticket/parse (read-frontmatter-head p)))
-                    :path        (str p)
-                    :owner-dir   (str (fs/file-name (fs/parent p)))}))))))
+           (into [] (keep (fn [p]
+                            (when-let [d (parse-or-skip #(ticket/parse (read-frontmatter-head p)))]
+                              {:frontmatter (:frontmatter d)
+                               :path        (str p)
+                               :owner-dir   (str (fs/file-name (fs/parent p)))}))))))))
 
 (defn load-docs-meta-for
   "One ticket's documents, frontmatter and path only, ordered by filename.
