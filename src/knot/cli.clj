@@ -2165,8 +2165,8 @@
 ;; one. Two rules follow from that and diverge from the ticket write surface:
 ;; a document body is opaque, so the reserved-heading refusal that guards
 ;; ticket bodies does not apply to it; and the update replaces title, type
-;; and body together, so a missing one is an error, not a silent carry-over
-;; from the stored document.
+;; and body together, never carrying one over from the stored document. A
+;; missing title or type is an error; a missing body is an empty one.
 
 (defn- validate-doc-type!
   "Refuse a type outside `:doc-types` before anything is written."
