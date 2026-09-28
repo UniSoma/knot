@@ -304,16 +304,29 @@ inspect the `error' object themselves (e.g. to branch on
 `has_incoming_refs').  Still raises `user-error' when the
 subprocess emits no parseable output or when JSON parsing fails,
 since those are infrastructure failures rather than envelope
-outcomes."
+outcomes.
+
+Stderr is captured apart from stdout: knot prints warnings there
+\(e.g. unknown `.knot.edn' keys) even on success, and they would
+otherwise corrupt the JSON."
   (let* ((program (knot-cli--program))
-         (final-args (append args (list "--json"))))
-    (with-temp-buffer
-      (let ((exit (if stdin
-                      (apply #'call-process-region
-                             stdin nil program nil t nil final-args)
-                    (apply #'call-process
-                           program nil t nil final-args))))
-        (knot-cli--parse-envelope exit (buffer-string))))))
+         (final-args (append args (list "--json")))
+         (stderr-file (make-temp-file "knot-stderr")))
+    (unwind-protect
+        (with-temp-buffer
+          (let* ((destination (list t stderr-file))
+                 (exit (if stdin
+                           (apply #'call-process-region
+                                  stdin nil program nil destination nil
+                                  final-args)
+                         (apply #'call-process
+                                program nil destination nil final-args))))
+            (knot-cli--parse-envelope
+             exit (buffer-string)
+             (with-temp-buffer
+               (insert-file-contents stderr-file)
+               (string-trim (buffer-string))))))
+      (delete-file stderr-file))))
 
 (defun knot-cli-call (args &optional stdin)
   "Run the knot binary with ARGS, return the envelope's `data' field.
@@ -327,20 +340,25 @@ on `ok:false' with the envelope's `error.message'."
                           "knot subprocess reported failure")))
         (user-error "knot: %s" message)))))
 
-(defun knot-cli--parse-envelope (exit output)
+(defun knot-cli--parse-envelope (exit output &optional stderr)
   "Parse the knot --json envelope in OUTPUT, given subprocess EXIT code.
-Returns the envelope alist verbatim — caller inspects `ok'."
-  (when (or (null output) (string-empty-p output))
-    (user-error "knot: no output from subprocess (exit %s)" exit))
-  (condition-case err
-      (json-parse-string output
-                         :object-type 'alist
-                         :array-type 'list
-                         :null-object nil
-                         :false-object nil)
-    (error
-     (user-error "knot: failed to parse JSON (exit %s): %s"
-                 exit (error-message-string err)))))
+Returns the envelope alist verbatim — caller inspects `ok'.
+STDERR, when non-empty, is appended to the failure messages."
+  (let ((stderr-note (if (and stderr (not (string-empty-p stderr)))
+                         (format "; stderr: %s" stderr)
+                       "")))
+    (when (or (null output) (string-empty-p output))
+      (user-error "knot: no output from subprocess (exit %s)%s"
+                  exit stderr-note))
+    (condition-case err
+        (json-parse-string output
+                           :object-type 'alist
+                           :array-type 'list
+                           :null-object nil
+                           :false-object nil)
+      (error
+       (user-error "knot: failed to parse JSON (exit %s): %s%s"
+                   exit (error-message-string err) stderr-note)))))
 
 
 ;;;; Completing-read annotations (shared ticket-picker affixation)

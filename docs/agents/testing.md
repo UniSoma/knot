@@ -8,6 +8,8 @@ bb test
 
 The task globs `test/**/*_test.clj` and runs every namespace it finds. There is no scoped subset — the suite is fast enough that every change runs the full set.
 
+The Emacs client has its own ERT suite in `emacs/knot-test.el`; run `bb test:elisp` when you touch `emacs/knot.el`.
+
 ## The runner is parallel
 
 `bb test` hands the namespaces to `script/knot/test_runner.clj`, which fans the individual test vars out over one worker per CPU. The suite is dominated by end-to-end tests that spawn a fresh `bb` per command — roughly 890 subprocesses at ~90ms each — so running them one at a time wasted almost all of the wall clock. Set `KNOT_TEST_THREADS` to override the worker count.

@@ -18,6 +18,29 @@
              [clojure.string :as str]
              [clojure.test :as t])
 
+  :init
+  (defn elpa-package-dir
+    "Newest `<pkg>-*` directory under the common system-wide ELPA dirs,
+     or nil."
+    [pkg]
+    (let [home (System/getenv "HOME")]
+      (->> ["/usr/share/emacs/site-lisp/elpa"
+            "/usr/share/emacs/site-lisp/elpa-src"
+            "/usr/local/share/emacs/site-lisp/elpa"
+            "/usr/local/share/emacs/site-lisp/elpa-src"
+            (when home (str home "/.emacs.d/elpa"))]
+           (remove nil?)
+           (filter fs/exists?)
+           distinct
+           (mapcat fs/list-dir)
+           (filter (fn [p]
+                     (and (fs/directory? p)
+                          (str/starts-with? (str (fs/file-name p))
+                                            (str pkg "-")))))
+           (map str)
+           sort
+           last)))
+
   test
   {:doc "Run all tests under test/ (parallel; KNOT_TEST_THREADS overrides worker count)"
    :task
@@ -94,19 +117,6 @@
    (let [src      "emacs/knot.el"
          helper   "emacs/knot-lint.el"
          emacs    (or (System/getenv "EMACS") "emacs")
-         starts?  (fn [pkg p]
-                    (str/starts-with? (str (fs/file-name p))
-                                      (str pkg "-")))
-         find-pkg (fn [elpa-dirs pkg]
-                    (->> elpa-dirs
-                         (mapcat
-                          (fn [d]
-                            (filter
-                             (fn [p] (and (fs/directory? p) (starts? pkg p)))
-                             (fs/list-dir d))))
-                         (map str)
-                         sort
-                         last))
          shell    (fn [& args]
                     (:exit (apply p/shell {:continue true} args)))]
      (when-not (fs/exists? src)
@@ -118,17 +128,8 @@
      ;; slice-1 acceptance ("when available").  markdown-mode is a
      ;; Package-Requires dep and must be on the load-path for
      ;; byte-compile to succeed.
-     (let [home      (System/getenv "HOME")
-           elpa-dirs (->> ["/usr/share/emacs/site-lisp/elpa"
-                           "/usr/share/emacs/site-lisp/elpa-src"
-                           "/usr/local/share/emacs/site-lisp/elpa"
-                           "/usr/local/share/emacs/site-lisp/elpa-src"
-                           (when home (str home "/.emacs.d/elpa"))]
-                          (remove nil?)
-                          (filter fs/exists?)
-                          distinct)
-           md-mode   (find-pkg elpa-dirs "markdown-mode")
-           pkg-lint  (find-pkg elpa-dirs "package-lint")
+     (let [md-mode   (elpa-package-dir "markdown-mode")
+           pkg-lint  (elpa-package-dir "package-lint")
            load-paths (cond-> []
                         md-mode  (conj "-L" md-mode)
                         pkg-lint (conj "-L" pkg-lint))]
@@ -155,4 +156,23 @@
                                        src]))]
            (when-not (zero? pl-exit)
              (System/exit pl-exit)))
-         (println "lint:elisp: package-lint not found; skipping"))))}}}
+         (println "lint:elisp: package-lint not found; skipping"))))}
+
+  test:elisp
+  {:doc "Run the ERT suite in emacs/knot-test.el"
+   :task
+   (let [md-mode (elpa-package-dir "markdown-mode")]
+     (when-not md-mode
+       (binding [*out* *err*]
+         (println "test:elisp: markdown-mode not found under any ELPA dir;"
+                  "loading knot.el may fail")))
+     ;; load-prefer-newer: a stale knot.elc left by lint:elisp would
+     ;; otherwise shadow the source under test.
+     (System/exit
+      (:exit (apply p/shell {:continue true}
+                    (or (System/getenv "EMACS") "emacs") "-batch" "-Q"
+                    "--eval" "(setq load-prefer-newer t)"
+                    (concat (when md-mode ["-L" md-mode])
+                            ["-L" "emacs"
+                             "-l" "emacs/knot-test.el"
+                             "-f" "ert-run-tests-batch-and-exit"])))))}}}
