@@ -40,10 +40,7 @@
       (is (not (re-matches #"kno-[0-9a-z]{12}" did))
           "a ticket id is prefix + 12 chars and has one hyphen; a document id has two")))
   (testing "every id in a burst still embeds the same owner"
-    ;; Uniqueness is the store's job, not the generator's: the suffix is random
-    ;; rather than a counter, so `save-new-doc!` regenerates on a collision and
-    ;; `check` reports one already on disk. Asserting 50-of-50 distinct here
-    ;; would be asserting a property the design deliberately does not promise.
+    ;; No uniqueness assertion: the suffix is random; the store and `check` handle collisions.
     (let [ids (repeatedly 50 #(doc/generate-id "kno-01abc0000"))]
       (is (every? #(re-matches #"kno-01abc0000-d[0-9a-z]{4}" %) ids)))))
 

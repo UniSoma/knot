@@ -628,9 +628,6 @@
         live-glob    (when (fs/directory? live)      (vec (fs/glob live    "*.md")))
         archive-glob (when (fs/directory? archive)   (vec (fs/glob archive "*.md")))
         docs-glob    (when (fs/directory? docs-root) (vec (fs/glob docs-root "*/*.md")))
-        ;; `doc/id-of` returns nil for a ticket filename: a ticket id is
-        ;; `<prefix>-01…` and the pattern requires `-d` straight after the
-        ;; prefix, which `[a-z0-9]+` cannot cross a hyphen to reach.
         doc-file?    (fn [p] (some? (doc/id-of (str (fs/file-name p)))))
         misplaced    (vec (filter doc-file? (concat (or live-glob [])
                                                     (or archive-glob []))))

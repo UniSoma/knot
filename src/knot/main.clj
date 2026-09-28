@@ -310,15 +310,7 @@
 
 (defn- no-ticket-msg
   "`no ticket matching <id>`, with a pointer at the document command when `id`
-   is document-shaped.
-
-   A document id handed to a ticket command is a wrong-corpus call, not a
-   missing ticket, and saying only the latter leaves the caller looking for
-   something that was never there. The shape test lives in `knot.doc`, which
-   owns it.
-
-   Shared by every ticket command that can be handed an id, so the two output
-   modes cannot drift and `start` cannot say something `show` does not."
+   is document-shaped. Shared by every ticket command that takes an id."
   [id]
   (str "no ticket matching " id (doc/wrong-corpus-hint id)))
 

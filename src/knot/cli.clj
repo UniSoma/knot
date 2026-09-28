@@ -495,11 +495,6 @@
 
       (not force?)
       (throw (ex-info
-              ;; Count only, no names. `emit-gate-failure!` prints one bullet
-              ;; per missing type below this line, so naming them here stutters
-              ;; on the common single-type case. Both sibling gates already read
-              ;; this way: "3 of 5 acceptance criteria are unchecked",
-              ;; "2 open children block this close".
               (str (count missing) " required document type"
                    (when (> (count missing) 1) "s")
                    " missing")
@@ -2260,18 +2255,12 @@
    owner-plus-title selector. Text mode prints the file as stored; `:json?`
    emits the metadata plus the body.
 
-   With `:type`, `(:id opts)` is read as the OWNING TICKET rather than as a
-   document selector, which is the one shape where that flips. Without it a
-   ticket id is not a document selector at all — it points at `knot show`."
+   With `:type`, `(:id opts)` is the owning ticket, not a document selector."
   [ctx {:keys [id ticket type json?]}]
   (let [{:keys [project-root tickets-dir docs-root]} (resolve-ctx ctx)
         owner (when ticket (resolve-owner! project-root tickets-dir ticket))
         d     (if type
                 (do
-                  ;; The positional is the owner under `--type`, so `--ticket`
-                  ;; has nothing left to narrow. Refused rather than ignored: a
-                  ;; silently dropped flag reads as a resolution the caller
-                  ;; asked for and did not get.
                   (when ticket
                     (throw (ex-info "--type and --ticket cannot be combined; with --type the selector is the owning ticket"
                                     {:kind :invalid-argument})))

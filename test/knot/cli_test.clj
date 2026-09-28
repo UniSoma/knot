@@ -6440,8 +6440,7 @@ Restart the daemon.
         (is (= 1 (count (store/load-docs-for (droot tmp) owner))))))))
 
 (defn- doc-partial
-  "A segment-wise partial of document id `did`: the owner truncated and the
-   tail truncated, which is the shape the reviewer asked to keep resolving
+  "A segment-wise partial of document id `did`: owner and tail both truncated
    (`kp-01m2s4ec-d7f` for `kp-01m2s4ecygyc-d7f3k`)."
   [did]
   (let [[p owner tail] (str/split did #"-")]
@@ -6538,9 +6537,6 @@ Restart the daemon.
         (is (= owner (get-in d [:data :ticket])))
         (is (= #{"Bravo" "Alpha"} (set (map :title docs))))
         (is (= (vec (sort ids)) ids)
-            ;; Still filename order, but the random suffix means that is no
-            ;; longer creation order: a document id is minted at random within
-            ;; its owner, not monotonically.
             "ordered by id, which is what the filename leads with")
         (is (not-any? #{"Gamma"} (map :title docs))))))
 

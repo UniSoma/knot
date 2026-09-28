@@ -869,7 +869,6 @@
              (get-in (store/resolve-doc (droot tmp) "kno-01A-daaaa")
                      [:frontmatter :id]))))
     (testing "a unique prefix resolves, truncated in both segments"
-      ;; The reviewer's example shape: the owner AND the tail are partial.
       (is (= "kno-01B-dcccc"
              (get-in (store/resolve-doc (droot tmp) "kno-01B-dc")
                      [:frontmatter :id])))
@@ -882,8 +881,6 @@
         (is (= :ambiguous (:kind (ex-data e))))
         (is (= ["kno-01A-daaaa" "kno-01A-dbbbb"] (:candidates (ex-data e))))))
     (testing "a bare ticket id is not a document selector"
-      ;; It is a wrong-corpus call. Resolving it to that ticket's only document
-      ;; would be guessing; kno-01m3j5ncec1a turns this into a pointer.
       (let [e (try (store/resolve-doc (droot tmp) "kno-01B") nil
                    (catch clojure.lang.ExceptionInfo ex ex))]
         (is (= :not-found (:kind (ex-data e))))))

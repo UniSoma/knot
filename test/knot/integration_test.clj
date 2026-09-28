@@ -4003,16 +4003,8 @@
         (is (not (str/includes? (:out (run-knot tmp "prime")) did)))))))
 
 (deftest type-as-a-document-selector-end-to-end-test
-  ;; The owner's sentence is "show me the spec of kno-01abc", which previously
-  ;; took a list, an id read back by eye, and a second command. With --type the
-  ;; positional argument is the OWNING TICKET, the one shape where that flips.
   (testing "--type answers the same ownership question as list and show"
-    ;; A misplaced document -- filed under one ticket while its `ticket` field
-    ;; claims another -- is the case where a whole-corpus read and a
-    ;; directory-scoped one diverge. `show` and `document list` are both scoped;
-    ;; `--type` must be too, or two commands in one group disagree about what a
-    ;; ticket owns. Nothing downstream catches that swap, which is why it is
-    ;; pinned here.
+    ;; A misfiled document: --type must scope by directory like `show` and `document list`.
     (with-tmp tmp
       (run-knot tmp "init" "--prefix" "kno")
       (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
@@ -4060,9 +4052,7 @@
           (is (= 1 (count (re-seq #"knot document show:" err))))))))
 
   (testing "a partial owning id resolves, since the owner is strict-resolved"
-    ;; Its own sandbox with ONE ticket on purpose: two ids minted back to back
-    ;; differ only in the random tail, so a truncated prefix would be ambiguous
-    ;; between them and the test would be measuring the fixture, not the code.
+    ;; One ticket only: a truncated prefix would be ambiguous between two.
     (with-tmp tmp
       (run-knot tmp "init" "--prefix" "kno")
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
@@ -4114,18 +4104,11 @@
             (is (str/includes? err "it owns no documents"))))
 
         (testing "without --type a ticket id is still not a document selector"
-          ;; The cross-corpus pointer must survive the new layer: --type is what
-          ;; makes a ticket id meaningful here, and its absence must not start
-          ;; resolving one.
           (let [{:keys [err]} (run-knot tmp "document" "show" tid)]
             (is (str/includes? err "that is a ticket id"))
             (is (str/includes? err (str "knot show " tid)))))))))
 
 (deftest wrong-corpus-id-points-at-the-other-command-test
-  ;; The reviewer hit this while using the branch: handing a document id to
-  ;; `show` answered "no ticket matching" with no hint that the document
-  ;; commands exist, and the reverse did the same. Both are correct and useless.
-  ;; Recognition is by SHAPE, so neither failure path touches the other corpus.
   (testing "a document id handed to a ticket command names the document command"
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
@@ -4145,8 +4128,6 @@
             (is (str/includes? (get-in parsed [:error :message]) "that is a document id"))))
 
         (testing "every ticket command that takes an id says it, not only show"
-          ;; One shared message builder, so `start` cannot say something `show`
-          ;; does not.
           (doseq [cmd ["start" "close" "update" "add-note"]]
             (let [{:keys [err]} (run-knot tmp cmd did)]
               (is (str/includes? err "that is a document id")
@@ -4165,11 +4146,7 @@
             (is (str/includes? (get-in parsed [:error :message]) "that is a ticket id")))))))
 
   (testing "the store's own not-found path points across too"
-    ;; Two message builders reach a caller: main's, for the commands that
-    ;; resolve inline, and store/not-found!'s, for those that resolve through
-    ;; the store. A reviewer proved the store copy was untested by deleting it
-    ;; and by pointing it at a command that does not exist -- the suite stayed
-    ;; green both times. `link` is the cheapest command on that path.
+    ;; `link` resolves through store/not-found!, not main's message builder.
     (with-tmp tmp
       (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
             did (doc-id-from-json (:out (run-knot tmp "document" "add" tid
@@ -4208,8 +4185,6 @@
           (is (str/includes? text "Rollout (plan) — "))
           (is (= #{"Design" "Rollout"} (set (map :title docs))))
           (is (= (vec (sort (map :id docs))) (mapv :id docs))
-              ;; Ordered by id, which the filename leads with. The random
-              ;; suffix means that is no longer creation order.
               "documents are listed in id order")
           (is (= #{:id :title :type} (set (mapcat keys docs)))
               "metadata only — a body would make the most common read unbounded")
@@ -4519,9 +4494,6 @@
         (is (zero? (:exit (run-knot tmp "close" tid "--force" "--summary" "no spec")))))))
 
   (testing "the refusal names each missing type once, in the bullets not the headline"
-    ;; Reported upstream as a nit: the headline listed the types and the bullet
-    ;; list repeated them, which reads as a stutter on the common single-type
-    ;; case. Both sibling gates carry a count and let the bullets do the naming.
     (with-tmp tmp
       (run-knot tmp "init" "--prefix" "kno")
       (let [cfg (str (fs/path tmp ".knot.edn"))]
@@ -4536,7 +4508,6 @@
             "the type is named exactly once, in the bullet")
         (is (str/includes? err "  - spec")))
 
-      ;; Two missing types: plural, and the bullet list earns its place.
       (let [cfg (str (fs/path tmp ".knot.edn"))]
         (spit cfg (str/replace (slurp cfg)
                                " :required-docs {\"in_progress\" [\"spec\"]}"
@@ -4548,8 +4519,6 @@
         (is (= 1 (count (re-seq #"spec" err))))
         (is (= 1 (count (re-seq #"plan" err))))))
 
-    ;; The structured field still carries the names, so a machine reader loses
-    ;; nothing by the headline dropping them.
     (with-tmp tmp
       (run-knot tmp "init" "--prefix" "kno")
       (let [cfg (str (fs/path tmp ".knot.edn"))]

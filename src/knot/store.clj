@@ -757,12 +757,7 @@
 
    Throws `ex-info` with `:kind :not-found` or `:kind :ambiguous`."
   [docs-root owner-id type]
-  ;; Directory-scoped read, then filtered by the authoritative `ticket` field,
-  ;; exactly as `show` and `document list` do. `load-all-docs` would answer the
-  ;; same question here while parsing the whole corpus to do it, and would also
-  ;; answer it DIFFERENTLY: it would find a document filed under another owner
-  ;; that claims this one, which those two commands say this ticket does not
-  ;; own. Two commands in one group must not disagree about ownership.
+  ;; Scoped like `show` and `document list`, so all three agree on ownership.
   (let [owned (filterv #(= owner-id (get-in % [:frontmatter :ticket]))
                        (load-docs-for docs-root owner-id))
         hits  (filterv #(= type (get-in % [:frontmatter :type])) owned)]

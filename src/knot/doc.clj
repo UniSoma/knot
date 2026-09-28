@@ -8,14 +8,9 @@
 
 (def ^:private doc-marker
   "The segment distinguishing a document id from a ticket id. It follows the
-   owning ticket id, so `kp-01m2s4ecygyc-d7f3k` names both the corpus and the
-   owner: an agent reading the id knows which ticket owns the document without
-   a lookup, and cannot mistake it for the ticket id it embeds.
-
-   The marker matters because the owner alone is not a document key — a ticket
-   owns several — so it is the marker plus the random tail that makes the
-   filename's leading segment unique, which is what the store's straggler
-   sweep depends on."
+   owning ticket id, as in `kp-01m2s4ecygyc-d7f3k`. The marker plus the random
+   tail keeps the filename's leading segment unique, which the store's
+   straggler sweep depends on."
   "d")
 
 (def ^:private suffix-chars
@@ -27,11 +22,6 @@
 (defn generate-id
   "Generate a document id: `<owning-ticket-id>-d<4 random Crockford base32
    chars>`, e.g. `kp-01m2s4ecygyc-d7f3k`.
-
-   The owning ticket leads rather than the bare prefix, so the id carries its
-   owner. That is what keeps a document id from reading as a near-miss of a
-   ticket id — the two differ by a whole trailing segment now, not by one
-   letter in the middle.
 
    The suffix is random, not a counter: see `ticket/random-suffix` for why."
   [ticket-id]
@@ -60,21 +50,14 @@
   (str id "--" (ticket/derive-slug title) ".md"))
 
 (def ^:private filename-pat
-  ;; `<prefix>-<ticket-suffix>-d<suffix>--<slug>.md`. Two hyphen-separated
-  ;; segments before the `-d` marker is what distinguishes a document filename
-  ;; from a ticket one: a ticket has only `<prefix>-<suffix>`, so it never
-  ;; matches.
+  ;; `<prefix>-<ticket-suffix>-d<suffix>--<slug>.md`; a ticket filename lacks the `-d` segment.
   #"^([a-z0-9]+-[0-9a-z]+-d[0-9a-z]+)--.*\.md$")
 
 (defn owner-of
   "The owning ticket id embedded in document id `did`, or nil when `did` does
    not have the document shape.
-
-   The `:ticket` frontmatter field stays authoritative — ADR-0016 R10 says the
-   field decides and everything else locates — so this exists for `check` to
-   compare the two. Nesting the owner in the id creates a second place the
-   ownership is written down, and two places that can disagree need a check
-   that says so rather than a rule about which one wins."
+   The `:ticket` field stays authoritative (ADR-0016 R10); `check` uses this
+   to report when the two disagree."
   [did]
   (when (string? did)
     (second (re-matches #"^([a-z0-9]+-[0-9a-z]+)-d[0-9a-z]+$" did))))
@@ -83,12 +66,7 @@
   "The clause a ticket resolver appends when `id` is document-shaped:
    \" — that is a document id; use `knot document show <id>`\". Nil otherwise,
    so a caller can `str` it unconditionally.
-
-   It lives here rather than in either resolver because two of them need the
-   identical sentence — `knot.main`'s message builder and `knot.store`'s
-   not-found throw — and a second copy drifts. A reviewer proved that
-   concretely: changing one copy to name `knot doc show`, a command that does
-   not exist, left the suite green."
+   Shared by `knot.main`'s message builder and `knot.store`'s not-found throw."
   [id]
   (when (owner-of id)
     (str " — that is a document id; use `knot document show " id "`")))

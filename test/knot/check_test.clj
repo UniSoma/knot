@@ -896,10 +896,7 @@
       (is (not (str/includes? (:message (first issues)) "nil")))))
 
   (testing "an id that names a different owner than the ticket field is reported"
-    ;; The directory and the ticket field AGREE here, so the misplacement branch
-    ;; does not fire and this is the only shape that reaches the id check. Every
-    ;; other fixture in this test carries a directory disagreement too, which
-    ;; the cond resolves first.
+    ;; Directory and ticket field agree, so only the id check can fire.
     (let [issues (:issues (run-docs [(doc-rec "kno-01t" "kno-01other-daaa" :ticket "kno-01t")]
                                     :tickets [(ticket "kno-01t" "open" [] :title "T")]))]
       (is (= 1 (count issues))
@@ -916,8 +913,6 @@
       (is (not (str/includes? (:message (first issues)) "nil")))))
 
   (testing "a directory disagreement outranks an id disagreement"
-    ;; Both faults at once: the cond reports the misplacement, because moving
-    ;; the file is the repair that subsumes the other.
     (let [issues (:issues (run-docs [(doc-rec "kno-01dead" "kno-01dead-daaa" :ticket "kno-01live")]
                                     :tickets [(ticket "kno-01live" "open" [] :title "T")]))]
       (is (= [:doc_directory_mismatch] (mapv :code issues)))))
