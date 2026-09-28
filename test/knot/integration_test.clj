@@ -3934,6 +3934,125 @@
         (is (= 1 exit))
         (is (str/includes? err "unknown command: doc"))))))
 
+(deftest type-as-a-document-selector-end-to-end-test
+  ;; The owner's sentence is "show me the spec of kno-01abc", which previously
+  ;; took a list, an id read back by eye, and a second command. With --type the
+  ;; positional argument is the OWNING TICKET, the one shape where that flips.
+  (testing "--type answers the same ownership question as list and show"
+    ;; A misplaced document -- filed under one ticket while its `ticket` field
+    ;; claims another -- is the case where a whole-corpus read and a
+    ;; directory-scoped one diverge. `show` and `document list` are both scoped;
+    ;; `--type` must be too, or two commands in one group disagree about what a
+    ;; ticket owns. Nothing downstream catches that swap, which is why it is
+    ;; pinned here.
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [a (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            b (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (run-knot tmp "document" "add" a "--title" "The spec" "--type" "spec" "sbody")
+        ;; move a's document into b's directory, leaving its ticket field alone
+        (let [from (first (fs/glob (fs/path tmp ".tickets" "docs" a) "*.md"))
+              to   (fs/path tmp ".tickets" "docs" b)]
+          (fs/create-dirs to)
+          (fs/move from (fs/path to (fs/file-name from))))
+
+        (let [listed (get-in (json/parse-string
+                              (:out (run-knot tmp "document" "list" a "--json")) true)
+                             [:data :documents])
+              shown  (get-in (json/parse-string
+                              (:out (run-knot tmp "show" a "--json")) true)
+                             [:data :documents])
+              {:keys [exit err]} (run-knot tmp "document" "show" a "--type" "spec")]
+          (is (empty? listed) "document list says the ticket owns nothing")
+          (is (empty? shown)  "show agrees")
+          (is (= 1 exit) "--type must agree rather than finding it corpus-wide")
+          (is (str/includes? err "it owns no documents"))))))
+
+  (testing "--type refuses a missing value rather than printing a Clojure one"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            {:keys [exit err]} (run-knot tmp "document" "show" tid "--type")]
+        (is (= 1 exit))
+        (is (str/includes? err "--type needs a value"))
+        (is (not (str/includes? err "no true document"))
+            "a boolean must not reach user-facing prose")
+        (is (= 1 (count (re-seq #"knot document show:" err)))
+            "one command prefix, not two"))))
+
+  (testing "--type refuses to be combined with --ticket rather than ignoring it"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "The spec" "--type" "spec" "sbody")
+        (let [{:keys [exit err]} (run-knot tmp "document" "show" tid
+                                           "--type" "spec" "--ticket" tid)]
+          (is (= 1 exit))
+          (is (str/includes? err "cannot be combined"))
+          (is (= 1 (count (re-seq #"knot document show:" err))))))))
+
+  (testing "a partial owning id resolves, since the owner is strict-resolved"
+    ;; Its own sandbox with ONE ticket on purpose: two ids minted back to back
+    ;; differ only in the random tail, so a truncated prefix would be ambiguous
+    ;; between them and the test would be measuring the fixture, not the code.
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [tid (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")]
+        (run-knot tmp "document" "add" tid "--title" "The spec" "--type" "spec" "sbody")
+        (let [{:keys [exit out]} (run-knot tmp "document" "show" (subs tid 0 11)
+                                           "--type" "spec" "--json")]
+          (is (zero? exit))
+          (is (= "The spec" (get-in (json/parse-string out true) [:data :title])))))))
+
+  (testing "--type resolves a ticket's single document of that type"
+    (with-tmp tmp
+      (run-knot tmp "init" "--prefix" "kno")
+      (let [cfg (str (fs/path tmp ".knot.edn"))]
+        (spit cfg (str/replace (slurp cfg)
+                               " :doc-types [\"spec\" \"plan\" \"other\"]"
+                               " :doc-types [\"spec\" \"plan\" \"adr\" \"other\"]")))
+      (let [tid  (id-from-create-out (:out (run-knot tmp "create" "Alpha")) "alpha")
+            tid2 (id-from-create-out (:out (run-knot tmp "create" "Bravo")) "bravo")]
+        (run-knot tmp "document" "add" tid "--title" "The spec" "--type" "spec" "sbody")
+        (run-knot tmp "document" "add" tid "--title" "Plan one" "--type" "plan" "p1")
+        (run-knot tmp "document" "add" tid "--title" "Plan two" "--type" "plan" "p2")
+
+        (testing "exactly one of that type resolves, body included"
+          (let [{:keys [exit out]} (run-knot tmp "document" "show" tid "--type" "spec" "--json")
+                d (:data (json/parse-string out true))]
+            (is (zero? exit))
+            (is (= "The spec" (:title d)))
+            (is (= "spec" (:type d)))
+            (is (= "sbody" (:body d)))))
+
+        (testing "several of that type refuses with the candidates named"
+          (let [{:keys [exit err]} (run-knot tmp "document" "show" tid "--type" "plan")]
+            (is (= 1 exit))
+            (is (str/includes? err "ambiguous")))
+          (let [{:keys [out]} (run-knot tmp "document" "show" tid "--type" "plan" "--json")
+                e (:error (json/parse-string out true))]
+            (is (= "ambiguous_doc" (:code e)))
+            (is (= 2 (count (:candidates e))))))
+
+        (testing "none of that type names the types the ticket does own"
+          (let [{:keys [exit err]} (run-knot tmp "document" "show" tid "--type" "adr")]
+            (is (= 1 exit))
+            (is (str/includes? err "no adr document"))
+            (is (str/includes? err "it owns: plan, spec")
+                "the caller corrects in one step instead of listing to find out")))
+
+        (testing "a ticket owning nothing says so rather than listing an empty set"
+          (let [{:keys [err]} (run-knot tmp "document" "show" tid2 "--type" "spec")]
+            (is (str/includes? err "it owns no documents"))))
+
+        (testing "without --type a ticket id is still not a document selector"
+          ;; The cross-corpus pointer must survive the new layer: --type is what
+          ;; makes a ticket id meaningful here, and its absence must not start
+          ;; resolving one.
+          (let [{:keys [err]} (run-knot tmp "document" "show" tid)]
+            (is (str/includes? err "that is a ticket id"))
+            (is (str/includes? err (str "knot show " tid)))))))))
+
 (deftest wrong-corpus-id-points-at-the-other-command-test
   ;; The reviewer hit this while using the branch: handing a document id to
   ;; `show` answered "no ticket matching" with no hint that the document

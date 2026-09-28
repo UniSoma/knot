@@ -742,6 +742,39 @@
                  (ambiguous! input by-title)))
            (ambiguous! input pre)))))))
 
+(defn resolve-doc-by-type
+  "Resolve the single document of `type` owned by `owner-id`.
+
+   The fourth document selector, and the only one whose input is the OWNING
+   TICKET rather than the document: it answers \"show me the spec of <ticket>\",
+   which otherwise takes a list, an id read back by eye, and a second command.
+
+   Resolves on exactly one match. Refuses with the candidates named on several,
+   like every other ambiguous selector. On none it names the types the ticket
+   DOES own, so the caller corrects in one step instead of listing to find out.
+
+   Throws `ex-info` with `:kind :not-found` or `:kind :ambiguous`."
+  [docs-root owner-id type]
+  ;; Directory-scoped read, then filtered by the authoritative `ticket` field,
+  ;; exactly as `show` and `document list` do. `load-all-docs` would answer the
+  ;; same question here while parsing the whole corpus to do it, and would also
+  ;; answer it DIFFERENTLY: it would find a document filed under another owner
+  ;; that claims this one, which those two commands say this ticket does not
+  ;; own. Two commands in one group must not disagree about ownership.
+  (let [owned (filterv #(= owner-id (get-in % [:frontmatter :ticket]))
+                       (load-docs-for docs-root owner-id))
+        hits  (filterv #(= type (get-in % [:frontmatter :type])) owned)]
+    (case (count hits)
+      1 (first hits)
+      0 (throw (ex-info (str "no " type " document on " owner-id
+                             (if (seq owned)
+                               (str "; it owns: "
+                                    (str/join ", " (sort (distinct (keep #(get-in % [:frontmatter :type])
+                                                                        owned)))))
+                               "; it owns no documents"))
+                        {:kind :not-found :input owner-id :type type}))
+      (ambiguous! owner-id hits))))
+
 (defn delete-doc!
   "Unlink the document file at `path` and return the path string. A sibling
    of `delete!` and not a call to it: `delete!` is the ticket boundary,

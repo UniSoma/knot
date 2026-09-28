@@ -1507,7 +1507,8 @@
     (run-document!
      "show" json?
      #(cli/document-show-cmd (discover-ctx)
-                             {:id selector :ticket (:ticket opts) :json? json?}))))
+                             {:id selector :ticket (:ticket opts)
+                              :type (:type opts) :json? json?}))))
 
 (defn- document-replace-handler [argv]
   (let [{:keys [args opts]} (bcli/parse-args argv (spec :document/replace))

@@ -2169,6 +2169,20 @@
                          ": expected one of " (str/join ", " doc-types))
                     {:kind :invalid-doc-type :value type :allowed (vec doc-types)}))))
 
+(defn- resolve-doc-by-type!
+  "`store/resolve-doc-by-type` with the same `:kind` re-tagging `resolve-doc!`
+   does, so the envelope names the document corpus."
+  [docs-root owner-id type]
+  (try
+    (store/resolve-doc-by-type docs-root owner-id type)
+    (catch clojure.lang.ExceptionInfo e
+      (let [data (ex-data e)]
+        (throw (ex-info (.getMessage e)
+                        (assoc data :kind (case (:kind data)
+                                            :not-found :doc-not-found
+                                            :ambiguous :ambiguous-doc
+                                            (:kind data)))))))))
+
 (defn- resolve-owner!
   "Strict-resolve the owning ticket id, so a partial id works and a ticket
    that resolves to nothing is refused, not filed as an orphan the
@@ -2232,12 +2246,33 @@
 (defn document-show-cmd
   "Render the document `(:id opts)` resolves to. `:ticket` narrows an
    owner-plus-title selector. Text mode prints the file as stored; `:json?`
-   emits the metadata plus the body."
-  [ctx {:keys [id ticket json?]}]
+   emits the metadata plus the body.
+
+   With `:type`, `(:id opts)` is read as the OWNING TICKET rather than as a
+   document selector, which is the one shape where that flips. Without it a
+   ticket id is not a document selector at all — it points at `knot show`."
+  [ctx {:keys [id ticket type json?]}]
   (let [{:keys [project-root tickets-dir docs-root]} (resolve-ctx ctx)
         owner (when ticket (resolve-owner! project-root tickets-dir ticket))
-        d     (resolve-doc! docs-root
-                            id owner)]
+        d     (if type
+                (do
+                  ;; `--type` with no value parses to boolean true, which would
+                  ;; otherwise be interpolated into the refusal as "no true
+                  ;; document on <id>".
+                  (when-not (string? type)
+                    (throw (ex-info "--type needs a value"
+                                    {:kind :invalid-argument})))
+                  ;; The positional is the owner under `--type`, so `--ticket`
+                  ;; has nothing left to narrow. Refused rather than ignored: a
+                  ;; silently dropped flag reads as a resolution the caller
+                  ;; asked for and did not get.
+                  (when ticket
+                    (throw (ex-info "--type and --ticket cannot be combined; with --type the selector is the owning ticket"
+                                    {:kind :invalid-argument})))
+                  (resolve-doc-by-type! docs-root
+                                        (resolve-owner! project-root tickets-dir id)
+                                        type))
+                (resolve-doc! docs-root id owner))]
     (if json?
       (output/envelope-str (assoc (doc->json d) :body (:body d)))
       (ticket/render {:frontmatter (:frontmatter d) :body (:body d)}))))

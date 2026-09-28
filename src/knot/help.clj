@@ -779,13 +779,17 @@
     :args        [{:name "selector" :required true}]
     :restrict?   true
     :flags       [{:name :ticket :desc "Owning ticket, required when the selector is a title, not an id."}
+                  {:name :type :desc "Read the selector as an owning ticket and print its one document of this type."}
                   {:name :json :coerce :boolean :desc "Emit a JSON envelope carrying the metadata and the body."}]
     :notes       ["A document id nests inside its owning ticket: `<ticket-id>-d<random>`, as in `kno-01m2s4ecygyc-d7f3k`. The owner is readable from the id without a lookup, and the id cannot be mistaken for the ticket id it embeds."
-                  "A selector is a document id, a unique prefix of one, or — with --ticket — an exact title. A prefix may truncate the owner and the tail together (`kno-01m2s4ec-d7f`). An ambiguous selector is refused with the candidates named, never resolved to a first match."]
+                  "A selector is a document id, a unique prefix of one, or — with --ticket — an exact title. A prefix may truncate the owner and the tail together (`kno-01m2s4ec-d7f`). An ambiguous selector is refused with the candidates named, never resolved to a first match."
+                  "--type reads the selector as the OWNING TICKET instead, for \"show me the spec of <ticket>\". It resolves when that ticket owns exactly one document of the type, and on none it names the types the ticket does own. Without --type a ticket id is not a document selector at all, and --type cannot be combined with --ticket, which would have nothing left to narrow."]
     :examples    [{:cmd "knot document show kno-01m2s4ecygyc-d7f3k"
                    :note "Print a document by id."}
                   {:cmd "knot document show \"Rollout plan\" --ticket kno-01abc"
-                   :note "Print a document by title within its ticket."}]
+                   :note "Print a document by title within its ticket."}
+                  {:cmd "knot document show kno-01m2s4ecygyc --type spec"
+                   :note "Print a ticket's one spec, without looking up its id first."}]
     :exit-codes  [{:code 0 :when "document printed"}
                   {:code 1 :when "no document matches, or the selector is ambiguous"}]}
 
